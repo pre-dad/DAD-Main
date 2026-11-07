@@ -52,30 +52,30 @@ func derived(id pgtype.UUID, tag byte) pgtype.UUID {
 	return id
 }
 
-// event is a processor fact with the processed Stripe event it arrived in.
+// stripeEvent is a processor fact with the processed Stripe event it arrived in.
 // Events are written only where an observation cites them, with no payload:
 // the worker reads payloads of unprocessed events alone.
-type event struct {
+type stripeEvent struct {
 	id           pgtype.UUID
 	kind, status string
 	at           time.Time
 }
 
-func (pd *period) events() []event {
-	var out []event
+func (pd *period) events() []stripeEvent {
+	var out []stripeEvent
 	if !pd.failedAt.IsZero() {
-		out = append(out, event{derived(pd.id, 1), "invoice.payment_failed", "FAILED", pd.failedAt})
+		out = append(out, stripeEvent{derived(pd.id, 1), "invoice.payment_failed", "FAILED", pd.failedAt})
 	}
 	if pd.paid {
-		out = append(out, event{derived(pd.id, 2), "invoice.payment_succeeded", "PAID", pd.paidAt})
+		out = append(out, stripeEvent{derived(pd.id, 2), "invoice.payment_succeeded", "PAID", pd.paidAt})
 	}
 	return out
 }
 
-func (r *refund) events() []event {
-	out := make([]event, len(r.observations))
+func (r *refund) events() []stripeEvent {
+	out := make([]stripeEvent, len(r.observations))
 	for i, o := range r.observations {
-		out[i] = event{derived(r.id, byte(i+1)), "refund.updated", o.status, o.at}
+		out[i] = stripeEvent{derived(r.id, byte(i+1)), "refund.updated", o.status, o.at}
 	}
 	out[0].kind = "refund.created"
 	return out
@@ -207,7 +207,7 @@ func (p *population) tables() []table {
 			"donor_stripe_events",
 			"id stripe_event_id event_type occurred_at data processed_at attempts available_at created_at",
 			func(emit func(...any)) {
-				write := func(e event) {
+				write := func(e stripeEvent) {
 					emit(e.id, "evt_"+hex.EncodeToString(e.id.Bytes[:]), e.kind, e.at, "{}", e.at.Add(2*time.Second), int32(1), e.at, e.at)
 				}
 				for c := range p.checkouts {
@@ -522,14 +522,14 @@ type fixture struct {
 	EventIDs      []string `json:"event_ids,omitempty"`
 }
 
-// sessions signs in n claimed donors, favouring active referrers, whose
-// dashboards are the most expensive and the most visited. Tokens come from
-// the system random source like real sessions; only their hashes are stored.
 type session struct {
 	donor *donor
 	token string
 }
 
+// sessions signs in n claimed donors, favouring active referrers, whose
+// dashboards are the most expensive and the most visited. Tokens come from
+// the system random source like real sessions; only their hashes are stored.
 func (p *population) sessions(ctx context.Context, pool *pgxpool.Pool, n int) ([]session, error) {
 	type candidate struct {
 		d   *donor

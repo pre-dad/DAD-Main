@@ -204,7 +204,7 @@ type population struct {
 
 	partners    []*partner
 	initiatives []*initiative
-	events      []*event2
+	events      []*event
 }
 
 // partner is an approved partner org (donor_partner_signups with approved_at),
@@ -257,9 +257,8 @@ type initiativeMetric struct {
 	unit  string
 }
 
-// event2 is a published event (donor_events) and the reservations against it.
-// Named event2 because cmd/seed already has an unrelated Stripe-event type.
-type event2 struct {
+// event is a published event (donor_events) and the reservations against it.
+type event struct {
 	id           pgtype.UUID
 	index        int
 	slug         string
@@ -669,7 +668,7 @@ func (g *generator) makeEvents() {
 		} else {
 			starts = g.now.Add(day + g.seconds(eventWindow))
 		}
-		ev := &event2{
+		ev := &event{
 			id:          g.uuid(),
 			index:       i,
 			slug:        fmt.Sprintf("event-%08d", n),
@@ -724,7 +723,7 @@ func (g *generator) reserveEvents() {
 		seen := map[pgtype.UUID]bool{}
 		for n := 1 + g.r.IntN(3); n > 0; n-- { // 1–3 reservations
 			ev := g.pop.events[g.r.IntN(len(g.pop.events))]
-			if seen[ev.id] || !ev.publishedAt.Before(d.claimedAt.Add(g.now.Sub(d.claimedAt))) {
+			if seen[ev.id] {
 				continue
 			}
 			seen[ev.id] = true
