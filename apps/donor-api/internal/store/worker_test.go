@@ -169,6 +169,14 @@ func (f *workerFixture) receiveAt(t *testing.T, kind string, obj map[string]any,
 	t.Helper()
 	eventID := "evt_" + f.request.RequestID.String() + "_" + strconv.Itoa(len(f.events))
 	f.events = append(f.events, eventID)
+	f.deliver(t, eventID, kind, obj, occurred)
+	return eventID
+}
+
+// deliver posts a signed event under eventID, as Stripe does for every
+// attempt at the same event.
+func (f *workerFixture) deliver(t *testing.T, eventID, kind string, obj map[string]any, occurred time.Time) {
+	t.Helper()
 	now := time.Now()
 	body, err := json.Marshal(
 		map[string]any{
@@ -190,7 +198,6 @@ func (f *workerFixture) receiveAt(t *testing.T, kind string, obj map[string]any,
 	if err = receiver.Receive(context.Background(), body, signature); err != nil {
 		t.Fatal(err)
 	}
-	return eventID
 }
 
 func (f *workerFixture) process(t *testing.T) {
@@ -401,7 +408,6 @@ func TestInvalidInvoiceRollsBackAllFinancialEffects(t *testing.T) {
 	}
 	for _, sql := range []string{
 		"SELECT count(*) FROM donor_gifts WHERE donor_id=$1",
-		"SELECT count(*) FROM donor_billing_observations WHERE source_event_id IN (SELECT id FROM donor_stripe_events WHERE data->>'checkout_id' IN (SELECT id::text FROM donor_checkouts WHERE donor_id=$1))",
 		"SELECT count(*) FROM donor_billing_periods WHERE donor_id=$1",
 		// Checkout seeds an uncomputed projection row; a computed one would be a partial write.
 		"SELECT count(*) FROM donor_metric_projections WHERE donor_id=$1 AND net_minor IS NOT NULL",
@@ -412,6 +418,11 @@ func TestInvalidInvoiceRollsBackAllFinancialEffects(t *testing.T) {
 		if err := f.db.QueryRow(ctx, sql, f.donorID).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("partial financial write survived: %s %d %v", sql, count, err)
 		}
+	}
+	var observations int
+	if err := f.db.QueryRow(ctx, "SELECT count(*) FROM donor_billing_observations WHERE source_event_id IN (SELECT id FROM donor_stripe_events WHERE stripe_event_id=$1)", eventID).Scan(&observations); err != nil ||
+		observations != 0 {
+		t.Fatalf("partial billing observation survived: %d %v", observations, err)
 	}
 	var attempts int
 	var processed *time.Time
@@ -495,5 +506,50 @@ func TestRefundBeforeGiftIsRetriedAfterGiftExists(t *testing.T) {
 	p, err := queries.New(f.db).Projection(ctx, f.donorID)
 	if err != nil || p.NetMinor.Int64 != 0 || !p.FoundingAwardedAt.Valid {
 		t.Fatal("late refund not reconciled", p.NetMinor, err)
+	}
+}
+
+// Stripe redelivers an event until it is acknowledged, and may do so after
+// it was processed: the replay must keep the original facts and state and
+// must not recognize the gift a second time.
+func TestReplayedEventKeepsOriginalFactsAndIsNotReprocessed(t *testing.T) {
+	f := newWorkerFixture(t, "MONTHLY")
+	checkout := f.checkout(t)
+	ctx := context.Background()
+	start := time.Now().UTC().Truncate(time.Second).Add(-2 * 24 * time.Hour)
+	original := invoice(checkout.CheckoutID, "in_replay_"+f.donorID.String(), start, true)
+	event := f.receive(t, "invoice.payment_succeeded", original)
+	f.process(t)
+	var data string
+	var processed time.Time
+	read := func() (string, time.Time, int) {
+		var gifts int
+		if err := f.db.QueryRow(ctx, "SELECT data::text,processed_at FROM donor_stripe_events WHERE stripe_event_id=$1", event).Scan(&data, &processed); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.db.QueryRow(ctx, "SELECT count(*) FROM donor_gifts WHERE donor_id=$1", f.donorID).Scan(&gifts); err != nil {
+			t.Fatal(err)
+		}
+		return data, processed, gifts
+	}
+	firstData, firstProcessed, gifts := read()
+	if gifts != 1 {
+		t.Fatalf("%d gifts after the first delivery", gifts)
+	}
+
+	forged := invoice(checkout.CheckoutID, "in_replay_"+f.donorID.String(), start, true)
+	forged["amount_paid"] = 9000
+	f.deliver(t, event, "invoice.payment_succeeded", forged, time.Now())
+	var rows int
+	if err := f.db.QueryRow(ctx, "SELECT count(*) FROM donor_stripe_events WHERE stripe_event_id=$1", event).Scan(&rows); err != nil ||
+		rows != 1 {
+		t.Fatalf("%d rows for one event id: %v", rows, err)
+	}
+	if worked, err := f.worker.ProcessNext(ctx); err != nil || worked {
+		t.Fatalf("a replayed event was queued again: worked=%v err=%v", worked, err)
+	}
+	data, processed, gifts = read()
+	if data != firstData || !processed.Equal(firstProcessed) || gifts != 1 {
+		t.Fatalf("replay changed the event or its effects: data %s, processed %v, gifts %d", data, processed, gifts)
 	}
 }
