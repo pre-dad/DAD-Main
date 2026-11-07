@@ -76,7 +76,7 @@ func (s StaffFinanceService) CancellationQuote(ctx context.Context, token string
 			if _, err := q.StaffDonorByID(ctx, donorID); err != nil {
 				return RecurringDetails{}, err
 			}
-			view, err := storedDetails(ctx, q, donorID, now)
+			view, err := storedDetails(ctx, q, donorID)
 			if err != nil || view.Subscription == nil {
 				return RecurringDetails{Mode: "test"}, err
 			}

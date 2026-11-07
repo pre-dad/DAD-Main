@@ -18,7 +18,7 @@ func terminalSubscription(status string) bool {
 // subFetcher memoizes RetrieveSubscription for the span of a single ProcessNext
 // step, so a subscription resolved once is reused rather than fetched again. It
 // is created per step and never shared across donors, so it introduces no
-// cross-donor coupling. A nil *subFetcher reads straight through the gateway.
+// cross-donor coupling.
 type subFetcher struct {
 	gateway payments.FinancialGateway
 	seen    map[string]payments.Object
@@ -33,9 +33,6 @@ func newSubFetcher(gateway payments.FinancialGateway) *subFetcher {
 // read during this step (a first resolution): the under-lock conflict re-read
 // uses refresh instead, so this memo never masks a needed fresh read.
 func (f *subFetcher) retrieve(ctx context.Context, id string) (payments.Object, error) {
-	if f == nil || f.seen == nil {
-		return f.refresh(ctx, id)
-	}
 	if cached, ok := f.seen[id]; ok {
 		return cached, nil
 	}
@@ -46,16 +43,14 @@ func (f *subFetcher) retrieve(ctx context.Context, id string) (payments.Object, 
 // the step. The under-lock conflict path calls this so a state that moved
 // after the pre-lock read is observed, never a memoized pre-lock value.
 func (f *subFetcher) refresh(ctx context.Context, id string) (payments.Object, error) {
-	if f == nil || f.gateway == nil {
+	if f.gateway == nil {
 		return nil, payments.ErrUnconfigured
 	}
 	remote, err := f.gateway.RetrieveSubscription(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if f.seen != nil {
-		f.seen[id] = remote
-	}
+	f.seen[id] = remote
 	return remote, nil
 }
 

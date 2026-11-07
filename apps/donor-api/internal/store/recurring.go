@@ -81,7 +81,6 @@ func subscriptionView(
 	q *queries.Queries,
 	attempt queries.DonorStripeCheckout,
 	row queries.DonorSubscription,
-	now time.Time,
 ) (RecurringDetails, error) {
 	draft, err := q.CheckoutDraft(ctx, attempt.CheckoutID)
 	if err != nil {
@@ -122,7 +121,7 @@ func syncedSubscription(
 
 // storedDetails describes the donor's monthly gift as last synced. A started
 // monthly gift is preparing until its subscription is first synced.
-func storedDetails(ctx context.Context, q *queries.Queries, donor pgtype.UUID, now time.Time) (RecurringDetails, error) {
+func storedDetails(ctx context.Context, q *queries.Queries, donor pgtype.UUID) (RecurringDetails, error) {
 	attempt, row, err := syncedSubscription(ctx, q, donor)
 	if err != nil {
 		return RecurringDetails{}, err
@@ -134,7 +133,7 @@ func storedDetails(ctx context.Context, q *queries.Queries, donor pgtype.UUID, n
 		}
 		return RecurringDetails{Mode: "test", State: state}, nil
 	}
-	return subscriptionView(ctx, q, attempt, *row, now)
+	return subscriptionView(ctx, q, attempt, *row)
 }
 
 // prefetchSubscription reads the donor's latest subscription from the processor
@@ -331,8 +330,8 @@ func (s RecurringService) read(
 
 // Details describes the donor's monthly gift as last synced from the processor.
 func (s RecurringService) Details(ctx context.Context, token string) (RecurringDetails, error) {
-	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (RecurringDetails, error) {
-		return storedDetails(ctx, q, d.ID, now)
+	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (RecurringDetails, error) {
+		return storedDetails(ctx, q, d.ID)
 	})
 }
 
@@ -453,7 +452,7 @@ func completeCancellation(
 	if _, err := refreshProjection(ctx, tx, donor, now); err != nil {
 		return RecurringDetails{}, err
 	}
-	return subscriptionView(ctx, q, attempt, row, now)
+	return subscriptionView(ctx, q, attempt, row)
 }
 
 func amountView(c queries.DonorAmountChange) *AmountChange {
