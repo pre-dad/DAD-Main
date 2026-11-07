@@ -203,3 +203,34 @@ func TestOverallSpendSumsCategoryTotalsAcrossPublishedInitiatives(t *testing.T) 
 		}
 	}
 }
+
+func TestOverallSpendIgnoresUnpublishedSpendLinesOfPublishedInitiatives(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	_, admin := staffFixture(t, pool, "SUPER_ADMIN")
+	s := InitiativeService{Staff: &StaffService{DB: as(t, dbroles.API)}}
+	cleanInitiatives(t, pool)
+	id, err := s.Create(ctx, admin, withBoardApproval(t, pool, validInitiative("spend-draft-line")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := func(category string, amount int64) SpendInput {
+		return SpendInput{Category: category, AmountMinor: amount, VerificationNote: "Verified", VerifiedOn: "2026-10-01"}
+	}
+	if err = s.SetSpend(ctx, admin, id, line("Direct aid", 40_00)); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.PublishSpend(ctx, admin, id, "Direct aid"); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Publish(ctx, admin, id); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SetSpend(ctx, admin, id, line("Logistics", 900_00)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := (InitiativeReader{DB: as(t, dbroles.API)}).OverallSpend(ctx)
+	if err != nil || got.TotalMinor != 40_00 || len(got.Categories) != 1 || got.Categories[0].Category != "Direct aid" {
+		t.Fatalf("overall spend counted an unpublished line: %+v, %v", got, err)
+	}
+}
