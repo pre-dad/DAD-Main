@@ -71,26 +71,25 @@ func TestRecurringCommandsCallProcessorOutsideDonorLock(t *testing.T) {
 	_, finance := staffFixture(t, pool, "SUPER_ADMIN")
 	ctx := context.Background()
 	for _, c := range []struct {
-		name    string
-		prepare func(*recurringFixture) pgtype.UUID
-		run     func(*recurringFixture, pgtype.UUID) error
+		name string
+		run  func(*recurringFixture) error
 	}{
-		{"cancel", nil, func(r *recurringFixture, _ pgtype.UUID) error {
+		{"cancel", func(r *recurringFixture) error {
 			_, err := r.service.Cancel(ctx, r.token, CancellationRequest{RequestID: testID(t), AttemptID: r.attempt, PeriodEnd: r.end})
 			return err
 		}},
-		{"amount", nil, func(r *recurringFixture, _ pgtype.UUID) error {
+		{"amount", func(r *recurringFixture) error {
 			_, err := r.service.ChangeAmount(ctx, r.token, AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 9000, Previous: 3000, EffectiveAt: r.end})
 			return err
 		}},
-		{"payment method", nil, func(r *recurringFixture, _ pgtype.UUID) error {
+		{"payment method", func(r *recurringFixture) error {
 			update, err := r.service.BeginPaymentUpdate(ctx, r.token, testID(t))
 			if err == nil && update.URL == nil {
 				err = errors.New("no hosted setup URL")
 			}
 			return err
 		}},
-		{"staff cancel", nil, func(r *recurringFixture, _ pgtype.UUID) error {
+		{"staff cancel", func(r *recurringFixture) error {
 			s := StaffFinanceService{Staff: &StaffService{DB: api}, Gateway: r.sub, Origin: "https://donor.example.org"}
 			_, err := s.Cancel(ctx, finance, StaffFinancialRequest{RequestID: testID(t), DonorID: r.donorID, TargetID: r.attempt, Reason: "Donor asked by phone to stop", PeriodEnd: r.end})
 			return err
@@ -98,15 +97,11 @@ func TestRecurringCommandsCallProcessorOutsideDonorLock(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := newRecurringFixture(t)
-			var target pgtype.UUID
-			if c.prepare != nil {
-				target = c.prepare(r)
-			}
 			before := len(r.sub.keys)
 			err := whileStalled(
 				t,
 				r.sub.stall(t),
-				func() error { return c.run(r, target) },
+				func() error { return c.run(r) },
 				func() { assertDonorUnlocked(t, pool, r.donorID) },
 			)
 			if err != nil {
