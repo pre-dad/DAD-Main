@@ -42,6 +42,13 @@ type NetworkMilestone struct {
 	Remaining int64  `json:"remaining"`
 }
 
+var milestoneLabels = map[string]string{
+	"REF1":  "First Referral",
+	"REF3":  "Community Builder",
+	"REF12": "Super Connector",
+	"TC":    "Team Captain",
+}
+
 // Network assembles the donor's network summary.
 func (s NetworkService) Network(ctx context.Context, token string) (NetworkSummary, error) {
 	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (NetworkSummary, error) {
@@ -51,7 +58,6 @@ func (s NetworkService) Network(ctx context.Context, token string) (NetworkSumma
 
 func buildNetwork(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) (NetworkSummary, error) {
 	var out NetworkSummary
-
 	totals, err := q.NetworkTotals(ctx, donorID)
 	if err != nil {
 		return out, err
@@ -65,10 +71,9 @@ func buildNetwork(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) 
 	proj, err := q.Projection(ctx, donorID)
 	if err == nil {
 		converted := int64(proj.ReferredLinkCount + proj.ReferredIrlCount)
-		out.NextMilestone = nil
-		rules, e := recognitionRules(ctx, q)
-		if e != nil {
-			return out, e
+		rules, err := recognitionRules(ctx, q)
+		if err != nil {
+			return out, err
 		}
 		for _, rule := range rules.Badges {
 			if rule.Signal != "referrals" || rule.Threshold <= converted {
@@ -76,7 +81,7 @@ func buildNetwork(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) 
 			}
 			if out.NextMilestone == nil || rule.Threshold < out.NextMilestone.Target {
 				out.NextMilestone = &NetworkMilestone{
-					Label:     map[string]string{"REF1": "First Referral", "REF3": "Community Builder", "REF12": "Super Connector", "TC": "Team Captain"}[rule.Code],
+					Label:     milestoneLabels[rule.Code],
 					Target:    rule.Threshold,
 					Remaining: rule.Threshold - converted,
 				}
@@ -95,11 +100,7 @@ func buildNetwork(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) 
 	var visibleActive int64
 	out.Invitees = make([]NetworkInvitee, 0, len(invitees))
 	for _, iv := range invitees {
-		name := ""
-		if iv.PublicName.Valid {
-			name = iv.PublicName.String
-		}
-		out.Invitees = append(out.Invitees, NetworkInvitee{Name: name, Active: iv.Active})
+		out.Invitees = append(out.Invitees, NetworkInvitee{Name: iv.PublicName.String, Active: iv.Active})
 		if iv.Active {
 			visibleActive++
 		}

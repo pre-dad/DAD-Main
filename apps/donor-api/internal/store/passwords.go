@@ -2,18 +2,27 @@ package store
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+	"unicode/utf8"
+
 	"dad/donor-api/internal/geo"
 	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/store/queries"
-	"errors"
-	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
-	"strings"
-	"time"
-	"unicode/utf8"
+)
+
+const (
+	passwordCost = 12
+	// unknownAccountHash is a valid bcrypt hash of a password no one holds, so a
+	// sign-in for an unknown or ineligible account spends the same time as a
+	// wrong password.
+	unknownAccountHash = "$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6Ttxq7vdR5rJdJzNV6YjZ8T2eW8tK"
 )
 
 var ErrPassword = errors.New("use a password of 12 to 72 bytes")
@@ -26,6 +35,7 @@ type PasswordService struct {
 	DB             *pgxpool.Pool
 	FoundingClaims FoundingClaimKey
 }
+
 type SignupInput struct {
 	Name  string `json:"name"`
 	Email string `json:"email"`
@@ -73,11 +83,12 @@ func (s PasswordService) Signup(ctx context.Context, in SignupInput) error {
 		return queueLoginEmail(ctx, q, email, dashboardPath, now)
 	})
 }
+
 func (s PasswordService) Set(ctx context.Context, token, current, password string) error {
 	if len(password) < 12 || len(password) > 72 {
 		return ErrPassword
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), passwordCost)
 	if err != nil {
 		return err
 	}
@@ -110,6 +121,7 @@ func (s PasswordService) Set(ctx context.Context, token, current, password strin
 		)
 	})
 }
+
 func (s PasswordService) SignIn(ctx context.Context, email, password string, client Client) (Tokens, error) {
 	canonical, err := identity.NormalizeEmail(email)
 	if err != nil {
@@ -120,8 +132,7 @@ func (s PasswordService) SignIn(ctx context.Context, email, password string, cli
 	}
 	q := queries.New(s.DB)
 	d, err := q.DonorByEmail(ctx, canonical)
-	// Spend the same bcrypt budget for unknown accounts and wrong passwords.
-	hash := "$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6Ttxq7vdR5rJdJzNV6YjZ8T2eW8tK"
+	hash := unknownAccountHash
 	eligible := err == nil && !d.Disabled && d.ClaimedAt.Valid
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Tokens{}, err
