@@ -104,7 +104,7 @@ func (a *api) claim(w http.ResponseWriter, r *http.Request) {
 	if !a.account().available(w, r) {
 		return
 	}
-	client := store.Client{CompanyToken: cookieValue(r, companyCookie), JourneyID: cookieValue(r, "dad_analytics_journey")}
+	client := store.Client{CompanyToken: cookieValue(r, companyCookie), JourneyID: cookieValue(r, journeyCookie)}
 	if native(r) {
 		client = store.Client{App: true, Device: device, Platform: platform}
 	}

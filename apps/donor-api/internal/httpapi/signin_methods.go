@@ -122,7 +122,7 @@ func (a *api) oidcSignInHandler(w http.ResponseWriter, r *http.Request) {
 // honouring them only for a native request, exactly as passkey sign-in does.
 func signInClient(r *http.Request, device, platform *string) (store.Client, bool) {
 	if !native(r) {
-		return store.Client{CompanyToken: cookieValue(r, companyCookie), JourneyID: cookieValue(r, "dad_analytics_journey")}, true
+		return store.Client{CompanyToken: cookieValue(r, companyCookie), JourneyID: cookieValue(r, journeyCookie)}, true
 	}
 	client := store.Client{App: true}
 	if device != nil {

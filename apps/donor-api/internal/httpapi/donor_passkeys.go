@@ -80,7 +80,7 @@ func (a *api) finishDonorPasskeySignIn(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	client := store.Client{CompanyToken: cookieValue(r, companyCookie)}
+	client := store.Client{CompanyToken: cookieValue(r, companyCookie), JourneyID: cookieValue(r, journeyCookie)}
 	if native(r) {
 		client, _ = body.client()
 	}
