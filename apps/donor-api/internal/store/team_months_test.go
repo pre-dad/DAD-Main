@@ -16,7 +16,7 @@ func TestWinningTeamByCombinedActiveGiving(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	partner := approvedPartner(t, pool, "Team Org", "TEAMMONTH", 0, 0)
-	team := func(name string, members, active int) []pgtype.UUID {
+	team := func(name string, members, active int) (pgtype.UUID, []pgtype.UUID) {
 		id := testID(t)
 		mustExec(t, pool, "INSERT INTO donor_partner_teams(id,partner_id,name) VALUES($1,$2,$3)", id, partner, name)
 		var donors []pgtype.UUID
@@ -34,10 +34,10 @@ VALUES($1,$2,1,1,now(),now(),$3,3000)`,
 			)
 			donors = append(donors, donorID)
 		}
-		return donors
+		return id, donors
 	}
-	large := team("Large", 12, 6)
-	small := team("Small", 5, 5)
+	largeID, large := team("Large", 12, 6)
+	_, small := team("Small", 5, 5)
 	team("Tiny", 2, 2)
 
 	months := TeamMonthService{DB: as(t, dbroles.ProjectionWorker)}
@@ -56,6 +56,9 @@ VALUES($1,$2,1,1,now(),now(),$3,3000)`,
 FROM donor_team_months WHERE partner_id=$1 AND month='2026-10-01'`, partner).Scan(&closed, &winner, &ranked); err != nil {
 		t.Fatal(err)
 	}
+	if winner != largeID {
+		t.Fatalf("winner %v, want the team with the most combined active giving %v", winner, largeID)
+	}
 	if closed != 1 || ranked != 2 {
 		t.Fatalf("closed %d months with %d ranked teams; want October once, without the team below the minimum size", closed, ranked)
 	}
@@ -70,7 +73,7 @@ FROM donor_team_months WHERE partner_id=$1 AND month='2026-10-01'`, partner).Sca
 		return n
 	}
 	if got := earned(large); got != len(large) {
-		t.Fatalf("%d of %d members of the team with the most giving per member earned Winning Team", got, len(large))
+		t.Fatalf("%d of %d members of the team with the most combined active giving earned Winning Team", got, len(large))
 	}
 	if got := earned(small); got != 0 {
 		t.Fatalf("%d members of the smaller, lower-total team earned Winning Team", got)
