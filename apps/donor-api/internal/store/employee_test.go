@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/recognition"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -185,7 +187,7 @@ func TestEmployeeMatchingAndKAnonymity(t *testing.T) {
 
 	// 10% match, $50 annual cap.
 	partnerID := approvedPartner(t, pool, "Delta Inc", "DELTA", 1000, 5000)
-	thisYear := int32(time.Now().UTC().Year())
+	thisYear := int32(time.Now().In(recognition.NewYork).Year())
 	jan := time.Date(int(thisYear), 1, 15, 0, 0, 0, 0, time.UTC)
 	lastYear := jan.AddDate(-1, 0, 0)
 
@@ -361,4 +363,148 @@ func approvePartnerAdmin(t *testing.T, pool *pgxpool.Pool, partnerID pgtype.UUID
 		uid, partnerID, "admin-"+uid.String()+"@x.test")
 	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_partner_users WHERE id=$1", uid) })
 	return uid, uid.String()
+}
+
+func TestJoinTeamValidatesReusesAndMovesBetweenTeams(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	emp := EmployeeService{DB: pool}
+	partner := approvedPartner(t, pool, "Team Co", "TEAMCO", 0, 0)
+	_, solo := signedInDonor(t, pool)
+	if _, err := emp.JoinTeam(ctx, solo, "Ops"); !errors.Is(err, ErrEmployeeLink) {
+		t.Fatalf("a donor with no employer joined a team: %v", err)
+	}
+	if team, err := emp.Team(ctx, solo); err != nil || team.PartnerID != "" || team.TeamName != "" || team.Leaderboard == nil ||
+		len(team.Leaderboard) != 0 {
+		t.Fatalf("unlinked donor's team view must be empty with a non-null leaderboard: %+v %v", team, err)
+	}
+
+	first, firstToken := signedInDonor(t, pool)
+	second, secondToken := signedInDonor(t, pool)
+	for _, id := range []pgtype.UUID{first, second} {
+		mustExec(t, pool, "INSERT INTO donor_partner_employees (donor_id, partner_id, enrolled_at) VALUES ($1,$2,now())", id, partner)
+	}
+	for _, name := range []string{"", "   ", "tab\there", "line\nbreak", strings.Repeat("x", 81)} {
+		if _, err := emp.JoinTeam(ctx, firstToken, name); !errors.Is(err, ErrTeam) {
+			t.Fatalf("team name %q accepted: %v", name, err)
+		}
+	}
+	ops, err := emp.JoinTeam(ctx, firstToken, "  Ops  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, err := emp.JoinTeam(ctx, secondToken, "Ops"); err != nil || again != ops {
+		t.Fatalf("two members naming one team got different teams: %s %s %v", ops, again, err)
+	}
+	var teams int
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_partner_teams WHERE partner_id=$1", partner).Scan(&teams); err != nil ||
+		teams != 1 {
+		t.Fatalf("%d teams created for one name: %v", teams, err)
+	}
+	sales, err := emp.JoinTeam(ctx, firstToken, "Sales")
+	if err != nil || sales == ops {
+		t.Fatalf("moving to another team: %s %v", sales, err)
+	}
+	if team, err := emp.Team(ctx, firstToken); err != nil || team.TeamName != "Sales" {
+		t.Fatalf("donor stayed on the old team: %+v %v", team, err)
+	}
+	if team, err := emp.Team(ctx, secondToken); err != nil || team.TeamName != "Ops" {
+		t.Fatalf("moving one member moved the other: %+v %v", team, err)
+	}
+}
+
+func TestSetWorkforceIsAdminOnlyAndNonNegative(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	emp := EmployeeService{DB: pool}
+	partner := approvedPartner(t, pool, "Workforce Co", "WORKFORCE", 0, 0)
+	_, adminID := approvePartnerAdmin(t, pool, partner)
+	admin := issueTestPartnerSession(t, pool, adminID)
+	viewerID := mustNewID(t)
+	mustExec(t, pool, `INSERT INTO donor_partner_users (id, partner_id, email, name, role, accepted_at, created_at)
+		VALUES ($1,$2,$3,'Viewer','VIEWER',now(),now())`, viewerID, partner, "viewer-"+viewerID.String()+"@x.test")
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_partner_users WHERE id=$1", viewerID) })
+	viewer := issueTestPartnerSession(t, pool, viewerID.String())
+	size := func() int32 {
+		t.Helper()
+		var n int32
+		if err := pool.QueryRow(ctx, "SELECT workforce_size FROM donor_partner_signups WHERE id=$1", partner).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if err := emp.SetWorkforce(ctx, admin, 250); err != nil || size() != 250 {
+		t.Fatalf("admin set workforce: size=%d err=%v", size(), err)
+	}
+	if err := emp.SetWorkforce(ctx, admin, -1); !errors.Is(err, ErrPartnerApplication) || size() != 250 {
+		t.Fatalf("negative workforce: size=%d err=%v", size(), err)
+	}
+	if err := emp.SetWorkforce(ctx, viewer, 9); !errors.Is(err, ErrPartnerForbidden) || size() != 250 {
+		t.Fatalf("viewer changed the workforce: size=%d err=%v", size(), err)
+	}
+	if err := emp.SetWorkforce(ctx, "not-a-session", 9); !errors.Is(err, ErrPartnerDenied) || size() != 250 {
+		t.Fatalf("anonymous caller changed the workforce: size=%d err=%v", size(), err)
+	}
+	if err := emp.SetWorkforce(ctx, admin, 0); err != nil || size() != 0 {
+		t.Fatalf("workforce could not be cleared: size=%d err=%v", size(), err)
+	}
+}
+
+func TestRecordMatchPaymentRefusesBadInputUnknownPartnersAndUnauthorizedStaff(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	partner := approvedPartner(t, pool, "Refusals Matching", "REFUSALS-MATCH", 1000, 0)
+	_, super := staffFixture(t, pool, "SUPER_ADMIN")
+	_, growth := staffFixture(t, pool, "OP_GROWTH")
+	svc := EmployeeService{DB: api, Staff: &StaffService{DB: api}}
+	for _, tc := range []struct {
+		name   string
+		amount int64
+		id     pgtype.UUID
+	}{{"zero", 0, mustNewID(t)}, {"negative", -1, mustNewID(t)}, {"no request id", 100, pgtype.UUID{}}} {
+		if err := svc.RecordMatchPayment(ctx, super, partner, 2026, tc.amount, tc.id); !errors.Is(err, ErrStaffInput) {
+			t.Errorf("%s: %v; want ErrStaffInput", tc.name, err)
+		}
+	}
+	if err := svc.RecordMatchPayment(ctx, growth, partner, 2026, 100, mustNewID(t)); !errors.Is(err, ErrStaffForbidden) {
+		t.Errorf("OP_GROWTH recorded a payment: %v", err)
+	}
+	if err := svc.RecordMatchPayment(ctx, super, mustNewID(t), 2026, 100, mustNewID(t)); !errors.Is(err, pgx.ErrNoRows) {
+		t.Errorf("payment for a partner that does not exist: %v", err)
+	}
+	if err := (EmployeeService{DB: api}).RecordMatchPayment(ctx, super, partner, 2026, 100, mustNewID(t)); !errors.Is(err, ErrStaffDenied) {
+		t.Errorf("payment without a back office: %v", err)
+	}
+	if _, err := (EmployeeService{DB: api}).Match(ctx, super, partner, 2026); !errors.Is(err, ErrStaffDenied) {
+		t.Errorf("match without a back office: %v", err)
+	}
+	var recorded int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_partner_match_payments WHERE partner_id=$1", partner).Scan(&recorded); err != nil ||
+		recorded != 0 {
+		t.Fatalf("%d payments recorded by refused calls: %v", recorded, err)
+	}
+}
+
+// A year's match is the calendar year in New York: a gift in the last
+// minutes of December 31 there belongs to that year even though it is already
+// January in UTC, and one just after midnight belongs to the next.
+func TestMatchYearBoundaryIsNewYorkCalendarYear(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	partner := approvedPartner(t, pool, "Boundary Matching", "BOUNDARY-MATCH", 1000, 0)
+	_, super := staffFixture(t, pool, "SUPER_ADMIN")
+	svc := EmployeeService{DB: api, Staff: &StaffService{DB: api}}
+	const year = 2031
+	newYear := time.Date(year+1, 1, 1, 0, 0, 0, 0, recognition.NewYork)
+	linkDonorWithGift(t, pool, partner, 10000, newYear.Add(-time.Minute), 1)
+	linkDonorWithGift(t, pool, partner, 20000, newYear, 1)
+	linkDonorWithGift(t, pool, partner, 40000, time.Date(year, 1, 1, 0, 0, 0, 0, recognition.NewYork).Add(-time.Minute), 1)
+	for want, y := range map[int64]int32{10000: year, 20000: year + 1, 40000: year - 1} {
+		status, err := svc.Match(ctx, super, partner, y)
+		if err != nil || status.GiftsMinor != want || status.OwedMinor != want/10 {
+			t.Errorf("year %d: gifts=%d owed=%d err=%v; want gifts=%d owed=%d", y, status.GiftsMinor, status.OwedMinor, err, want, want/10)
+		}
+	}
 }
