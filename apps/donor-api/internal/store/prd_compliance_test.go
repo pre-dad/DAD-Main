@@ -2,14 +2,15 @@ package store
 
 import (
 	"context"
-	"dad/donor-api/internal/badges"
-	"dad/donor-api/internal/dbroles"
-	"dad/donor-api/internal/store/queries"
 	"errors"
-	"github.com/jackc/pgx/v5/pgtype"
 	"slices"
 	"testing"
 	"time"
+
+	"dad/donor-api/internal/badges"
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/store/queries"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func TestCofundersKeepIndependentCommitmentsAndVerifiedSpend(t *testing.T) {
@@ -83,6 +84,7 @@ func TestCofundersKeepIndependentCommitmentsAndVerifiedSpend(t *testing.T) {
 		t.Fatalf("published snapshot: %+v %v", read, err)
 	}
 }
+
 func TestReasonedStreakResetSurvivesRecompute(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
@@ -111,6 +113,7 @@ func TestReasonedStreakResetSurvivesRecompute(t *testing.T) {
 		t.Fatalf("reset did not persist or changed history: %+v %v", after, err)
 	}
 }
+
 func TestRecognitionRulesAndArtwork(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
@@ -166,6 +169,7 @@ func TestRecognitionRulesAndArtwork(t *testing.T) {
 		t.Fatal("custom threshold not applied")
 	}
 }
+
 func TestPasswordRequiresProofAndCurrentSecret(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
