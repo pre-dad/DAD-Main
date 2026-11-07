@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,7 +89,9 @@ func TestEventAlertBatchesPageEachAudienceInDonorOrder(t *testing.T) {
 	cleanEvents(t, pool)
 	_, token := staffFixture(t, pool, "SUPER_ADMIN")
 	events := EventService{Staff: &StaffService{DB: as(t, dbroles.API)}}
-	id, err := events.Create(ctx, token, eventInput("audience-paging", "Paging City", "94110", "COMMUNITY", 48*time.Hour))
+	// Neither the city nor the ZIP prefix may match a donor from another test.
+	city := "Paging " + testID(t).String()
+	id, err := events.Create(ctx, token, eventInput("audience-paging", city, "99950", "COMMUNITY", 48*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,15 +110,17 @@ func TestEventAlertBatchesPageEachAudienceInDonorOrder(t *testing.T) {
 		return d
 	}
 	want := map[pgtype.UUID]bool{
-		audience("paging city", "10001", true, true): true,
-		audience("Elsewhere", "94107", true, true):   true,
-		audience("PAGING CITY", "94103", true, true): true,
-		audience("Paging City", "94110", true, true): true,
-		audience("Paging City", "94110", true, true): true,
+		audience(strings.ToLower(city), "10001", true, true): true,
+		audience("Elsewhere", "99951", true, true):           true,
+		audience(strings.ToUpper(city), "99903", true, true): true,
+		audience(city, "99950", true, true):                  true,
+		audience(city, "99950", true, true):                  true,
 	}
-	audience("Paging City", "94110", false, true)
-	audience("Paging City", "94110", true, false)
+	audience(city, "99950", false, true)
+	audience(city, "99950", true, false)
 	audience("Elsewhere", "10001", true, true)
+	disabled := audience(city, "99950", true, true)
+	mustExec(t, pool, "UPDATE donors SET disabled=true WHERE id=$1", disabled)
 
 	q := queries.New(pool)
 	var after pgtype.UUID
@@ -156,5 +161,68 @@ func TestEventAlertBatchesPageEachAudienceInDonorOrder(t *testing.T) {
 		if !want[d] {
 			t.Fatalf("alert queued for donor %s outside the audience", d)
 		}
+	}
+}
+
+func TestEventAlertsAreQueuedOnlyForOpenPublishedEvents(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, token := staffFixture(t, pool, "SUPER_ADMIN")
+	events := EventService{Staff: &StaffService{DB: as(t, dbroles.API)}}
+	city := "Gated " + testID(t).String()
+	d, _ := donor(t, pool)
+	t.Cleanup(func() {
+		cleanExec(t, "DELETE FROM donor_push_notifications WHERE donor_id=$1", d)
+		cleanExec(t, "DELETE FROM donor_preferences WHERE donor_id=$1", d)
+	})
+	mustExec(t, pool, "UPDATE donors SET city=$2 WHERE id=$1", d, city)
+	mustExec(t, pool, `INSERT INTO donor_preferences(id,donor_id,version,referral_emails,marketing_emails,volunteer,push_event_nearby)
+		VALUES($1,$2,1,false,false,true,true)`, testID(t), d)
+	jobs := func() (n int) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_event_alert_jobs").Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if _, err := events.Create(ctx, token, eventInput("gated-draft", city, "", "COMMUNITY", 48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	invite, err := events.Create(ctx, token, eventInput("gated-invite", city, "", "INVITE_ONLY", 48*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = events.Publish(ctx, token, invite); err != nil {
+		t.Fatal(err)
+	}
+	if jobs() != 0 {
+		t.Fatalf("%d alert jobs for a draft and an invite-only event", jobs())
+	}
+	worker := EventAlertService{DB: as(t, dbroles.ProjectionWorker)}
+	if worked, err := worker.QueueNext(ctx, time.Now().UTC()); err != nil || worked {
+		t.Fatalf("a worker found alert work with no eligible event: %v %v", worked, err)
+	}
+
+	open, err := events.Create(ctx, token, eventInput("gated-open", city, "", "COMMUNITY", 48*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = events.Publish(ctx, token, open); err != nil {
+		t.Fatal(err)
+	}
+	// The event starts before the worker reaches it: nobody is told of a past event.
+	if worked, err := worker.QueueNext(ctx, time.Now().UTC().Add(72*time.Hour)); err != nil || !worked {
+		t.Fatalf("the lapsed job was not retired: %v %v", worked, err)
+	}
+	var queued int
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_push_notifications WHERE donor_id=$1", d).Scan(&queued); err != nil ||
+		queued != 0 {
+		t.Fatalf("%d alerts queued for an event already started: %v", queued, err)
+	}
+	var done bool
+	if err = pool.QueryRow(ctx, "SELECT completed_at IS NOT NULL FROM donor_event_alert_jobs WHERE event_id=$1", open).Scan(&done); err != nil ||
+		!done {
+		t.Fatal("lapsed job left to be picked up again", err)
 	}
 }
