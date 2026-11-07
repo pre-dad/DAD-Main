@@ -287,6 +287,15 @@ Two pipelines:
      the container exits 0) → deploy api/web/nginx on their pinned revisions and wait for
      the rollout to complete (the `up` step) → the same for the six worker services,
      skipping any DAD-infra has switched off (desired count 0).
+   - a `ci-gate` job runs first: a push starts `deploy.yml` and `ci.yml` side by side, so
+     the gate polls the `ci.yml` run for the same commit (up to 45 minutes) and fails unless
+     it succeeded. `deploy` needs it, so a red or cancelled commit never deploys.
+   - `APP_DEPLOY_ROLE_ARN` must exist at **repository** level (any non-empty value) for
+     anything to run. Both jobs test it in a job-level `if:`, which GitHub evaluates before
+     the job's environment is chosen, so an environment-only variable reads as empty and
+     the jobs are skipped green. Set the real role ARN per environment (`staging`,
+     `production`) as well: inside the steps the environment value overrides the
+     repository one, which keeps each environment on its own account's role.
    - staging auto on merge to `dev`; production **only** on merge to `main`, gated by
      manual approval. There is no release- or tag-triggered path to production (releases,
      including the `mobile-foundation-*` contract releases, never start a deploy).

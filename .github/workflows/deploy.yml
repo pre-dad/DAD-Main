@@ -88,7 +88,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     # Only run once the account is bootstrapped and the OIDC app-deploy role ARN
-    # is configured as the per-environment variable APP_DEPLOY_ROLE_ARN. Before
+    # is configured as APP_DEPLOY_ROLE_ARN. The job-level `if:` sees only repository
+    # variables (the environment is not resolved yet), so the variable must also exist at
+    # repository level; the environment's own value overrides it inside the steps. Before
     # bootstrap the variable is empty, so the job is skipped (green) instead of
     # hard-failing on a role that does not exist yet. The pipeline "wakes up" on
     # the first push after the variable is set. See docs/aws-deployment.md
