@@ -275,3 +275,38 @@ FROM generate_series(1,$2::int) n, LATERAL (SELECT $3::timestamptz+n*interval '1
 		t.Fatal("pass did not start once the interval elapsed", err)
 	}
 }
+
+// Serial, because every pass purges expired analytics first and would delete
+// this test's events from under a parallel pass.
+func TestTouchRetentionPurgesExpiredAnalyticsInBatches(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	journey := testID(t)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM analytics_events WHERE journey_id=$1", journey) })
+	mustExec(t, pool, `INSERT INTO analytics_events (id,name,source,occurred_at,received_at,journey_id)
+SELECT gen_random_uuid(),'app_opened','WEB',$1,$1,$2 FROM generate_series(1,$3::int)`,
+		time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC), journey, analyticsPurgeBatch+1)
+	fresh := testID(t)
+	mustExec(
+		t,
+		pool,
+		`INSERT INTO analytics_events (id,name,source,occurred_at,journey_id) VALUES ($1,'app_opened','WEB',now(),$2)`,
+		fresh,
+		journey,
+	)
+	count := func() (n int) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM analytics_events WHERE journey_id=$1", journey).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	retention := &TouchRetention{DB: as(t, dbroles.ProjectionWorker)}
+	if worked, err := retention.PurgeNext(ctx, time.Now().UTC()); err != nil || !worked || count() != 2 {
+		t.Fatalf("first pass left %d events, want the last expired one and the fresh one: %v", count(), err)
+	}
+	if _, err := retention.PurgeNext(ctx, time.Now().UTC()); err != nil || count() != 1 {
+		t.Fatalf("second pass left %d events, want only the fresh one: %v", count(), err)
+	}
+}

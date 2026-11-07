@@ -152,13 +152,26 @@ func (q *Queries) JourneyReport(ctx context.Context, arg JourneyReportParams) (J
 	return i, err
 }
 
-const purgeAnalytics = `-- name: PurgeAnalytics :exec
-DELETE FROM analytics_events WHERE received_at<$1
+const purgeAnalytics = `-- name: PurgeAnalytics :execrows
+DELETE FROM analytics_events WHERE id=ANY(ARRAY(
+ SELECT id FROM analytics_events WHERE received_at<$1::timestamptz
+ ORDER BY received_at LIMIT $2
+))
 `
 
-func (q *Queries) PurgeAnalytics(ctx context.Context, receivedAt pgtype.Timestamptz) error {
-	_, err := q.db.Exec(ctx, purgeAnalytics, receivedAt)
-	return err
+type PurgeAnalyticsParams struct {
+	ReceivedBefore pgtype.Timestamptz `json:"received_before"`
+	Batch          int32              `json:"batch"`
+}
+
+// One bounded batch of events past retention, oldest first, so a pass never
+// holds a long transaction or scans the table.
+func (q *Queries) PurgeAnalytics(ctx context.Context, arg PurgeAnalyticsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeAnalytics, arg.ReceivedBefore, arg.Batch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const sevenDayShareReport = `-- name: SevenDayShareReport :one

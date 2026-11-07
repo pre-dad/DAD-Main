@@ -14,8 +14,13 @@ ON CONFLICT DO NOTHING;
 UPDATE donor_checkouts SET journey_id=$2 WHERE id=$1 AND journey_id IS NULL;
 -- name: DeleteDonorAnalytics :exec
 DELETE FROM analytics_events WHERE donor_id=$1;
--- name: PurgeAnalytics :exec
-DELETE FROM analytics_events WHERE received_at<$1;
+-- name: PurgeAnalytics :execrows
+-- One bounded batch of events past retention, oldest first, so a pass never
+-- holds a long transaction or scans the table.
+DELETE FROM analytics_events WHERE id=ANY(ARRAY(
+ SELECT id FROM analytics_events WHERE received_at<sqlc.arg(received_before)::timestamptz
+ ORDER BY received_at LIMIT sqlc.arg(batch)
+));
 -- name: BindAnalyticsJourney :exec
 UPDATE analytics_events SET donor_id=$2 WHERE journey_id=$1 AND donor_id IS NULL;
 -- name: JourneyReport :one
