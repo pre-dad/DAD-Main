@@ -41,6 +41,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   id-token: write
 
 concurrency:
@@ -51,7 +52,39 @@ env:
   AWS_REGION: us-east-2
 
 jobs:
+  # A push starts this workflow and CI side by side, so nothing else stops a red commit
+  # from deploying. This job waits for the CI run on the same commit and fails unless it
+  # succeeded; a superseded commit's cancelled run therefore never deploys either.
+  ci-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    if: ${{ vars.APP_DEPLOY_ROLE_ARN != '' }}
+    steps:
+      - name: Wait for CI on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 2700))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            run="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&per_page=20" \
+              --jq '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at) | last // empty | "\(.status) \(.conclusion // "-") \(.html_url)"')"
+            read -r status conclusion url <<<"${run:-none - -}"
+            echo "CI for $SHA: $status $conclusion $url"
+            if [ "$status" = completed ]; then
+              [ "$conclusion" = success ] && exit 0
+              echo "::error::CI did not succeed on $SHA ($conclusion): $url"
+              exit 1
+            fi
+            sleep 30
+          done
+          echo "::error::CI did not finish on $SHA within 45 minutes"
+          exit 1
+
   deploy:
+    needs: ci-gate
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     # Only run once the account is bootstrapped and the OIDC app-deploy role ARN
