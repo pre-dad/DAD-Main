@@ -169,8 +169,8 @@ Staff recovery/role changes revoke sessions and preserve the last active adminis
 Browser mutations require the exact Origin of their surface: the public origin for donor
 and public routes, the staff origin for staff routes. Requests, pages, uploads, passkey
 responses, exports, and provider calls have bounded sizes or timeouts. The Next proxy
-exposes `/donor/*` and the exact public event-detail, calendar, and initiative-spend
-GET/HEAD paths. Other paths and public mutations are refused before contacting the API.
+exposes `/donor/*`, `POST /analytics/events`, and the exact public event-detail, calendar,
+and initiative-spend GET/HEAD paths. Everything else is refused before contacting the API.
 
 Browsers reach the web service only through nginx ([edge](edge.md)). It accepts TLS 1.2
 and 1.3 for the configured public and staff hosts only, serves back-office paths only on
@@ -192,8 +192,10 @@ calls, and no donor lock is held during the call. Current remote state is reconc
 Reads never call Stripe, so page views cannot multiply provider requests.
 Logs must exclude donor payloads, credentials, tokens, and remote response bodies; API
 failures are logged with route, status, and error type only. Every API response carries
-`no-store`, `nosniff`, `no-referrer`, and a `default-src 'none'; frame-ancestors 'none'`
-content security policy.
+`nosniff`, `no-referrer`, and a `default-src 'none'; frame-ancestors 'none'` content
+security policy (file downloads use `default-src 'none'; sandbox` instead), and is
+`no-store` except successful answers from the public event
+detail, event calendar and initiative detail routes, which allow 60 seconds of caching.
 
 Public content never includes donor data or private source files. Source documents use a
 dedicated encryption key and SHA-256 verification. CSV exports use field allowlists,
