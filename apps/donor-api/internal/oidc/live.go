@@ -176,8 +176,15 @@ func (v *liveVerifier) key(ctx context.Context, provider Provider, kid string) (
 		return stale(ErrKeys)
 	}
 	keys, err := v.fetch(ctx, provider)
+	if err == nil && len(keys) == 0 {
+		err = fmt.Errorf("%w: no usable signing keys", ErrKeys)
+	}
 	if err != nil {
-		v.failed[provider] = now
+		// A caller that gave up says nothing about the provider, and must not
+		// hold every other sign-in off it for a backoff window.
+		if ctx.Err() == nil {
+			v.failed[provider] = now
+		}
 		return stale(err)
 	}
 	delete(v.failed, provider)
