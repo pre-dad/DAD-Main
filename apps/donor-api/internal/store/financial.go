@@ -235,7 +235,8 @@ type projection struct {
 	zone        *time.Location
 }
 
-// Version 11 requires fresh continuity before awarding new streak badges.
+// projectionRules versions the recognition rules. Raising it queues every
+// projection computed under an earlier version for recomputation.
 const projectionRules = 12
 
 // A projection waits at most refreshCap for its next time boundary. Facts that

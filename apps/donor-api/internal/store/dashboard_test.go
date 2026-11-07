@@ -48,11 +48,8 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 		owner,
 		second,
 	)
-	// The totals are read from the owner's own denormalized columns now, not
-	// recomputed from the referred rows on every view, so set them to exactly
-	// what the OLD FILTER aggregate produced for this setup: first LINK 3000 +
-	// second IRL 9000 -> Link 1, IRL 1, 12000 total. Production writes these the
-	// same way via projectFacts -> ReferralTotalsFromReferred -> SaveProjection.
+	// The dashboard reads the owner's denormalized totals, which projectFacts
+	// writes from the referred rows: here LINK 3000 and IRL 9000.
 	mustExec(
 		t,
 		tx,
@@ -85,26 +82,15 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 		}
 		mustExec(t, tx, "ROLLBACK TO SAVEPOINT invalid_projection")
 	}
-	// Overflowing minors must still never surface a total. With denormalized
-	// columns the overflow guard reads the OWNER's minor columns, so mirror the
-	// overflowing net_minor onto the owner the way a recompute would, then
-	// confirm the dashboard still refuses to invent a sum. The single-channel
-	// case (sameChannel) is the stronger one: in production its bigint sum would
-	// fail the recompute outright; here we assert the dashboard guard itself
-	// still withholds the total when the stored minors overflow int64 together.
+	// Stored minors that overflow int64 together must not surface a sum. The
+	// per-channel bigint columns cannot overflow on their own; the dashboard
+	// guard is pinned directly.
 	for _, sameChannel := range []bool{false, true} {
 		mustExec(t, tx, "SAVEPOINT overflow_projection")
 		mustExec(t, tx, "UPDATE donor_metric_projections SET net_minor=$1 WHERE donor_id=$2", int64(math.MaxInt64), first)
 		if sameChannel {
 			mustExec(t, tx, "UPDATE donor_metric_projections SET referral_kind='LINK' WHERE donor_id=$1", second)
 		}
-		// Mirror the overflowing minors onto the owner's denormalized columns so
-		// the dashboard reads them: both channels at MaxInt64 means their total
-		// overflows int64, which the guard (irlMinor <= MaxInt64-linkMinor) must
-		// catch so no sum is invented. (In production a single bigint column can
-		// never hold an overflowing per-channel sum: that case fails the recompute
-		// cast instead, keeping the owner's prior totals; here we pin the
-		// dashboard-level guard directly.)
 		mustExec(
 			t,
 			tx,
@@ -184,9 +170,7 @@ func TestDashboardWaitsForReferredGiftsToBeProjected(t *testing.T) {
 		giver,
 		now.Add(time.Hour),
 	)
-	// Projecting the giver credits the owner's denormalized columns in
-	// production; this test drives the referred rows by direct SQL, so set the
-	// owner's totals to what that projection would write (Link 1, 3000).
+	// Projecting the giver credits the owner's totals; set them directly.
 	mustExec(t, tx, "UPDATE donor_metric_projections SET referred_link_count=1,referred_link_minor=3000 WHERE donor_id=$1", owner)
 	result, err := dashboard(ctx, q, queries.Donor{ID: owner}, now)
 	if err != nil || result.Referrals == nil || result.Referrals.Link != 1 || result.Referrals.TotalMinor != 3000 {
