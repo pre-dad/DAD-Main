@@ -84,6 +84,22 @@ func TestEventDraftPublishAndValidation(t *testing.T) {
 	if err != nil || view.Title != "Event water-cleanup" || view.Capacity != 20 {
 		t.Fatalf("published detail: %+v %v", view, err)
 	}
+
+	var first, again time.Time
+	var audited int
+	if err = pool.QueryRow(ctx, "SELECT published_at FROM donor_events WHERE id=$1", id).Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Publish(ctx, adminToken, id); err != nil {
+		t.Fatalf("republish: %v", err)
+	}
+	if err = pool.QueryRow(ctx, "SELECT published_at FROM donor_events WHERE id=$1", id).Scan(&again); err != nil || !again.Equal(first) {
+		t.Fatalf("republishing moved published_at from %v to %v (%v)", first, again, err)
+	}
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE action='event.published' AND target=$1", id.String()).Scan(&audited); err != nil ||
+		audited != 1 {
+		t.Fatalf("event.published audited %d times (%v), want once", audited, err)
+	}
 }
 
 func TestUpcomingEventsNearDonor(t *testing.T) {

@@ -169,6 +169,17 @@ func TestInitiativeDraftPublishLifecycleAndMetricVerificationGate(t *testing.T) 
 		t.Fatal(err)
 	}
 	assertInitiativeState(t, pool, id, "PUBLISHED")
+	var firstPublished, republished time.Time
+	if err := pool.QueryRow(ctx, "SELECT published_at FROM donor_initiatives WHERE id=$1", id).Scan(&firstPublished); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Publish(ctx, adminToken, id); err != nil {
+		t.Fatalf("republish: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT published_at FROM donor_initiatives WHERE id=$1", id).Scan(&republished); err != nil ||
+		!republished.Equal(firstPublished) {
+		t.Fatalf("republishing moved published_at from %v to %v (%v)", firstPublished, republished, err)
+	}
 	unapproved := upd
 	unapproved.BoardApprovalSourceID, unapproved.BoardApprovedOn = "", ""
 	if err := s.Update(ctx, adminToken, id, unapproved); !errors.Is(err, ErrBoardApprovalRequired) {

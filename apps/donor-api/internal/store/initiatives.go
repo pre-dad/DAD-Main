@@ -220,7 +220,8 @@ func (s InitiativeService) Update(ctx context.Context, token string, id pgtype.U
 	return err
 }
 
-// Publish makes a DRAFT initiative donor-visible.
+// Publish makes a DRAFT initiative donor-visible. Publishing a published
+// initiative is a no-op, so its published time is not reset.
 func (s InitiativeService) Publish(ctx context.Context, token string, id pgtype.UUID) error {
 	_, err := staffWrite(ctx, s.Staff, token, initiativePermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
@@ -228,6 +229,9 @@ func (s InitiativeService) Publish(ctx context.Context, token string, id pgtype.
 			initiative, err := q.LockInitiative(ctx, id)
 			if err != nil {
 				return struct{}{}, err
+			}
+			if initiative.PublishState == "PUBLISHED" {
+				return struct{}{}, nil
 			}
 			if !initiative.BoardApprovalSourceID.Valid {
 				return struct{}{}, ErrBoardApprovalRequired
@@ -337,11 +341,9 @@ func (s InitiativeService) PublishMetric(
 			// METRICS_VERIFIED partner email (§6.11): a verified figure for a
 			// partner's initiative went live. Keyed per (initiative, position) so
 			// republishing the same metric does not re-notify.
-			{
-				key := "partner-metrics:" + initiativeID.String() + ":" + strconv.FormatInt(int64(position), 10)
-				if err = queueInitiativePartners(ctx, q, initiativeID, "METRICS_VERIFIED", key, map[string]string{"initiative_id": initiativeID.String()}, now); err != nil {
-					return struct{}{}, err
-				}
+			key := "partner-metrics:" + initiativeID.String() + ":" + strconv.FormatInt(int64(position), 10)
+			if err = queueInitiativePartners(ctx, q, initiativeID, "METRICS_VERIFIED", key, map[string]string{"initiative_id": initiativeID.String()}, now); err != nil {
+				return struct{}{}, err
 			}
 			return struct{}{}, auditStaff(
 				ctx,
@@ -382,8 +384,8 @@ func (s InitiativeService) DeleteMetric(
 	return err
 }
 
-// SpendInput sets the running total for one spend category of an initiative
-// . Spend is category totals only — never line items (PRD §5.2).
+// SpendInput sets the running total for one spend category of an initiative.
+// Spend is category totals only — never line items (PRD §5.2).
 type SpendInput struct {
 	Category         string `json:"category"`
 	AmountMinor      int64  `json:"amount_minor"`
