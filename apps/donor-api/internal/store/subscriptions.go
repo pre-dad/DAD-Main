@@ -22,11 +22,16 @@ func terminalSubscription(status string) bool {
 type subFetcher struct {
 	gateway payments.FinancialGateway
 	seen    map[string]payments.Object
+	frozen  bool
 }
 
 func newSubFetcher(gateway payments.FinancialGateway) *subFetcher {
 	return &subFetcher{gateway: gateway, seen: map[string]payments.Object{}}
 }
+
+// freeze ends the fetcher's reads: a later refresh reports errRefetch, so a
+// caller holding a transaction never calls the processor.
+func (f *subFetcher) freeze() { f.frozen = true }
 
 // retrieve returns the processor's view of id, fetching it at most once per
 // step for a given id. It is for a resolution that is content with any state
@@ -43,6 +48,9 @@ func (f *subFetcher) retrieve(ctx context.Context, id string) (payments.Object, 
 // the step. The under-lock conflict path calls this so a state that moved
 // after the pre-lock read is observed, never a memoized pre-lock value.
 func (f *subFetcher) refresh(ctx context.Context, id string) (payments.Object, error) {
+	if f.frozen {
+		return nil, errRefetch
+	}
 	if f.gateway == nil {
 		return nil, payments.ErrUnconfigured
 	}
