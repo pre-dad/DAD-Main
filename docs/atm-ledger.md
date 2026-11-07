@@ -2,8 +2,8 @@
 
 The active ledger runs at `https://dad-atm-ledger.cocuyo.workers.dev`, backed
 by the dedicated `dad-atm-ledger-history` R2 bucket. Source lives in
-`apps/atm-ledger`. Both branch workflows require the durable service and hold no Git
-write permission. There is no Git fallback on an outage.
+`apps/atm-ledger`. The ATM workflow (`.github/workflows/atm.yml`, run on `dev` and `main`)
+requires the durable service and holds no Git write permission. There is no Git fallback on an outage.
 
 The original Git history is preserved by the annotated tag
 `archive/atm-state-20261013`. Do not restore the old state branch as an operational
@@ -116,13 +116,13 @@ finding audit and receipt against every original Git revision. The source branch
 was checked again before activation.
 
 The service was deployed from the code committed in `6774ec3`, Cloudflare version
-`936fa1c6-339b-4c53-a362-295be87ddaf1`. Both consumer workflows were updated with explicit
+`936fa1c6-339b-4c53-a362-295be87ddaf1`. The consumer workflow was updated with explicit
 main-branch authorization. Publication was paused while legacy runs drained and the
 import was verified. `ATM_LEDGER_URL` selects the service origin;
 `ATM_LEDGER_BACKEND=paused` remains a maintenance switch that blocks acceptance.
-Other backend values cannot enable a Git fallback in the final workflow.
+Other values of that variable cannot enable a Git fallback.
 
-The Git state branch can be removed only after both branches have passed complete
+The Git state branch can be removed only after `dev` and `main` have passed complete
 validation, encrypted evidence retention, durable publication and acceptance. Retain
 the archive tag. Identical retries must leave each execution receipt present exactly
 once. Any failed check requires investigation; never initialize an empty replacement.
