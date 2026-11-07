@@ -228,14 +228,13 @@ alone does not consume it or replace the browser's account.
 
 ## Dependency advisory boundary
 
-`GO-2026-5932` concerns the unmaintained `golang.org/x/crypto/openpgp` packages;
-the application and its tests do not import them. Other packages from `x/crypto`,
-including OCSP used by WebAuthn's certificate checks, remain required. The
-[advisory](https://pkg.go.dev/vuln/GO-2026-5932) lists all OpenPGP versions as
-affected, with no known fix, so changing the module version cannot resolve it.
-`make lint-go` rejects legacy OpenPGP anywhere in the application/test dependency
-graph and continues to run the unmodified vulnerability scanner. A module-only
-notice is distinct from an affected imported package or reachable function.
+`GO-2026-5932` concerns the unmaintained `golang.org/x/crypto/openpgp` packages. The
+module is pinned to a pseudo-version, after those packages were removed, that no tagged
+release carries yet; move to the first tagged release that does when one exists. The
+application and its tests do not import OpenPGP, and `make lint-go` fails if any package
+in the application or test dependency graph does, then runs the unmodified vulnerability
+scanner. Other `x/crypto` packages, including OCSP used by WebAuthn's certificate checks
+and bcrypt, remain required, which is why `x/crypto` is a direct requirement.
 
 Release still needs verified legal/entity details, approved retention and incident
 procedures, managed secret storage, backup/restore evidence, the Cloudflare edge

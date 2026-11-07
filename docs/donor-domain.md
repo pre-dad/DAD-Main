@@ -171,9 +171,11 @@ identify the channel without the referred donor's name or amount. Send the initi
 account-claim email with replacement-link access, without promotional reminders.
 The donor app's notifications follow the same facts: a referral converted (with its
 channel, not the referred donor's name or amount), a failed renewal putting a streak at
-risk (once per failed period), and a streak milestone. Each is optional and starts on
-once the app is allowed to notify, since the device's permission prompt is the opt-in;
-preferences are rechecked before sending.
+risk (once per failed period), a streak milestone, a streak that ended after grace, an
+earned badge, a waitlist promotion, event reminders and nearby events, and an event
+cancellation. Each except the cancellation is optional and starts on once the app is
+allowed to notify, since the device's permission prompt is the opt-in; preferences are
+rechecked before sending. [Messaging](messaging.md) lists every message and notification.
 Marketing consent is separate. Receipts/security/essential payment notices are distinct
 from optional messages, subject to approved legal classification. Prepare the enrolment
 template at R1 and activate it with R2 enrolment. Finance approves summary treatment;

@@ -30,7 +30,7 @@ Start with these; this file only adds what they do not say.
 - **OpenAPI/schema changes fan out.** Adding a field to a Go struct that maps to the
   donor `Profile` means also updating `apps/donor-api/api/openapi.json` (properties +
   `required` for non-omitempty) **and both hand-maintained Swift `Profile` fixtures** in
-  `contracts/mobile/swift/.../ContractTests.swift`, or the contract / swift-compatibility
+  `contracts/mobile/swift/Tests/DADAPITests/ContractTests.swift`, or the contract / swift-compatibility
   CI jobs fail. Also regenerate `apps/web/lib/openapi.d.ts` (`make generate`).
 - **`openapi.json` uses one-space indent.** A script that rewrites it must use
   `indent=1` + trailing newline, or the whole 12k-line file reformats into a noisy diff.

@@ -70,9 +70,10 @@ The app registers its installation's push token on its own session with `POST
 long as the sign-in, and a token registered by another session moves to the new one.
 Each projection refresh queues push intents in the same transaction as the facts
 behind them, next to the email outbox: recent verified gifts, referral conversions,
-failed renewals initially and on grace day five, and streak milestones. Stable keys
-identify the gift, referred donor, failed period and reminder day, or donor and streak
-run. Full refunds suppress gift-processed pushes; recovery and cancellation suppress
+failed renewals initially and on grace day five, streak milestones and lapses, earned
+badges, and event promotions, reminders, nearby publications and cancellations. Stable
+keys identify the gift, referred donor, failed period and reminder day, donor and streak
+run, badge, or event and window. Full refunds suppress gift-processed pushes; recovery and cancellation suppress
 payment reminders. Only donors with a live
 registered device get intents. The push worker delivers each to every live device of the
 donor through APNs or FCM (`internal/push`), rechecking preferences and facts first,
