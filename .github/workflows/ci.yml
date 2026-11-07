@@ -135,6 +135,7 @@ jobs:
         with: { node-version: "24" }
       - run: make check-deploy-secrets
       - run: make lint-scripts
+      - run: ./scripts/check-docker-contexts.sh
       - run: make check-ingress smoke-ingress
       - name: Validate production compose
         run: |
