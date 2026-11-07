@@ -198,7 +198,7 @@ func (s *StaffService) DonorDetail(
 
 // storedSubscription returns the donor's last synced monthly gift, if any.
 func storedSubscription(ctx context.Context, q *queries.Queries, donor pgtype.UUID, now time.Time) (*StaffSubscription, error) {
-	details, err := storedDetails(ctx, q, donor, now)
+	details, err := storedDetails(ctx, q, donor)
 	if err != nil || details.Subscription == nil {
 		return nil, err
 	}

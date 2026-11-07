@@ -2,13 +2,14 @@ package store
 
 import (
 	"context"
+	"encoding/base64"
+	"slices"
+	"time"
+
 	"dad/donor-api/internal/badges"
 	"dad/donor-api/internal/recognition"
 	"dad/donor-api/internal/store/queries"
-	"encoding/base64"
 	"github.com/jackc/pgx/v5"
-	"slices"
-	"time"
 )
 
 type BadgeRule struct {
@@ -20,38 +21,37 @@ type BadgeRule struct {
 	MinPopulation int64  `json:"min_population"`
 	Artwork       string `json:"artwork"`
 }
+
 type RecognitionRules struct {
 	Badges     []BadgeRule `json:"badges"`
 	Milestones []int64     `json:"milestones"`
 }
 
 var defaultBadgeRules = map[string]BadgeRule{
-	"F": {Signal: "founding", Threshold: 1}, "1D": {Signal: "first_gift", Threshold: 1},
-	"7": {
-		Signal:    "streak_days",
-		Threshold: 7,
-	}, "30": {Signal: "streak_days", Threshold: 30}, "100": {Signal: "streak_days", Threshold: 100},
-	"Y1": {
-		Signal:    "streak_days",
-		Threshold: 365,
-	}, "1K": {Signal: "streak_days", Threshold: 1000}, "Y3": {Signal: "streak_days", Threshold: 1095},
-	"CB": {Signal: "comeback", Threshold: 1}, "UP": {Signal: "raised_amount", Threshold: 1},
-	"REF1": {
-		Signal:    "referrals",
-		Threshold: 1,
-	}, "REF3": {Signal: "referrals", Threshold: 3}, "REF12": {Signal: "referrals", Threshold: 12}, "TC": {Signal: "referrals", Threshold: 20},
-	"IRL": {
-		Signal:    "irl_referral",
-		Threshold: 1,
-	}, "V": {Signal: "volunteer", Threshold: 1}, "SU": {Signal: "checkins", Threshold: 1}, "V3": {Signal: "checkins", Threshold: 3}, "V10": {Signal: "checkins", Threshold: 10},
-	"INIT7": {
-		Signal:    "initiatives",
-		Threshold: 7,
-	}, "CITY50": {
-		Signal:        "city_rank",
-		Threshold:     50,
-		MinPopulation: badges.MinRankPopulation,
-	}, "NAT2": {Signal: "national_percentile", Threshold: 2, MinPopulation: badges.MinRankPopulation}, "TP": {Signal: "team", Threshold: 1}, "WT": {Signal: "monthly_winner", Threshold: 1},
+	"F":      {Signal: "founding", Threshold: 1},
+	"1D":     {Signal: "first_gift", Threshold: 1},
+	"7":      {Signal: "streak_days", Threshold: 7},
+	"30":     {Signal: "streak_days", Threshold: 30},
+	"100":    {Signal: "streak_days", Threshold: 100},
+	"Y1":     {Signal: "streak_days", Threshold: 365},
+	"1K":     {Signal: "streak_days", Threshold: 1000},
+	"Y3":     {Signal: "streak_days", Threshold: 1095},
+	"CB":     {Signal: "comeback", Threshold: 1},
+	"UP":     {Signal: "raised_amount", Threshold: 1},
+	"REF1":   {Signal: "referrals", Threshold: 1},
+	"REF3":   {Signal: "referrals", Threshold: 3},
+	"REF12":  {Signal: "referrals", Threshold: 12},
+	"TC":     {Signal: "referrals", Threshold: 20},
+	"IRL":    {Signal: "irl_referral", Threshold: 1},
+	"V":      {Signal: "volunteer", Threshold: 1},
+	"SU":     {Signal: "checkins", Threshold: 1},
+	"V3":     {Signal: "checkins", Threshold: 3},
+	"V10":    {Signal: "checkins", Threshold: 10},
+	"INIT7":  {Signal: "initiatives", Threshold: 7},
+	"CITY50": {Signal: "city_rank", Threshold: 50, MinPopulation: badges.MinRankPopulation},
+	"NAT2":   {Signal: "national_percentile", Threshold: 2, MinPopulation: badges.MinRankPopulation},
+	"TP":     {Signal: "team", Threshold: 1},
+	"WT":     {Signal: "monthly_winner", Threshold: 1},
 }
 
 func recognitionRules(ctx context.Context, q *queries.Queries) (RecognitionRules, error) {
@@ -96,6 +96,7 @@ func configuredLadder(
 	}
 	return run.LadderWithMilestones(now, zone, rules.Milestones), nil
 }
+
 func ruleEarned(r BadgeRule, s badges.Signals) bool {
 	var n int64
 	switch r.Signal {
@@ -130,11 +131,13 @@ func ruleEarned(r BadgeRule, s badges.Signals) bool {
 	}
 	return n >= r.Threshold
 }
+
 func (s WordingService) Rules(ctx context.Context, token string) (RecognitionRules, error) {
 	return staffRead(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (RecognitionRules, error) {
 		return recognitionRules(ctx, queries.New(tx))
 	})
 }
+
 func (s WordingService) SetRules(ctx context.Context, token string, in RecognitionRules) error {
 	if len(in.Milestones) == 0 || len(in.Milestones) > 32 || !slices.IsSorted(in.Milestones) {
 		return ErrStaffInput
