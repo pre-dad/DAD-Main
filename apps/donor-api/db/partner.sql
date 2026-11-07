@@ -1,9 +1,11 @@
--- name: InsertPartnerApplication :exec
--- P-1: a new partner application. The partial unique index rejects a second
--- PENDING application for the same work email.
+-- name: InsertPartnerApplication :execrows
+-- P-1: a new partner application. A repeated id inserts nothing, so a retry
+-- that races its original reads the stored row. The partial unique index
+-- rejects a second PENDING application for the same work email.
 INSERT INTO donor_partner_applications
   (id, organization, website, type, contact_name, title, work_email, phone, workforce_size, created_at, updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10);
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10)
+ON CONFLICT (id) DO NOTHING;
 
 -- name: PartnerApplicationByID :one
 SELECT * FROM donor_partner_applications WHERE id=$1 FOR UPDATE;

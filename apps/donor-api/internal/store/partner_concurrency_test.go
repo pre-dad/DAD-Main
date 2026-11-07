@@ -78,6 +78,50 @@ func TestPartnerInviteIsSingleUseUnderConcurrency(t *testing.T) {
 	}
 }
 
+func TestPartnerApplicationRetryIsIdempotentUnderConcurrency(t *testing.T) {
+	pool := database(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cleanPartners(t, pool)
+	apps := PartnerApplicationService{DB: as(t, dbroles.API)}
+	application := mustNewID(t)
+	input := validApplication("Double Submit", "double@partner.test")
+	lock, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback(ctx)
+	mustExec(
+		t,
+		lock,
+		`INSERT INTO donor_partner_applications(id,organization,website,type,contact_name,title,work_email,phone,workforce_size)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		application,
+		input.Organization,
+		input.Website,
+		input.Type,
+		input.ContactName,
+		input.Title,
+		input.WorkEmail,
+		input.Phone,
+		input.WorkforceSize,
+	)
+	done := make(chan error, 1)
+	go func() { done <- apps.Apply(ctx, application, input) }()
+	awaitPartnerWaiters(t, pool, 1)
+	if err := lock.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("retry that raced the original submission: %v", err)
+	}
+	var stored int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_partner_applications WHERE work_email=$1", input.WorkEmail).Scan(&stored); err != nil ||
+		stored != 1 {
+		t.Fatalf("%d applications stored (%v), want 1", stored, err)
+	}
+}
+
 func TestPartnerApprovalIsSingleDecisionUnderConcurrency(t *testing.T) {
 	pool := database(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

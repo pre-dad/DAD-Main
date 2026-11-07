@@ -26,9 +26,7 @@ func referredDonor(
 	t.Helper()
 	ctx := context.Background()
 	id, _ := donor(t, pool)
-	t.Cleanup(func() {
-		pool.Exec(context.Background(), "DELETE FROM donor_preferences WHERE donor_id=$1", id)
-	})
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_preferences WHERE donor_id=$1", id) })
 	if name != "" {
 		if _, err := pool.Exec(ctx, "UPDATE donors SET public_name=$2 WHERE id=$1", id, name); err != nil {
 			t.Fatal(err)
@@ -118,5 +116,39 @@ func TestNetworkTotalsActiveOnlyAnnualizedAndInviteeVisibility(t *testing.T) {
 	// N-2: 3 converted referrals -> next milestone is the 12 tier, 9 remaining.
 	if got.NextMilestone == nil || got.NextMilestone.Target != 12 || got.NextMilestone.Remaining != 9 {
 		t.Fatalf("next_milestone: got %+v want target=12 remaining=9", got.NextMilestone)
+	}
+}
+
+func TestNetworkMilestoneLadderEndsAtTheLastTier(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	referrer, _ := donor(t, pool)
+	mustExec(
+		t,
+		pool,
+		`INSERT INTO donor_metric_projections(id,donor_id,best_streak,current_streak,computed_at,next_refresh_at,referred_link_count,referred_irl_count)
+		 VALUES ($1,$2,1,1,now(),now()+interval '1 hour',12,0)`,
+		testID(t),
+		referrer,
+	)
+	for _, tt := range []struct {
+		converted         int
+		label             string
+		target, remaining int64
+	}{{12, "Team Captain", 20, 8}, {19, "Team Captain", 20, 1}} {
+		mustExec(t, pool, "UPDATE donor_metric_projections SET referred_link_count=$2 WHERE donor_id=$1", referrer, tt.converted)
+		got, err := buildNetwork(ctx, queries.New(pool), referrer)
+		if err != nil || got.NextMilestone == nil ||
+			*got.NextMilestone != (NetworkMilestone{Label: tt.label, Target: tt.target, Remaining: tt.remaining}) {
+			t.Fatalf("%d converted: %+v %v", tt.converted, got.NextMilestone, err)
+		}
+	}
+	mustExec(t, pool, "UPDATE donor_metric_projections SET referred_link_count=20 WHERE donor_id=$1", referrer)
+	got, err := buildNetwork(ctx, queries.New(pool), referrer)
+	if err != nil || got.NextMilestone != nil {
+		t.Fatalf("every tier reached: %+v %v", got.NextMilestone, err)
+	}
+	if got.Invitees == nil || len(got.Invitees) != 0 || got.ActiveCount != 0 || got.AnonymousActive != 0 {
+		t.Fatalf("a donor with no referrals: %+v", got)
 	}
 }

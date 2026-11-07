@@ -693,10 +693,8 @@ func TestRefreshNextProjectionDefersUnprojectableDonor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, row := range rows {
-		if row.Queue == "projections" && (row.Due != 1 || row.Parked != 1) {
-			t.Fatal("unprojectable donor not surfaced", row)
-		}
+	if row := queueHealthRow(t, rows, "projections"); row.Due != 1 || row.Parked != 1 {
+		t.Fatal("unprojectable donor not surfaced", row)
 	}
 	if worked, err := RefreshNextProjection(ctx, worker, now.Add(5*time.Minute)); err != nil || !worked {
 		t.Fatal(worked, err)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -181,6 +183,36 @@ func TestPartnerDashboardAndReport(t *testing.T) {
 	}
 	if got, err := dash.ReportArtifact(ctx, viewerSession, reportID); err != nil || !bytes.Equal(got, pdf) {
 		t.Fatalf("viewer could not read a retained export: %v", err)
+	}
+}
+
+func TestPartnerReportRendersAnyNameAndPaginatesLongSpend(t *testing.T) {
+	now := time.Date(2027, 3, 4, 5, 6, 0, 0, time.UTC)
+	enrolled := int64(7)
+	overview := PartnerOverview{
+		Organization:      "Ünïcode Fondation 日本語 " + strings.Repeat("Long Name ", 20),
+		CommittedVerified: true, CommittedMinor: 150000,
+		DeployedVerified: true, DeployedMinor: 50000, DeployedPercent: 33,
+		PeopleReachedVerified: true, PeopleReached: 200,
+		EmployeesEnrolled: &enrolled, WorkforceSize: 70,
+	}
+	spend := make([]queries.PartnerSpendByCategoryRow, 60)
+	for i := range spend {
+		spend[i] = queries.PartnerSpendByCategoryRow{
+			Category:    fmt.Sprintf("Category %d — %s", i, strings.Repeat("wrapped ", 25)),
+			AmountMinor: int64(i+1) * 100,
+		}
+	}
+	logo, err := cleanLogo(partnerTestLogo(t, 64, 16))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pdf, err := renderPartnerReport(overview, spend, logo, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(pdf, []byte("%PDF-")) || bytes.Count(pdf, []byte("/Type /Page\n")) < 2 {
+		t.Fatalf("report is not a multi-page PDF: %d bytes, %d pages", len(pdf), bytes.Count(pdf, []byte("/Type /Page\n")))
 	}
 }
 

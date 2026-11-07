@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -46,10 +47,8 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 	partnerID := approvedPartner(t, pool, "Matrix Org", "MATRIX-"+mustNewID(t).String()[:8], 0, 0)
 	// Two accepted admins so we can assert fan-out, plus one disabled and one
 	// pending (unaccepted) who must NOT receive the notice.
-	a1, _ := approvePartnerAdmin(t, pool, partnerID)
-	a2, _ := approvePartnerAdmin(t, pool, partnerID)
-	_ = a1
-	_ = a2
+	approvePartnerAdmin(t, pool, partnerID)
+	approvePartnerAdmin(t, pool, partnerID)
 	mustExec(t, pool,
 		`INSERT INTO donor_partner_users (id, partner_id, email, name, role, created_at)
 		 VALUES ($1,$2,'pending@x.test','P','VIEWER',now())`, mustNewID(t), partnerID)
@@ -92,6 +91,52 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 		if pending != 0 {
 			t.Fatalf("%s: dedup key re-queued a live intent", kind)
 		}
+	}
+}
+
+// A failed send is retried after the same backoff as donor mail, and the retry
+// carries the message it failed with: the body is rendered once and the
+// Message-ID is stable, so a lost acknowledgement cannot send two different
+// emails.
+func TestPartnerMessageRetriesWithBackoffAfterDeliveryFailure(t *testing.T) {
+	ctx := context.Background()
+	pool := as(t, dbroles.API)
+	mustExec(t, database(t), "DELETE FROM donor_partner_messages")
+	partnerID := approvedPartner(t, pool, "Retry Org", "RETRY-"+mustNewID(t).String()[:8], 0, 0)
+	approvePartnerAdmin(t, pool, partnerID)
+	key := "retry:METRICS_VERIFIED:" + partnerID.String()
+	queuePartnerIntent(t, partnerID, "METRICS_VERIFIED", key)
+	transport := &recordingMail{failure: errors.New("connection reset")}
+	w := partnerMessageWorker(t, transport)
+	now := time.Now().UTC().Add(time.Second)
+	if worked, err := w.DeliverNext(ctx, now); err != nil || !worked {
+		t.Fatalf("first attempt: worked=%v err=%v", worked, err)
+	}
+	var attempts int32
+	var lastError string
+	var completed bool
+	state := func() {
+		t.Helper()
+		if err := pool.QueryRow(ctx, "SELECT attempts,coalesce(last_error,''),completed_at IS NOT NULL FROM donor_partner_messages WHERE dedup_key=$1",
+			key).Scan(&attempts, &lastError, &completed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if state(); attempts != 1 || lastError != "DeliveryError" || completed {
+		t.Fatalf("after a failed send: attempts=%d error=%q completed=%v", attempts, lastError, completed)
+	}
+	transport.failure = nil
+	if worked, err := w.DeliverNext(ctx, now.Add(time.Minute)); err != nil || worked {
+		t.Fatalf("retried before its backoff: worked=%v err=%v", worked, err)
+	}
+	if worked, err := w.DeliverNext(ctx, now.Add(3*time.Minute)); err != nil || !worked {
+		t.Fatalf("retry: worked=%v err=%v", worked, err)
+	}
+	if state(); !completed {
+		t.Fatal("a successful retry did not complete the intent")
+	}
+	if len(transport.messages) != 2 || transport.messages[0] != transport.messages[1] {
+		t.Fatalf("retry changed the message: %+v", transport.messages)
 	}
 }
 
@@ -146,18 +191,37 @@ func TestPartnerMonthlySweepQueuesOncePerMonth(t *testing.T) {
 	})
 
 	sweep := PartnerMonthlyService{DB: as(t, dbroles.ProjectionWorker)}
+	// A sweep step is bounded, so drain it before reading the partner's count.
+	drain := func(at time.Time) int {
+		t.Helper()
+		total := 0
+		for {
+			n, err := sweep.QueueDueMonthly(ctx, at)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n == 0 {
+				return total
+			}
+			total += n
+		}
+	}
 	now := time.Now().UTC()
-	n, err := sweep.QueueDueMonthly(ctx, now)
-	if err != nil || n < 1 {
-		t.Fatalf("first sweep: n=%d err=%v", n, err)
+	if n := drain(now); n < 1 {
+		t.Fatalf("first sweep queued %d reports", n)
+	}
+	if queued := partnerMonthlyCount(t, pool, partnerID); queued != 1 {
+		t.Fatalf("first sweep queued %d monthly reports for the partner, want 1", queued)
 	}
 	// A second sweep in the same month queues nothing more for this partner.
-	before := partnerMonthlyCount(t, pool, partnerID)
-	if _, err := sweep.QueueDueMonthly(ctx, now.Add(time.Hour)); err != nil {
-		t.Fatal(err)
+	drain(now.Add(time.Hour))
+	if after := partnerMonthlyCount(t, pool, partnerID); after != 1 {
+		t.Fatalf("monthly re-queued within the same month: 1 -> %d", after)
 	}
-	if after := partnerMonthlyCount(t, pool, partnerID); after != before {
-		t.Fatalf("monthly re-queued within the same month: %d -> %d", before, after)
+	// The next month is due again.
+	drain(now.AddDate(0, 1, 0))
+	if next := partnerMonthlyCount(t, pool, partnerID); next != 2 {
+		t.Fatalf("the following month queued %d reports in total, want 2", next)
 	}
 	t.Cleanup(func() {
 		cleanExec(t, "DELETE FROM donor_partner_messages WHERE partner_id=$1", partnerID)

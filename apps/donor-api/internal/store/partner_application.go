@@ -111,8 +111,9 @@ func (in PartnerApplicationInput) validate(id pgtype.UUID, now time.Time) (queri
 }
 
 // Apply records a new PENDING partner application (P-1/P-2). id makes a retry
-// idempotent; a second PENDING application for the same work email is refused
-// by the partial unique index (surfaced as ErrPartnerApplication).
+// idempotent, even one that races the original; a second PENDING application
+// for the same work email is refused by the partial unique index (surfaced as
+// ErrPartnerApplication).
 func (s PartnerApplicationService) Apply(ctx context.Context, id pgtype.UUID, in PartnerApplicationInput) error {
 	params, err := in.validate(id, time.Now().UTC())
 	if err != nil {
@@ -124,21 +125,23 @@ func (s PartnerApplicationService) Apply(ctx context.Context, id pgtype.UUID, in
 }
 
 func applyPartner(ctx context.Context, q *queries.Queries, params queries.InsertPartnerApplicationParams) error {
-	if existing, err := q.PartnerApplicationByID(ctx, params.ID); err == nil {
-		if existing.Organization == params.Organization && existing.Website == params.Website && existing.Type == params.Type &&
-			existing.ContactName == params.ContactName && existing.Title == params.Title && existing.WorkEmail == params.WorkEmail &&
-			existing.Phone == params.Phone && existing.WorkforceSize == params.WorkforceSize {
-			return nil
-		}
-		return ErrPartnerApplication
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return err
-	}
-	err := q.InsertPartnerApplication(ctx, params)
+	inserted, err := q.InsertPartnerApplication(ctx, params)
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation {
 		return ErrPartnerApplication
 	}
-	return err
+	if err != nil || inserted == 1 {
+		return err
+	}
+	existing, err := q.PartnerApplicationByID(ctx, params.ID)
+	if err != nil {
+		return err
+	}
+	if existing.Organization == params.Organization && existing.Website == params.Website && existing.Type == params.Type &&
+		existing.ContactName == params.ContactName && existing.Title == params.Title && existing.WorkEmail == params.WorkEmail &&
+		existing.Phone == params.Phone && existing.WorkforceSize == params.WorkforceSize {
+		return nil
+	}
+	return ErrPartnerApplication
 }
 
 var applicationReceiptToken = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
@@ -146,7 +149,7 @@ var applicationReceiptToken = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 const applicationReceiptLifetime = 30 * 24 * time.Hour
 
 func (s PartnerApplicationService) ApplyWithReceipt(ctx context.Context, id pgtype.UUID, in PartnerApplicationInput, receipt string) error {
-	if len(receipt) != 43 || !applicationReceiptToken.MatchString(receipt) {
+	if !applicationReceiptToken.MatchString(receipt) {
 		return ErrPartnerApplication
 	}
 	now := time.Now().UTC()
