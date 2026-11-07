@@ -401,3 +401,23 @@ func TestDeviceNameIsPlainBoundedText(t *testing.T) {
 		}
 	}
 }
+
+func TestDisabledDonorAndRevokedSessionsAreDeniedAtOnce(t *testing.T) {
+	pool := database(t)
+	id, _ := donor(t, pool)
+	accountCleanup(t, pool, id)
+	revoked := claimSession(t, pool, id, app)
+	live := claimSession(t, pool, id, Client{})
+	if _, err := pool.Exec(context.Background(), "UPDATE donor_sessions SET revoked_at=now() WHERE token_hash=$1", HashToken(revoked.Access)); err != nil {
+		t.Fatal(err)
+	}
+	if signedInAs(t, pool, revoked.Access) || !signedInAs(t, pool, live.Access) {
+		t.Fatal("a revoked session must be denied without affecting the donor's others")
+	}
+	if _, err := pool.Exec(context.Background(), "UPDATE donors SET disabled=true WHERE id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	if signedInAs(t, pool, live.Access) {
+		t.Fatal("a disabled donor's unexpired session still authenticates")
+	}
+}

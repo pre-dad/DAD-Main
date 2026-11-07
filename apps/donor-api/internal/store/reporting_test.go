@@ -319,3 +319,25 @@ func TestReportRequiresPermissionAndValidWindow(t *testing.T) {
 		t.Errorf("bad token: got %v, want ErrStaffDenied", err)
 	}
 }
+
+func TestReportWindowIsHalfOpen(t *testing.T) {
+	pool := database(t)
+	_, token := staffFixture(t, pool, "OP_GROWTH")
+	svc := &ReportingService{Staff: &StaffService{DB: as(t, dbroles.API)}}
+	start := time.Date(2098, 5, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2098, 6, 1, 0, 0, 0, 0, time.UTC)
+	donorID, _ := donor(t, pool)
+	seedGift(t, pool, donorID, "pi_rep_at_start", 1000, "MONTHLY", start, nil, "")
+	seedGift(t, pool, donorID, "pi_rep_before_end", 2000, "MONTHLY", end.Add(-time.Second), nil, "")
+	seedGift(t, pool, donorID, "pi_rep_at_end", 4000, "MONTHLY", end, nil, "")
+	seedGift(t, pool, donorID, "pi_rep_before_start", 8000, "MONTHLY", start.Add(-time.Second), nil, "")
+	report, err := svc.Report(context.Background(), token, start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mix := range report.GiftMix {
+		if mix.Frequency == "MONTHLY" && (mix.Gifts != 2 || mix.CollectedMinor != 3000) {
+			t.Fatalf("window [start,end) counted %d gifts / %d, want the two inside / 3000", mix.Gifts, mix.CollectedMinor)
+		}
+	}
+}
