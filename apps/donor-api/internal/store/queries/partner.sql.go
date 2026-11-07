@@ -1408,7 +1408,7 @@ func (q *Queries) StaffPartnerInitiatives(ctx context.Context, partnerID pgtype.
 const staffPartnersPage = `-- name: StaffPartnersPage :many
 SELECT p.id, p.organization, p.partner_type, p.company_code, p.workforce_size, p.match_rate_bp, p.match_cap_minor, p.approved_at,
   (SELECT count(*) FROM donor_partner_users u WHERE u.partner_id=p.id AND NOT u.disabled)::bigint AS user_count,
-  (SELECT count(*) FROM donor_initiatives i WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id))::bigint AS initiative_count
+  (SELECT count(*) FROM donor_initiative_partners ip WHERE ip.partner_id=p.id)::bigint AS initiative_count
 FROM donor_partner_signups p
 WHERE p.approved_at IS NOT NULL
 ORDER BY p.organization, p.id
