@@ -87,6 +87,36 @@ func (q *Queries) InsertObservedEvent(ctx context.Context, arg InsertObservedEve
 	return err
 }
 
+const insertObservedEvents = `-- name: InsertObservedEvents :exec
+INSERT INTO analytics_events(id,name,donor_id,source,properties,occurred_at,journey_id)
+SELECT unnest($1::uuid[]),unnest($2::text[]),$3::uuid,$4::text,
+ unnest($5::jsonb[]),unnest($6::timestamptz[]),unnest($7::uuid[])
+ON CONFLICT DO NOTHING
+`
+
+type InsertObservedEventsParams struct {
+	Ids        []pgtype.UUID        `json:"ids"`
+	Names      []string             `json:"names"`
+	DonorID    pgtype.UUID          `json:"donor_id"`
+	Source     string               `json:"source"`
+	Properties [][]byte             `json:"properties"`
+	OccurredAt []pgtype.Timestamptz `json:"occurred_at"`
+	Journeys   []pgtype.UUID        `json:"journeys"`
+}
+
+func (q *Queries) InsertObservedEvents(ctx context.Context, arg InsertObservedEventsParams) error {
+	_, err := q.db.Exec(ctx, insertObservedEvents,
+		arg.Ids,
+		arg.Names,
+		arg.DonorID,
+		arg.Source,
+		arg.Properties,
+		arg.OccurredAt,
+		arg.Journeys,
+	)
+	return err
+}
+
 const journeyReport = `-- name: JourneyReport :one
 WITH landings AS (
  SELECT journey_id,min(occurred_at) AS landed FROM analytics_events
