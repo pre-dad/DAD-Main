@@ -8,9 +8,13 @@ these with a later production database or describe sandbox awards as real recogn
 Use a distinct PostgreSQL database and cluster for each environment. Every process
 connects with its own login, which holds only what that process needs
 ([database roles](#database-roles)). Each process's database pool is sized for its role:
-the API opens up to 40 connections, and each worker, the monitor, migrations, the staff
-command, and `rekey` up to 2. A full deployment therefore needs up to 58 of PostgreSQL's
-default 100 `max_connections`, or 60 while a migration runs. When adding API replicas, raise `max_connections` (or put a
+the API opens up to 40 connections, and each worker, the monitor, the reconcile job,
+migrations, the staff command, and `rekey` up to 2 (`Pool` in `internal/dbroles/roles.go`;
+each login's `CONNECTION LIMIT` is set to the same number when you provision it). One
+replica of every process therefore needs up to 60 connections: the API's 40, six workers
+at 2, and the monitor, reconcile job, staff command and `rekey` at 2 each. A migration
+adds 2 while it runs. PostgreSQL's default `max_connections` is 100, of which 3 are
+reserved for superusers. When adding API replicas, raise `max_connections` (or put a
 [transaction-mode pooler](#connection-pooling) in front) so the total stays below it; `pool_max_conns=N` in a
 process's database URL overrides its size.
 
@@ -484,8 +488,9 @@ eligible volunteers. Republishing does not restart the job. Each batch rechecks 
 cancellation, start time, and notification choices; delivery rechecks the recipient again.
 Apply migration `0054_projection_schedules_and_event_fanout.sql` before these binaries.
 
-Deploy migration `0017_referral_corrections.sql` before binaries using projection rules
-version 6. Older projections then converge on the earliest verified successful payment
+History: migration `0017_referral_corrections.sql` had to be applied before binaries
+using projection rules version 6 (the current version is 12, `projectionRules` in
+`internal/store/financial.go`). Older projections then converge on the earliest verified successful payment
 through the normal refresh worker. Corrections, transferred referral totals, and new
 notification intents commit together. Monitor projection errors during convergence and
 use the staff `referral-corrections` export to inspect changed attribution. The migration
@@ -499,8 +504,8 @@ is logged as a worker step failure and retried an hour later without holding up
 projections. Retention is not a monitored queue, since a touch past retention waits up
 to an hour by design.
 
-The same pass deletes analytics events after 13 months and credentials once they have
-lapsed: sessions 90 days after their last credential expired, sign-in links and completed
+The same pass deletes company-code touches once they expire, analytics events after 13
+months, and credentials once they have lapsed: sessions 90 days after their last credential expired, sign-in links and completed
 sign-in emails after 30 days, and a phone code a day after it expired. Session audit rows
 (`donor_session_events`) are kept with no session.
 Mail workers claim a job, then send outside the donor lock, and Stripe calls for commands,
@@ -867,7 +872,7 @@ Run the API as for production, and run the projection worker alone, with
 dashboards then wait for it. Never run the message worker against
 a seeded database; with Compose, start only
 `docker compose --env-file .env.production --env-file .env.database -f docker-compose.prod.yml --profile workers up -d projection-worker`.
-Every scenario but referral capture only reads, including recurring, so Stripe
+Every scenario but referral capture and `event-reserve` only reads, including recurring, so Stripe
 configuration does not change the result; captures insert referral touches, so the
 database grows with each run. Checkout is not in the mix because it calls Stripe.
 
@@ -892,14 +897,20 @@ make loadtest-seeded LOAD_API=http://api.staging.internal:8002 LOAD_ORIGIN=https
   LOAD_FIXTURE=/secure/dad-load.json
 ```
 
-This runs a 60-second burst at 256 users with a 250 ms p99 budget for every scenario,
-then a five-minute soak at 32 users with 100 ms, and exits nonzero on any failed request
-or exceeded budget; an interrupted run writes the result so far and exits nonzero. For
+This target runs four loads in turn: a 60-second burst at 256 users with a 250 ms p99
+budget for every scenario, a five-minute soak at 32 users with 100 ms, a 60-second event
+spike at 256 users (`events` 55 and `event-detail` 45, 400 ms), and a five-minute
+engagement soak at 32 users (`dashboard` 40, `today-initiative` 30, `team` 30, 150 ms).
+Each exits nonzero on any failed request or exceeded budget; an interrupted run writes the result so far and exits nonzero. For
 other shapes run `go run ./cmd/loadtest` with `-duration`, `-concurrency` (up to 2,048),
 `-mix name=weight,...` and `-max-p99 250ms,dashboard=400ms`.
 The default weights are referral-lookup 30, referral-capture 12, referral-missing 3 (an
-unknown code, expecting 404), content 15, dashboard 18, gifts 7, sharing 5, profile 4,
-recurring 4 and annual-summary 2. Each signed-in read uses a donor drawn from the fixture;
+unknown code, expecting 404), spend 15, dashboard 18, gifts 7, sharing 5, profile 4,
+recurring 4 and annual-summary 2. The scenarios `events`, `event-detail`, `event-reserve`,
+`today-initiative` and `team` default to 0 and are enabled through `-mix`; the event
+scenarios use the event IDs the seeder writes to the fixture. `event-reserve` is a write
+that takes the event row lock and fills seats, so use it only on a disposable database.
+Each signed-in read uses a donor drawn from the fixture;
 `-native` (default 0.25) of users present it as the donor app's bearer token, the rest as
 the browser cookie.
 
@@ -932,8 +943,9 @@ acceptance also require explicit evidence.
 
 Run `./scripts/deploy.sh monitor [--max-age 10m]` (or `go run ./cmd/monitor` from
 `apps/donor-api` with the database environment loaded). It emits only aggregate JSON counts,
-parked counts, and oldest due age for Stripe, projections, financial mail, login mail,
-email changes, push notifications, and subscriptions. It exits nonzero if any job is parked or a due item is
+parked counts, and oldest due age for Stripe, projections, financial mail (including
+partner messages), login mail, email changes, push notifications, deleted-account
+reversals, and subscriptions. It exits nonzero if any job is parked or a due item is
 older than five minutes; `--max-age 10m` changes the age threshold. Future scheduled sends
 are excluded. An ongoing subscription last synced before its billing period ended is due
 a sync one day after that end, when Stripe has renewed or ended it: one still due after
@@ -1072,6 +1084,10 @@ and production image, Compose and ingress checks. Changes to shared scripts,
 contracts, Makefile and Docker inputs trigger their dependent jobs. Pushes to
 `dev` and `main` run the full suite.
 
+`deploy.yml` rolls the application to ECS: staging on a merge to `dev`, production on a
+merge to `main` behind the `production` environment's reviewer. `cloudflare-ranges.yml`
+checks weekly that the committed Cloudflare address ranges are current.
+
 The mobile workflow validates and bundles the contract, then compiles and tests
 it with the pinned Swift package dependencies. Only matching mobile version tags
 publish a release; pull requests cannot publish artifacts as releases.
@@ -1163,7 +1179,10 @@ The web Apple and Google authorization-code flows use these server-only variable
   client-secret JWT, renewed before its expiry).
 - `DONOR_OAUTH_GOOGLE_CLIENT_ID` and `DONOR_OAUTH_GOOGLE_CLIENT_SECRET`.
 
-Register the exact redirect URLs `${DONOR_PUBLIC_ORIGIN}/account/oauth/apple` and
+`DONOR_PUBLIC_ORIGIN` is compiled into the web image. The shipped `docker-compose.prod.yml`
+does not yet pass these four variables to the `web` container's runtime environment, and the
+callback route answers 503 without them, so add them to the `web` service's `environment`
+before enabling these flows with Compose. Register the exact redirect URLs `${DONOR_PUBLIC_ORIGIN}/account/oauth/apple` and
 `${DONOR_PUBLIC_ORIGIN}/account/oauth/google` with the providers. Include the web
 client IDs in the corresponding `DONOR_OIDC_*_CLIENT_ID` audience allowlists and use
 `DONOR_OIDC_MODE=live`. Apple requires HTTPS for its cross-site form-post callback.
