@@ -15,6 +15,8 @@ import (
 
 // Frozen from the former backend's stringprep and Unicode 3.2 normalization data.
 // Changes require identity compatibility review, not dependency regeneration.
+// The exporter is apps/api/tests/export_donor_identity.py at commit c0b2bbb; the
+// scalar digest in testdata/identity.json pins the result for every code point.
 //
 //go:embed tables.json
 var encodedTables []byte
