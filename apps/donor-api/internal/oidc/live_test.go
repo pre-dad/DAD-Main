@@ -251,6 +251,28 @@ func TestLiveVerifierProviderOutage(t *testing.T) {
 	}
 }
 
+func TestLiveVerifierBacksOffFailedFetches(t *testing.T) {
+	p := newProvider(t)
+	p.down.Store(true)
+	now := issued
+	v := p.verifier(now)
+	v.now = func() time.Time { return now }
+	token := p.sign(rs256("k1"), googleClaims())
+	for range 3 {
+		if _, err := v.Verify(context.Background(), Google, token); !errors.Is(err, ErrKeys) {
+			t.Fatalf("an outage: %v; want ErrKeys", err)
+		}
+	}
+	if p.fetches.Load() != 1 {
+		t.Fatalf("%d fetches during one backoff window; want 1", p.fetches.Load())
+	}
+	now = now.Add(2 * keysRefetchGap)
+	p.down.Store(false)
+	if _, err := v.Verify(context.Background(), Google, token); err != nil || p.fetches.Load() != 2 {
+		t.Fatalf("after the window: %v with %d fetches; want a successful refetch", err, p.fetches.Load())
+	}
+}
+
 func TestLiveVerifierAcceptsEveryConfiguredAudience(t *testing.T) {
 	p := newProvider(t)
 	v := p.verifier(issued)

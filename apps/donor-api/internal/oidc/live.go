@@ -53,8 +53,9 @@ type liveVerifier struct {
 	client    *http.Client
 	now       func() time.Time
 
-	mu   sync.Mutex
-	sets map[Provider]*keySet
+	mu     sync.Mutex
+	sets   map[Provider]*keySet
+	failed map[Provider]time.Time
 }
 
 type keySet struct {
@@ -69,6 +70,7 @@ func newLiveVerifier(clientIDs map[Provider][]string) *liveVerifier {
 		client:    &http.Client{Timeout: 5 * time.Second},
 		now:       time.Now,
 		sets:      map[Provider]*keySet{},
+		failed:    map[Provider]time.Time{},
 	}
 }
 
@@ -160,9 +162,9 @@ func (v *liveVerifier) key(ctx context.Context, provider Provider, kid string) (
 			return nil, ErrToken
 		}
 	}
-	keys, err := v.fetch(ctx, provider)
-	if err != nil {
-		// A provider outage should not end sign-in while the key is still known.
+	// A provider outage should not end sign-in while the key is still known,
+	// nor make every sign-in wait out a failing fetch while holding the lock.
+	stale := func(err error) (*rsa.PublicKey, error) {
 		if set != nil {
 			if key, ok := set.keys[kid]; ok {
 				return key, nil
@@ -170,6 +172,15 @@ func (v *liveVerifier) key(ctx context.Context, provider Provider, kid string) (
 		}
 		return nil, err
 	}
+	if failedAt, ok := v.failed[provider]; ok && now.Sub(failedAt) < keysRefetchGap {
+		return stale(ErrKeys)
+	}
+	keys, err := v.fetch(ctx, provider)
+	if err != nil {
+		v.failed[provider] = now
+		return stale(err)
+	}
+	delete(v.failed, provider)
 	v.sets[provider] = &keySet{keys: keys, fetchedAt: now}
 	if key, ok := keys[kid]; ok {
 		return key, nil
