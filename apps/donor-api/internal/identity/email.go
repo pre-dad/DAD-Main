@@ -54,8 +54,12 @@ func ascii(value string) bool {
 	return true
 }
 
+// maxEmailRunes bounds an address before normalization, whose canonical
+// reordering is quadratic in the length of a label.
+const maxEmailRunes = 320
+
 func NormalizeEmail(value string) (string, error) {
-	if !utf8.ValidString(value) {
+	if !utf8.ValidString(value) || utf8.RuneCountInString(value) > maxEmailRunes {
 		return "", ErrEmail
 	}
 	value = TrimSpace(value)

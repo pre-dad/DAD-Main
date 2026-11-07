@@ -64,7 +64,7 @@ func (a *api) ingestAnalytics(w http.ResponseWriter, r *http.Request) {
 		if !native(r) && len(events) > 0 {
 			var journey pgtype.UUID
 			if journey.Scan(events[0].JourneyID) == nil && store.ValidRequestID(journey) {
-				a.setCookie(w, "dad_analytics_journey", journey.String(), 86400, http.SameSiteLaxMode)
+				a.setCookie(w, journeyCookie, journey.String(), 86400, http.SameSiteLaxMode)
 			}
 		}
 		return map[string]int{"accepted": len(events)}, nil
