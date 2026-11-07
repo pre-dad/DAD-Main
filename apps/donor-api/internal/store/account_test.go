@@ -149,3 +149,61 @@ func TestLoginQueueDeduplicatesConcurrentRequests(t *testing.T) {
 		t.Fatal("disabled account distinguishable")
 	}
 }
+
+func TestClaimDeniesUnknownExpiredAndDisabledProofsAndSignOutRevokes(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	id, _ := donor(t, pool)
+	accountCleanup(t, pool, id)
+	ctx := context.Background()
+	service := AccountService{DB: api}
+	sessions := func() (count int) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_sessions WHERE donor_id=$1", id).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+	if _, err := service.ClaimAccount(ctx, "unknown-proof", "", Client{}); !errors.Is(err, ErrDenied) {
+		t.Fatalf("unknown proof accepted: %v", err)
+	}
+	expired := link(t, pool, id, time.Now().UTC())
+	if _, err := pool.Exec(ctx, "UPDATE donor_login_links SET expires_at=now()-interval '1 second' WHERE donor_id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ClaimAccount(ctx, expired, "", Client{}); !errors.Is(err, ErrDenied) {
+		t.Fatalf("expired proof accepted: %v", err)
+	}
+	disabled := link(t, pool, id, time.Now().UTC())
+	if _, err := pool.Exec(ctx, "UPDATE donors SET disabled=true WHERE id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ClaimAccount(ctx, disabled, "", Client{}); !errors.Is(err, ErrDenied) {
+		t.Fatalf("disabled account claimed: %v", err)
+	}
+	var claimed *time.Time
+	if err := pool.QueryRow(ctx, "SELECT claimed_at FROM donors WHERE id=$1", id).Scan(&claimed); err != nil || claimed != nil ||
+		sessions() != 0 {
+		t.Fatal("a denied claim changed the account", claimed, err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE donors SET disabled=false WHERE id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	tokens, err := service.ClaimAccount(ctx, link(t, pool, id, time.Now().UTC()), "", Client{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := queries.New(pool)
+	if _, err = authenticate(ctx, q, tokens.Access, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.SignOut(ctx, tokens.Access); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = authenticate(ctx, q, tokens.Access, time.Now()); !errors.Is(err, ErrDenied) {
+		t.Fatalf("signed-out session still authenticates: %v", err)
+	}
+	if err = service.SignOut(ctx, "never-issued"); err != nil {
+		t.Fatalf("signing out an unknown session failed: %v", err)
+	}
+}

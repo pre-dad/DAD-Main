@@ -97,6 +97,7 @@ func TestStaffFailedPaymentsListStatesAndAudit(t *testing.T) {
 		}
 	}
 
+	reads := 0
 	find := func(state string) map[pgtype.UUID]FailedPayment {
 		t.Helper()
 		out := map[pgtype.UUID]FailedPayment{}
@@ -106,6 +107,7 @@ func TestStaffFailedPaymentsListStatesAndAudit(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			reads++
 			if len(got.Payments) > pageSize {
 				t.Fatal("page exceeds its bound", len(got.Payments))
 			}
@@ -146,7 +148,7 @@ func TestStaffFailedPaymentsListStatesAndAudit(t *testing.T) {
 	}
 	var audited int
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE actor_id=$1 AND action='payments.failed_list'", staff).Scan(&audited); err != nil ||
-		audited != 4 {
+		audited != reads {
 		t.Fatal("failed-payment reads not audited", audited, err)
 	}
 }
@@ -165,25 +167,31 @@ func TestStaffFailedPaymentsKeysetPagesAreStable(t *testing.T) {
 	if err != nil || len(first.Payments) != pageSize || first.NextCursor == nil {
 		t.Fatalf("first page: %d %v %v", len(first.Payments), first.NextCursor, err)
 	}
-	// A failure recorded after the first page must not shift the second one.
+	// A failure recorded after the first page must not shift the later ones.
 	_, newest := failedPeriod(t, pool, "FAILED", 0, 0)
-	second, err := s.FailedPayments(ctx, token, FailedInGrace, *first.NextCursor)
-	if err != nil {
-		t.Fatal(err)
-	}
 	seen := map[pgtype.UUID]bool{}
-	for _, p := range append(first.Payments, second.Payments...) {
-		if seen[p.PeriodID] {
-			t.Fatal("row repeated across pages")
-		}
+	for _, p := range first.Payments {
 		seen[p.PeriodID] = true
+	}
+	for next := first.NextCursor; next != nil; {
+		page, err := s.FailedPayments(ctx, token, FailedInGrace, *next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range page.Payments {
+			if seen[p.PeriodID] {
+				t.Fatal("row repeated across pages")
+			}
+			seen[p.PeriodID] = true
+		}
+		next = page.NextCursor
 	}
 	if seen[newest] {
 		t.Fatal("a row newer than the cursor appeared on a later page")
 	}
 	for period := range want {
 		if !seen[period] {
-			t.Fatal("fixture missing from the two pages", period)
+			t.Fatal("fixture missing from the pages", period)
 		}
 	}
 }
