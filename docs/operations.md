@@ -795,7 +795,7 @@ not yet granted no longer match under a new key, so re-import the file after cha
 Re-importing is safe and keeps each address's earliest sign-up. Qualifying claims have
 no redemption expiry; a later account claim still earns the badge.
 
-The enrolment CSV has headers only until R2. Keep exports private and apply an approved
+There is no enrolment export before R2. Keep exports private and apply an approved
 retention policy. Sensitive source documents have separate authenticated downloads.
 
 ## Partner report artifacts

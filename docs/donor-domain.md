@@ -208,5 +208,4 @@ An address already attached to another donor is rejected after verification; acc
 are never merged automatically. Historical checkout and processor billing records retain
 their original details.
 
-The inactive enrolment queue and header-only export exist at R1. There is no enrolment
-trigger until R2; the [prepared confirmation wording](messaging.md) does not promise funds.
+R1 has no enrolment queue, export or trigger; all of that arrives with R2. The [prepared confirmation wording](messaging.md) does not promise funds.

@@ -6,7 +6,7 @@ Go workers reconcile signed Stripe events, refresh donor projections, apply refe
 retention, deliver email, and send donor app notifications.
 
 ```text
-Browser → Next.js /api/donor/* → Go HTTP API → PostgreSQL
+Browser → Next.js /api/* proxy → Go HTTP API → PostgreSQL
              ↓                     ↓               ↑
        Stripe-hosted UI        Stripe API      Go workers
                                                 ↓
@@ -156,7 +156,7 @@ before adoption; removal of obsolete deployed data is a separate operational dec
 ## Boundaries
 
 The donor product, the partner portal, staff operations, and marketing content run at R1.
-The recipient queue/export is inactive. There are no AI, evidence-processing, blockchain,
+There is no recipient or enrolment queue or export. There are no AI, evidence-processing, blockchain,
 recipient eligibility, or aid-payment services.
 
 This build is test-mode only. Readiness confirms a usable, migrated database; it does not
