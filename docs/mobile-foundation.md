@@ -10,16 +10,17 @@ Their screens and platform interactions are separate from the Go financial domai
 `make bundle-mobile MOBILE_BUNDLE_DIR=/tmp/dad-foundation` creates:
 
 - `openapi.json`: the complete canonical API.
-- `mobile.openapi.json`: native-admitted mutations, donor-account and public
-  initiative/event reads, and liveness,
-  derived from the canonical API without rewriting schemas or response variants.
+- `mobile.openapi.json`: native-admitted mutations, every bearer-authenticated read (donor
+  account, partner portal, application status), the public initiative and event reads, and
+  liveness, derived from the canonical API without rewriting schemas or response variants.
 - `swift.openapi.json`: the mobile API adapted for the pinned Apple generator, with
   equivalent nullable object/scalar states and an explicit literal-null type override.
 - `DADNullValue.swift`: the strict Codable implementation for that override.
 - `tokens.json`: platform-neutral design values, with `schema_version`.
 - `tokens.ts`, `DADTokens.swift`, `DADTokens.kt`: generated platform values.
 - `links.json`: approved account, proof, referral, and notification destinations.
-- `manifest.json`: bundle version, source Git revision, and SHA-256 of every other file.
+- `manifest.json`: bundle version, source repository and Git revision, and SHA-256 of every
+  other file.
 
 The mobile contract is an integration surface, not a decision to expose every operation
 in the first mobile product. Backend authorization remains authoritative. Native requests
@@ -27,8 +28,9 @@ call the API host directly with `X-DAD-Client: native`, no cookies or Origin, an
 access token when authenticated. Browser-only giving and staff operations stay on the web.
 
 After checks pass on the release commit, tag it `mobile-foundation-v<version>` (using the
-version in the file, for example `mobile-foundation-v2.7.0`) and push that tag. The mobile-foundation workflow verifies the tag
-matches the declared version and publishes the individual files as GitHub Release assets.
+version in the file, for example `mobile-foundation-v2.11.0`) and push that tag. The
+mobile-foundation workflow verifies the tag matches the declared version and publishes the
+individual files as GitHub Release assets.
 Existing release assets are never overwritten. The workflow also retains a candidate
 bundle as an Actions artifact on normal branch and PR builds; those artifacts are not
 released versions. A release must be built from committed, clean sources.
@@ -40,7 +42,7 @@ the vendored contract without network access to this repository. A maintainer
 can obtain a release with:
 
 ```sh
-gh release download mobile-foundation-v2.7.0 --repo pre-dad/DAD-Main --dir /tmp/dad-foundation
+gh release download mobile-foundation-v2.11.0 --repo pre-dad/DAD-Main --dir /tmp/dad-foundation
 ```
 
 Use patch versions for equivalent packaging corrections, minor versions for compatible
@@ -76,8 +78,9 @@ Before it, `applyWithReceipt` was browser-only, so an app could not obtain a rec
   budget (60 per minute per client address); a 429 carries `Retry-After`.
 - Read the status with `applicationStatus` (`GET /donor/partner/application-status`),
   sending `X-DAD-Client: native` and `Authorization: Bearer <receipt>`. A receipt the
-  server does not know answers 401. Keep the receipt while the application is pending and
-  show the status card from it; discard it once the application is decided and shown.
+  server does not know, or one older than 30 days, answers 401. Keep the receipt while the
+  application is pending and show the status card from it; discard it once the application
+  is decided and shown, or on a 401.
   Keep it apart from donor and partner session tokens and send it only to this route.
 - `partnerRetainedReport` documents its `404` (an unknown, foreign or malformed report
   ID); the staff route `removeEventGuest`, outside the bundle, documents its 404 too.
@@ -319,8 +322,7 @@ retained; nullable enums explicitly include null. A null-only payment URL uses t
 `DADLiteralNull: DADNullValue` type override from the probe's configuration. Its supported
 schema placeholder is only a generator input: the custom Codable type accepts and emits
 literal null and rejects every non-null value. Apps adding payment-update operations must
-include that override and the bundled source. The iOS session client currently filters
-out those unrelated operations.
+include that override and the bundled source; DAD-iOS's generator configuration carries it.
 
 The probe no longer skips nullable fields. Unused public-import warnings emitted by the
 pinned generator with Swift 6.4 remain visible; no warning is suppressed.
@@ -334,7 +336,9 @@ and a migrated synthetic database, run:
 TEST_DATABASE_URL=postgresql://go_test:go_test@localhost:55440/donor_go make test-native-clients
 ```
 
-`DAD_IOS_DIR`, `DAD_ANDROID_DIR`, and `DAD_SWIFT_BUILD` override the checkout/build paths.
+`DAD_IOS_DIR`, `DAD_ANDROID_DIR`, and `DAD_SWIFT_BUILD` override the checkout/build paths;
+the defaults are `../dad-ios` and `../dad-android`, so set them when the checkouts are
+named `DAD-iOS` and `DAD-Android` on a case-sensitive file system.
 The command runs the backend's database-backed session lifecycle test, then holds open
 its test-only HTTPS server on loopback for the actual Swift URLSession and Kotlin Retrofit
 clients. Private temporary fixtures contain separate one-use proofs and the test server's
@@ -371,11 +375,12 @@ owns native presentation, lifecycle, secure credential storage, and platform int
 The R1 PRD defines the required donor and partner features; the native foundations
 are the transport and session starting point for those screens.
 
-The native foundations implement an authenticated read, single-flight
+Both apps implement the session lifecycle: authenticated reads, single-flight
 refresh and atomic token replacement, cancellation/timeouts, revoked-session handling,
-and local credential cleanup on logout against synthetic transports. Real API and device
-acceptance must prove the same behavior. A refresh response arriving after logout must
-never restore the session. Secure persistence must avoid logs and backups of credentials;
+and local credential cleanup on logout. The automated tests use synthetic transports, and
+the acceptance command below proves the same behavior against the real API; device
+acceptance remains open. A refresh response arriving after logout must never restore the
+session. Secure persistence must avoid logs and backups of credentials;
 Android uses encryption keys protected by Keystore, iOS uses Keychain.
 
 Link handling accepts only the configured HTTPS public origin and approved paths.
@@ -386,10 +391,11 @@ payloads select only approved relative destinations, never arbitrary URLs. OS as
 files require the final app identifiers and signing certificates, and a reachable direct
 API ingress is required for a real-device integration test. Neither is fabricated here.
 
-Production signing, camera/notification permission timing, analytics activation, and
-real-device/provider acceptance remain open. The R1 PRD defines donor and partner scope;
-the native foundations do not yet implement those product journeys. Offline financial
-mutations require a separate design rather than replaying commands blindly.
+Production signing, Apple and Google sign-in configuration, analytics activation, and
+real-device/provider acceptance remain open; each app's README lists what is wired against
+the API and what is switched off until configured. The R1 PRD defines donor and partner
+scope. Offline financial mutations require a separate design rather than replaying commands
+blindly.
 
 ## Partner sessions in the apps
 
