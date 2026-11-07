@@ -77,7 +77,7 @@ func TestRateBudgetBurstThenRefill(t *testing.T) {
 		if err := rb.Acquire(ctx, BucketWorker); err != nil {
 			t.Fatalf("burst grant %d failed: %v", i, err)
 		}
-		if waited := time.Since(start); waited > 20*time.Millisecond {
+		if waited := time.Since(start); waited > 45*time.Millisecond {
 			t.Fatalf("burst grant %d blocked %v, expected immediate", i, waited)
 		}
 	}

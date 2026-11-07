@@ -178,7 +178,11 @@ func TestContractDocumentsWrapperStatuses(t *testing.T) {
 			if name == "browser" || name == "app" {
 				rounds = 130
 			}
+			reported := false
 			for range rounds {
+				if reported {
+					break
+				}
 				r := routeRequest(route.pattern, "{}")
 				mark(r)
 				response := httptest.NewRecorder()
@@ -187,7 +191,7 @@ func TestContractDocumentsWrapperStatuses(t *testing.T) {
 				case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
 					if _, documented := op.Responses[strconv.Itoa(response.Code)]; !documented {
 						t.Errorf("%s: %s request got %d, which is not documented", route.pattern, name, response.Code)
-						rounds = 0
+						reported = true
 					}
 				}
 			}
