@@ -152,6 +152,10 @@ Some migrations and releases need more:
   from `/staff`.
 - `0008_referral_touch_retention` builds its indexes without `CONCURRENTLY`, blocking
   checkout writes while it runs; on a large database, migrate at a quiet time.
+- `0083_scan_free_lookups_and_credential_retention` builds its indexes without
+  `CONCURRENTLY` (migrations run in one transaction), blocking writes to each table while its
+  index builds. It is quick on a launch-sized database; on a large one, migrate at a quiet
+  time. It also lets a session be deleted while the audit rows that named it stay.
 - `0009_subscription_sync` adds the billing anchor that dates renewals. A
   subscription synced before it shows no anchor until the Stripe worker next syncs it, so
   start the workers promptly after `up`.
@@ -494,6 +498,11 @@ refreshes, until none remain. Concurrent projection workers share the work. A fa
 is logged as a worker step failure and retried an hour later without holding up
 projections. Retention is not a monitored queue, since a touch past retention waits up
 to an hour by design.
+
+The same pass deletes analytics events after 13 months and credentials once they have
+lapsed: sessions 90 days after their last credential expired, sign-in links and completed
+sign-in emails after 30 days, and a phone code a day after it expired. Session audit rows
+(`donor_session_events`) are kept with no session.
 Mail workers claim a job, then send outside the donor lock, and Stripe calls for commands,
 refunds, card setup, and webhooks likewise run without it, so a slow provider cannot block
 payments or staff actions for the same donor.

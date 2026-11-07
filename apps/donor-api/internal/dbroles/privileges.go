@@ -50,13 +50,14 @@ var grants = map[string]map[Role]string{
 	"donor_sessions": {
 		API:              "SELECT, INSERT, UPDATE",
 		StripeWorker:     "SELECT",
-		ProjectionWorker: "SELECT",
+		ProjectionWorker: "SELECT, DELETE",
 		PushWorker:       "SELECT, UPDATE",
 	},
 	"donor_session_events": {API: "SELECT, INSERT"},
-	"donor_login_links":    {API: "SELECT, UPDATE", LoginEmailWorker: "INSERT"},
+	"donor_login_links":    {API: "SELECT, UPDATE", LoginEmailWorker: "INSERT", ProjectionWorker: "SELECT (id, expires_at), DELETE"},
 	"donor_login_emails": {API: "SELECT, INSERT", StripeWorker: "SELECT, INSERT", LoginEmailWorker: "SELECT, UPDATE",
-		Monitor: "SELECT (attempts, available_at, completed_at)", Rekey: "SELECT (id, encrypted_token), UPDATE (encrypted_token)"},
+		ProjectionWorker: "SELECT (id, completed_at), DELETE",
+		Monitor:          "SELECT (attempts, available_at, completed_at)", Rekey: "SELECT (id, encrypted_token), UPDATE (encrypted_token)"},
 	"donor_email_changes": {API: "SELECT, INSERT, UPDATE", EmailChangeWorker: "SELECT, UPDATE",
 		Monitor: "SELECT (attempts, available_at, sent_at, stage)", Rekey: "SELECT (id, encrypted_token), UPDATE (encrypted_token)"},
 	"donor_identity_events": {API: "SELECT, INSERT"},
@@ -176,7 +177,7 @@ var grants = map[string]map[Role]string{
 	"donor_ceremonies": {API: "SELECT, INSERT, DELETE"},
 
 	"donor_passwords":       {API: "SELECT, INSERT, UPDATE, DELETE"},
-	"donor_phone_codes":     {API: "SELECT, INSERT, UPDATE, DELETE"},
+	"donor_phone_codes":     {API: "SELECT, INSERT, UPDATE, DELETE", ProjectionWorker: "SELECT (phone, expires_at), DELETE"},
 	"donor_oidc_identities": {API: "SELECT, INSERT, UPDATE, DELETE"},
 	"donor_company_touches": {
 		API:              "SELECT, INSERT, UPDATE (company_code, touched_at, expires_at), DELETE",
