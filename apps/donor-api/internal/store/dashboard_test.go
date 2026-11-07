@@ -221,3 +221,77 @@ func TestDashboardSeparatesRankingOptOutFromNoRankYet(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardIsPreparingUntilTheDonorIsProjected(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	id := testID(t)
+	mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", id, id.String()+"@example.org")
+	result, err := dashboard(ctx, queries.New(tx), queries.Donor{ID: id}, time.Now().UTC())
+	if err != nil || result.State != "preparing" || result.Referrals != nil || result.Streak != nil {
+		t.Fatalf("unprojected donor: %+v %v", result, err)
+	}
+}
+
+func TestDashboardShowsStreakAndImpactOnlyFromFreshProjections(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	grace := now.Add(48 * time.Hour)
+	id := testID(t)
+	mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", id, id.String()+"@example.org")
+	mustExec(
+		t,
+		tx,
+		`INSERT INTO donor_metric_projections(id,donor_id,net_minor,current_streak,at_risk,grace_ends_at,streak_since,computed_at,next_refresh_at)
+		VALUES($1,$2,4200,3,true,$3,$4,$5,$6)`,
+		testID(t),
+		id,
+		grace,
+		now.Add(-10*24*time.Hour),
+		now,
+		now.Add(time.Hour),
+	)
+	q := queries.New(tx)
+	result, err := dashboard(ctx, q, queries.Donor{ID: id}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Streak == nil || result.Streak.Current != 3 || !result.Streak.AtRisk || result.Streak.GraceEndsAt == nil ||
+		!result.Streak.GraceEndsAt.Equal(grace) || result.Streak.Ladder == nil || result.Streak.Ladder.Days < 10 {
+		t.Fatalf("fresh streak: %+v", result.Streak)
+	}
+	if result.Impact.GivenMinor == nil || *result.Impact.GivenMinor != 4200 || result.Impact.Currency != "USD" ||
+		result.Impact.InitiativesFunded != 0 || result.Impact.EventsVolunteered != 0 || result.Network != nil || result.FoundingDonor {
+		t.Fatalf("impact for a donor with no activity: %+v network=%+v founding=%v", result.Impact, result.Network, result.FoundingDonor)
+	}
+
+	// A projection no longer fresh must not claim the streak is alive, but the
+	// donor's own net giving remains true and stays visible.
+	mustExec(t, tx, "UPDATE donor_metric_projections SET next_refresh_at=$2 WHERE donor_id=$1", id, now)
+	if result, err = dashboard(ctx, q, queries.Donor{ID: id}, now); err != nil || result.Streak != nil || result.Impact.GivenMinor == nil {
+		t.Fatalf("stale projection: streak=%+v given=%v err=%v", result.Streak, result.Impact.GivenMinor, err)
+	}
+
+	// No streak at all, and net giving not yet computed: neither is invented.
+	mustExec(
+		t,
+		tx,
+		"UPDATE donor_metric_projections SET next_refresh_at=$2,current_streak=NULL,net_minor=NULL WHERE donor_id=$1",
+		id,
+		now.Add(time.Hour),
+	)
+	if result, err = dashboard(ctx, q, queries.Donor{ID: id}, now); err != nil || result.Streak != nil || result.Impact.GivenMinor != nil {
+		t.Fatalf("incomplete projection: streak=%+v given=%v err=%v", result.Streak, result.Impact.GivenMinor, err)
+	}
+}
