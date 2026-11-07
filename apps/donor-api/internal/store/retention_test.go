@@ -310,3 +310,116 @@ SELECT gen_random_uuid(),'app_opened','WEB',$1,$1,$2 FROM generate_series(1,$3::
 		t.Fatalf("second pass left %d events, want only the fresh one: %v", count(), err)
 	}
 }
+
+// Serial, because every pass purges every lapsed credential in the shared
+// database and would delete this test's rows from under a parallel pass.
+func TestTouchRetentionPurgesLapsedCredentialsAndKeepsLiveOnes(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	id, _ := donor(t, pool)
+	now := time.Now().UTC()
+	longAgo := now.Add(-sessionRetention - 24*time.Hour)
+	recent := now.Add(-time.Hour)
+
+	session := func(expires time.Time, refreshExpires *time.Time) pgtype.UUID {
+		t.Helper()
+		session := testID(t)
+		mustExec(
+			t,
+			pool,
+			`INSERT INTO donor_sessions(id,donor_id,token_hash,expires_at,client,refresh_family_hash,refresh_hash,refresh_expires_at)
+SELECT $1,$2,$3::varchar,$4,CASE WHEN $5::timestamptz IS NULL THEN 'BROWSER' ELSE 'APP' END,
+ CASE WHEN $5::timestamptz IS NULL THEN NULL ELSE $3::varchar END,CASE WHEN $5::timestamptz IS NULL THEN NULL ELSE $3::varchar END,$5`,
+			session,
+			id,
+			HashToken(session.String()),
+			expires,
+			refreshExpires,
+		)
+		return session
+	}
+	lapsedBrowser := session(longAgo, nil)
+	lapsedApp := session(recent, &longAgo)
+	liveApp := session(longAgo, &now)
+	recentBrowser := session(recent, nil)
+	mustExec(
+		t,
+		pool,
+		`INSERT INTO donor_session_events(id,donor_id,session_id,action) VALUES ($1,$2,$3,'SIGNED_IN')`,
+		testID(t),
+		id,
+		lapsedBrowser,
+	)
+
+	oldLink, freshLink := testID(t), testID(t)
+	for link, expires := range map[pgtype.UUID]time.Time{oldLink: now.Add(-loginRetention - time.Hour), freshLink: recent} {
+		mustExec(t, pool, `INSERT INTO donor_login_links(id,donor_id,token_hash,expires_at) VALUES ($1,$2,$3,$4)`,
+			link, id, HashToken(link.String()), expires)
+	}
+	oldEmail, freshEmail, openEmail := testID(t), testID(t), testID(t)
+	for email, completed := range map[pgtype.UUID]*time.Time{
+		oldEmail: new(now.Add(-loginRetention - time.Hour)), freshEmail: &recent, openEmail: nil,
+	} {
+		mustExec(
+			t,
+			pool,
+			`INSERT INTO donor_login_emails(id,donor_id,available_at,completed_at) VALUES ($1,$2,$3,$4)`,
+			email,
+			id,
+			now,
+			completed,
+		)
+	}
+	const oldPhone, freshPhone = "+14155550188", "+14155550189"
+	mustExec(
+		t,
+		pool,
+		`INSERT INTO donor_phone_codes(phone,code_hash,expires_at) VALUES ($1::text,'h',$2::timestamptz),($3::text,'h',$4::timestamptz)`,
+		oldPhone,
+		now.Add(-phoneCodeRetention-time.Hour),
+		freshPhone,
+		recent,
+	)
+	t.Cleanup(func() {
+		cleanExec(t, "DELETE FROM donor_phone_codes WHERE phone IN ($1,$2)", oldPhone, freshPhone)
+		cleanExec(t, "DELETE FROM donor_session_events WHERE donor_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_login_emails WHERE donor_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_login_links WHERE donor_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_sessions WHERE donor_id=$1", id)
+	})
+
+	retention := &TouchRetention{DB: as(t, dbroles.ProjectionWorker)}
+	if _, err := retention.PurgeNext(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	exists := func(table, key string, value any) bool {
+		t.Helper()
+		var found bool
+		if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM "+table+" WHERE "+key+"=$1)", value).Scan(&found); err != nil {
+			t.Fatal(err)
+		}
+		return found
+	}
+	for name, want := range map[string]struct{ got, want bool }{
+		"lapsed browser session": {exists("donor_sessions", "id", lapsedBrowser), false},
+		"lapsed app session":     {exists("donor_sessions", "id", lapsedApp), false},
+		"live app session":       {exists("donor_sessions", "id", liveApp), true},
+		"recent browser session": {exists("donor_sessions", "id", recentBrowser), true},
+		"old login link":         {exists("donor_login_links", "id", oldLink), false},
+		"fresh login link":       {exists("donor_login_links", "id", freshLink), true},
+		"old login email":        {exists("donor_login_emails", "id", oldEmail), false},
+		"fresh login email":      {exists("donor_login_emails", "id", freshEmail), true},
+		"unfinished login email": {exists("donor_login_emails", "id", openEmail), true},
+		"old phone code":         {exists("donor_phone_codes", "phone", oldPhone), false},
+		"fresh phone code":       {exists("donor_phone_codes", "phone", freshPhone), true},
+	} {
+		if want.got != want.want {
+			t.Errorf("%s present = %t, want %t", name, want.got, want.want)
+		}
+	}
+	var kept int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_session_events WHERE donor_id=$1 AND session_id IS NULL", id).Scan(&kept); err != nil ||
+		kept != 1 {
+		t.Fatalf("session audit rows kept without their session = %d, want 1: %v", kept, err)
+	}
+}
