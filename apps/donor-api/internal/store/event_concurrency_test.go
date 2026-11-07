@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -186,5 +188,114 @@ func TestReservationRechecksStartAfterEventLock(t *testing.T) {
 				t.Fatalf("%s changed a closed reservation: %d seats, want %d", name, active, want)
 			}
 		})
+	}
+}
+
+func TestConcurrentReservationsNeverOversellAndCancellationsRefillSeats(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	cleanEvents(t, pool)
+	_, staff := staffFixture(t, pool, "SUPER_ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	in := eventInput("oversell", "SF", "94103", "COMMUNITY", 48*time.Hour)
+	const seats, donors = 3, 12
+	in.Capacity = seats
+	eventID, err := events.Create(ctx, staff, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, staff, eventID); err != nil {
+		t.Fatal(err)
+	}
+	tokens := make([]string, donors)
+	for i := range tokens {
+		id, token := signedInDonor(t, pool)
+		pushCleanupDonor(t, pool, id)
+		tokens[i] = token
+	}
+	reservations := ReservationService{DB: api}
+	run := func(action func(token string) error) {
+		t.Helper()
+		var wg sync.WaitGroup
+		errs := make(chan error, donors)
+		for _, token := range tokens {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := action(token); err != nil {
+					errs <- err
+				}
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			t.Error(err)
+		}
+	}
+	counts := func() (reserved, waitlisted int) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE status='RESERVED'), count(*) FILTER(WHERE status='WAITLISTED')
+			FROM donor_event_reservations WHERE event_id=$1`, eventID).Scan(&reserved, &waitlisted); err != nil {
+			t.Fatal(err)
+		}
+		return reserved, waitlisted
+	}
+
+	run(func(token string) error {
+		_, err := reservations.Reserve(ctx, token, eventID)
+		return err
+	})
+	if reserved, waitlisted := counts(); reserved != seats || waitlisted != donors-seats {
+		t.Fatalf(
+			"after %d concurrent reservations: %d reserved, %d waitlisted; want %d and %d",
+			donors,
+			reserved,
+			waitlisted,
+			seats,
+			donors-seats,
+		)
+	}
+
+	var holders []string
+	rows, err := pool.Query(ctx, `SELECT s.token_hash FROM donor_event_reservations r JOIN donor_sessions s ON s.donor_id=r.donor_id
+		WHERE r.event_id=$1 AND r.status='RESERVED'`, eventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var hash string
+		if err := rows.Scan(&hash); err != nil {
+			t.Fatal(err)
+		}
+		holders = append(holders, hash)
+	}
+	rows.Close()
+	if len(holders) != seats {
+		t.Fatalf("seat holders with sessions = %d, want %d", len(holders), seats)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, donors)
+	for _, token := range tokens {
+		if !slices.Contains(holders, HashToken(token)) {
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := reservations.Cancel(ctx, token, eventID); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	if reserved, waitlisted := counts(); reserved != seats || waitlisted != donors-2*seats {
+		t.Fatalf("after concurrent cancellations: %d reserved, %d waitlisted; want %d and %d", reserved, waitlisted, seats, donors-2*seats)
 	}
 }
