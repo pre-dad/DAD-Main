@@ -62,7 +62,7 @@ export function PasswordAccess({ setup = false }: { setup?: boolean }) {
             required
           />
         </label>
-        <button type="submit" disabled={busy}>
+        <button className="button full" type="submit" disabled={busy}>
           {setup ? "Save password" : "Sign in"}
         </button>
         <Announcer status={status} alert={error} />

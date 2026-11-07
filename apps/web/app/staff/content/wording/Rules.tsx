@@ -129,7 +129,7 @@ export function Rules() {
               </label>
             </fieldset>
           ))}
-          <button type="submit" disabled={busy}>
+          <button className="button" type="submit" disabled={busy}>
             Save earning rules and artwork
           </button>
         </form>
