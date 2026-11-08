@@ -3786,7 +3786,7 @@
       }
      },
      {
-      "$ref": "#/components/parameters/Offset"
+      "$ref": "#/components/parameters/Cursor"
      }
     ],
     "responses": {
@@ -3914,7 +3914,7 @@
       "description": "A malformed ID is 404, like an unknown one."
      },
      {
-      "$ref": "#/components/parameters/Offset"
+      "$ref": "#/components/parameters/Cursor"
      }
     ],
     "responses": {
@@ -3970,7 +3970,7 @@
       "description": "A malformed ID is 404, like an unknown one."
      },
      {
-      "$ref": "#/components/parameters/Offset"
+      "$ref": "#/components/parameters/Cursor"
      }
     ],
     "responses": {
@@ -4090,7 +4090,7 @@
     ],
     "parameters": [
      {
-      "$ref": "#/components/parameters/Offset"
+      "$ref": "#/components/parameters/Cursor"
      }
     ],
     "responses": {
@@ -8539,10 +8539,18 @@
             ],
             "additionalProperties": false
            }
+          },
+          "next_cursor": {
+           "type": [
+            "string",
+            "null"
+           ],
+           "description": "Cursor of the next page, or null on the last page."
           }
          },
          "required": [
-          "applications"
+          "applications",
+          "next_cursor"
          ],
          "additionalProperties": false
         }
@@ -8555,10 +8563,18 @@
      "403": {
       "$ref": "#/components/responses/Forbidden"
      },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
-    }
+    },
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/Cursor"
+     }
+    ]
    }
   },
   "/donor/staff/partners/{appID}/approve": {
@@ -11950,7 +11966,7 @@
     "description": "Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows.",
     "schema": {
      "type": "string",
-     "maxLength": 200
+     "maxLength": 600
     }
    },
    "FailedPaymentState": {
@@ -13476,19 +13492,17 @@
        "$ref": "#/components/schemas/DonorSummary"
       }
      },
-     "next_offset": {
+     "next_cursor": {
       "type": [
-       "integer",
+       "string",
        "null"
       ],
-      "format": "int64",
-      "description": "Offset of the next page, or null on the last page.",
-      "minimum": 0
+      "description": "Cursor of the next page, or null on the last page."
      }
     },
     "required": [
      "donors",
-     "next_offset"
+     "next_cursor"
     ],
     "additionalProperties": false
    },
@@ -13780,19 +13794,17 @@
        "$ref": "#/components/schemas/AuditEvent"
       }
      },
-     "next_offset": {
+     "next_cursor": {
       "type": [
-       "integer",
+       "string",
        "null"
       ],
-      "format": "int64",
-      "description": "Offset of the next page, or null on the last page.",
-      "minimum": 0
+      "description": "Cursor of the next page, or null on the last page."
      }
     },
     "required": [
      "events",
-     "next_offset"
+     "next_cursor"
     ],
     "additionalProperties": false
    },
@@ -13832,6 +13844,10 @@
      "available_at": {
       "type": "string",
       "format": "date-time"
+     },
+     "created_at": {
+      "type": "string",
+      "format": "date-time"
      }
     },
     "required": [
@@ -13841,7 +13857,8 @@
      "completed_at",
      "last_error",
      "suppressed_reason",
-     "available_at"
+     "available_at",
+     "created_at"
     ],
     "additionalProperties": false
    },
@@ -13854,19 +13871,17 @@
        "$ref": "#/components/schemas/StaffMessage"
       }
      },
-     "next_offset": {
+     "next_cursor": {
       "type": [
-       "integer",
+       "string",
        "null"
       ],
-      "format": "int64",
-      "description": "Offset of the next page, or null on the last page.",
-      "minimum": 0
+      "description": "Cursor of the next page, or null on the last page."
      }
     },
     "required": [
      "messages",
-     "next_offset"
+     "next_cursor"
     ],
     "additionalProperties": false
    },
@@ -13919,6 +13934,10 @@
        "null"
       ],
       "format": "date-time"
+     },
+     "created_at": {
+      "type": "string",
+      "format": "date-time"
      }
     },
     "required": [
@@ -13930,7 +13949,8 @@
      "period_end",
      "reason",
      "status",
-     "completed_at"
+     "completed_at",
+     "created_at"
     ],
     "additionalProperties": false
    },
@@ -13943,19 +13963,17 @@
        "$ref": "#/components/schemas/StaffAction"
       }
      },
-     "next_offset": {
+     "next_cursor": {
       "type": [
-       "integer",
+       "string",
        "null"
       ],
-      "format": "int64",
-      "description": "Offset of the next page, or null on the last page.",
-      "minimum": 0
+      "description": "Cursor of the next page, or null on the last page."
      }
     },
     "required": [
      "actions",
-     "next_offset"
+     "next_cursor"
     ],
     "additionalProperties": false
    },

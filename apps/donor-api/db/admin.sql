@@ -1,7 +1,7 @@
 -- name: StaffDonorSearch :many
 SELECT id,email,public_name,claimed_at,disabled FROM donors
-WHERE email ILIKE sqlc.arg(term)::text ESCAPE '\'
-ORDER BY email,id LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
+WHERE email ILIKE sqlc.arg(term)::text ESCAPE '\' AND email > sqlc.arg(after_email)::text
+ORDER BY email LIMIT 51;
 
 -- name: StaffDonorByID :one
 SELECT * FROM donors WHERE id=$1;
@@ -12,13 +12,19 @@ JOIN donor_metric_projections p ON p.donor_id=d.id WHERE p.referrer_id=$1
 ORDER BY d.id LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
 
 -- name: StaffAuditPage :many
+-- Newest first, keyset-paged on (created_at DESC, id). The first page passes an
+-- infinite cursor_at, so the bound is never null and the index range stays usable.
 SELECT id,actor_id,action,target,created_at,details FROM donor_staff_audit
-ORDER BY created_at DESC,id LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
+WHERE created_at <= sqlc.arg(cursor_at)::timestamptz
+  AND (created_at < sqlc.arg(cursor_at)::timestamptz OR id > sqlc.arg(cursor_id)::uuid)
+ORDER BY created_at DESC,id LIMIT 51;
 
 -- name: StaffMessagePage :many
-SELECT id,kind,attempts,completed_at,last_error,suppressed_reason,available_at
-FROM donor_messages WHERE donor_id=$1
-ORDER BY created_at DESC,id LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
+SELECT id,kind,attempts,completed_at,last_error,suppressed_reason,available_at,created_at
+FROM donor_messages WHERE donor_id=sqlc.arg(donor_id)::uuid
+  AND created_at <= sqlc.arg(cursor_at)::timestamptz
+  AND (created_at < sqlc.arg(cursor_at)::timestamptz OR id > sqlc.arg(cursor_id)::uuid)
+ORDER BY created_at DESC,id LIMIT 51;
 
 -- name: StaffMessageByID :one
 SELECT * FROM donor_messages WHERE id=$1;
@@ -30,12 +36,14 @@ SELECT * FROM donor_messages WHERE dedup_key=$1;
 SELECT EXISTS(SELECT 1 FROM donor_messages WHERE donor_id=$1 AND kind=$2 AND created_at>$3);
 
 -- name: StaffActionPage :many
-SELECT id,actor_id,kind,target_id,amount_minor,period_end,reason,status,completed_at
-FROM donor_staff_actions WHERE donor_id=$1 ORDER BY created_at DESC,id
-LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
+SELECT id,actor_id,kind,target_id,amount_minor,period_end,reason,status,completed_at,created_at
+FROM donor_staff_actions WHERE donor_id=sqlc.arg(donor_id)::uuid
+  AND created_at <= sqlc.arg(cursor_at)::timestamptz
+  AND (created_at < sqlc.arg(cursor_at)::timestamptz OR id > sqlc.arg(cursor_id)::uuid)
+ORDER BY created_at DESC,id LIMIT 51;
 
 -- name: StaffPendingAction :one
-SELECT id,actor_id,kind,target_id,amount_minor,period_end,reason,status,completed_at
+SELECT id,actor_id,kind,target_id,amount_minor,period_end,reason,status,completed_at,created_at
 FROM donor_staff_actions
 WHERE donor_id=$1 AND actor_id=$2 AND target_id=$3 AND kind=$4 AND status='AUTHORIZED'
 ORDER BY created_at DESC,id LIMIT 1;

@@ -24,7 +24,7 @@ type DonorSummary struct {
 
 type DonorSearch struct {
 	Donors     []DonorSummary `json:"donors"`
-	NextOffset *int64         `json:"next_offset"`
+	NextCursor *string        `json:"next_cursor"`
 }
 
 type StaffStreak struct {
@@ -84,36 +84,42 @@ type AuditEvent struct {
 
 type AuditPage struct {
 	Events     []AuditEvent `json:"events"`
-	NextOffset *int64       `json:"next_offset"`
+	NextCursor *string      `json:"next_cursor"`
 }
 
 type MessagePage struct {
 	Messages   []queries.StaffMessagePageRow `json:"messages"`
-	NextOffset *int64                        `json:"next_offset"`
+	NextCursor *string                       `json:"next_cursor"`
 }
 
 type ActionPage struct {
 	Actions    []queries.StaffActionPageRow `json:"actions"`
-	NextOffset *int64                       `json:"next_offset"`
+	NextCursor *string                      `json:"next_cursor"`
 }
 
 type PendingAction struct {
 	Action *queries.StaffPendingActionRow `json:"action"`
 }
 
-func (s *StaffService) SearchDonors(ctx context.Context, token, term string, offset int64) (DonorSearch, error) {
-	if !pageOffsetValid(offset) || !plainText(term, false) || utf8.RuneCountInString(term) > 320 {
+func (s *StaffService) SearchDonors(ctx context.Context, token, term, after string) (DonorSearch, error) {
+	afterEmail, err := decodeKeyCursor(after)
+	if err != nil || !plainText(term, false) || utf8.RuneCountInString(term) > 320 {
 		return DonorSearch{}, ErrStaffInput
 	}
 	return staffRead(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (DonorSearch, error) {
 		q := queries.New(tx)
+		// The email filter is far more selective than any generic estimate: a
+		// cached generic plan walks the whole email index for a rare term.
+		if _, err := tx.Exec(ctx, "SET LOCAL plan_cache_mode = force_custom_plan"); err != nil {
+			return DonorSearch{}, err
+		}
 		pattern := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(identity.TrimSpace(term))
-		rows, err := q.StaffDonorSearch(ctx, queries.StaffDonorSearchParams{Term: "%" + pattern + "%", PageOffset: offset})
+		rows, err := q.StaffDonorSearch(ctx, queries.StaffDonorSearchParams{Term: "%" + pattern + "%", AfterEmail: afterEmail})
 		if err != nil {
 			return DonorSearch{}, err
 		}
-		rows, next := page(rows, offset)
-		out := DonorSearch{Donors: make([]DonorSummary, 0, len(rows)), NextOffset: next}
+		rows, next := keysetPage(rows, func(row queries.StaffDonorSearchRow) *string { return keyCursor(row.Email) })
+		out := DonorSearch{Donors: make([]DonorSummary, 0, len(rows)), NextCursor: next}
 		for _, row := range rows {
 			out.Donors = append(
 				out.Donors,
@@ -126,7 +132,7 @@ func (s *StaffService) SearchDonors(ctx context.Context, token, term string, off
 				},
 			)
 		}
-		if err = auditStaff(ctx, q, actor.ID, "donor.search", "donors", map[string]any{"offset": offset, "result_count": len(rows)}, now); err != nil {
+		if err = auditStaff(ctx, q, actor.ID, "donor.search", "donors", map[string]any{"paged": afterEmail != "", "result_count": len(rows)}, now); err != nil {
 			return DonorSearch{}, err
 		}
 		return out, nil
@@ -212,17 +218,18 @@ func storedSubscription(ctx context.Context, q *queries.Queries, donor pgtype.UU
 	}, nil
 }
 
-func (s *StaffService) AuditEvents(ctx context.Context, token string, offset int64) (AuditPage, error) {
-	if !pageOffsetValid(offset) {
-		return AuditPage{}, ErrStaffInput
+func (s *StaffService) AuditEvents(ctx context.Context, token, after string) (AuditPage, error) {
+	at, id, err := keysetBounds(after, true)
+	if err != nil {
+		return AuditPage{}, err
 	}
 	return staffRead(ctx, s, token, "audit.read", func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (AuditPage, error) {
-		rows, err := queries.New(tx).StaffAuditPage(ctx, offset)
+		rows, err := queries.New(tx).StaffAuditPage(ctx, queries.StaffAuditPageParams{CursorAt: at, CursorID: id})
 		if err != nil {
 			return AuditPage{}, err
 		}
-		rows, next := page(rows, offset)
-		out := AuditPage{Events: make([]AuditEvent, 0, len(rows)), NextOffset: next}
+		rows, next := keysetPage(rows, func(row queries.StaffAuditPageRow) *string { return encodeCursor(row.CreatedAt.Time, row.ID) })
+		out := AuditPage{Events: make([]AuditEvent, 0, len(rows)), NextCursor: next}
 		for _, row := range rows {
 			out.Events = append(
 				out.Events,
@@ -240,21 +247,25 @@ func (s *StaffService) AuditEvents(ctx context.Context, token string, offset int
 	})
 }
 
-func (s *StaffService) DonorMessages(ctx context.Context, token string, id pgtype.UUID, offset int64) (MessagePage, error) {
-	if !pageOffsetValid(offset) {
-		return MessagePage{}, ErrStaffInput
+func (s *StaffService) DonorMessages(ctx context.Context, token string, id pgtype.UUID, after string) (MessagePage, error) {
+	at, last, err := keysetBounds(after, true)
+	if err != nil {
+		return MessagePage{}, err
 	}
 	return staffRead(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (MessagePage, error) {
 		q := queries.New(tx)
 		if _, err := q.StaffDonorByID(ctx, id); err != nil {
 			return MessagePage{}, err
 		}
-		rows, err := q.StaffMessagePage(ctx, queries.StaffMessagePageParams{DonorID: id, PageOffset: offset})
+		rows, err := q.StaffMessagePage(ctx, queries.StaffMessagePageParams{DonorID: id, CursorAt: at, CursorID: last})
 		if err != nil {
 			return MessagePage{}, err
 		}
 		out := MessagePage{}
-		out.Messages, out.NextOffset = page(rows, offset)
+		out.Messages, out.NextCursor = keysetPage(
+			rows,
+			func(row queries.StaffMessagePageRow) *string { return encodeCursor(row.CreatedAt.Time, row.ID) },
+		)
 		if err = auditStaff(ctx, q, actor.ID, "message.list", id.String(), nil, now); err != nil {
 			return MessagePage{}, err
 		}
@@ -262,17 +273,21 @@ func (s *StaffService) DonorMessages(ctx context.Context, token string, id pgtyp
 	})
 }
 
-func (s *StaffService) DonorActions(ctx context.Context, token string, id pgtype.UUID, offset int64) (ActionPage, error) {
-	if !pageOffsetValid(offset) {
-		return ActionPage{}, ErrStaffInput
+func (s *StaffService) DonorActions(ctx context.Context, token string, id pgtype.UUID, after string) (ActionPage, error) {
+	at, last, err := keysetBounds(after, true)
+	if err != nil {
+		return ActionPage{}, err
 	}
 	return staffRead(ctx, s, token, "donor.read", func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (ActionPage, error) {
-		rows, err := queries.New(tx).StaffActionPage(ctx, queries.StaffActionPageParams{DonorID: id, PageOffset: offset})
+		rows, err := queries.New(tx).StaffActionPage(ctx, queries.StaffActionPageParams{DonorID: id, CursorAt: at, CursorID: last})
 		if err != nil {
 			return ActionPage{}, err
 		}
 		out := ActionPage{}
-		out.Actions, out.NextOffset = page(rows, offset)
+		out.Actions, out.NextCursor = keysetPage(
+			rows,
+			func(row queries.StaffActionPageRow) *string { return encodeCursor(row.CreatedAt.Time, row.ID) },
+		)
 		return out, nil
 	})
 }

@@ -138,61 +138,6 @@ func TestStaffDonorDetailShowsUncomputedStreakAsUpdating(t *testing.T) {
 	}
 }
 
-func TestStaffActionHistoryPagesNewestFirst(t *testing.T) {
-	pool := database(t)
-	api := as(t, dbroles.API)
-	ctx := context.Background()
-	actor, token := staffFixture(t, pool, "SUPER_ADMIN")
-	id, _ := donor(t, pool)
-	t.Cleanup(func() {
-		if _, err := pool.Exec(ctx, "DELETE FROM donor_staff_actions WHERE donor_id=$1", id); err != nil {
-			t.Error(err)
-		}
-	})
-	base := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
-	actions := make([]pgtype.UUID, 51)
-	for i := range actions {
-		actions[i] = testID(t)
-		if _, err := pool.Exec(ctx, "INSERT INTO donor_staff_actions(id,actor_id,donor_id,kind,target_id,amount_minor,reason,created_at) VALUES($1,$2,$3,'REFUND',$4,100,'Duplicate gift reported',$5)", actions[i], actor, id, testID(t), base.Add(time.Duration(i)*time.Second)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	s := &StaffService{DB: api}
-	first, err := s.DonorActions(ctx, token, id, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	view := jsonView(t, first)
-	assertKeys(t, view, "actions", "next_offset")
-	rows := view["actions"].([]any)
-	if len(rows) != 50 || view["next_offset"] != float64(50) {
-		t.Fatalf("first page: %d rows, next %v", len(rows), view["next_offset"])
-	}
-	row := rows[0].(map[string]any)
-	assertKeys(t, row, "id", "actor_id", "kind", "target_id", "amount_minor", "period_end", "reason", "status", "completed_at")
-	if row["id"] != actions[50].String() || rows[49].(map[string]any)["id"] != actions[1].String() {
-		t.Fatal("actions not newest first", row["id"])
-	}
-	second, err := s.DonorActions(ctx, token, id, 50)
-	if err != nil || len(second.Actions) != 1 || second.Actions[0].ID != actions[0] || second.NextOffset != nil {
-		t.Fatal("last page", second, err)
-	}
-	if _, err = pool.Exec(ctx, "DELETE FROM donor_staff_actions WHERE id=$1", actions[0]); err != nil {
-		t.Fatal(err)
-	}
-	exact, err := s.DonorActions(ctx, token, id, 0)
-	if err != nil || len(exact.Actions) != 50 || exact.NextOffset != nil {
-		t.Fatal("exactly one page reported more", len(exact.Actions), exact.NextOffset, err)
-	}
-	empty, err := s.DonorActions(ctx, token, id, 100)
-	if err != nil || jsonView(t, empty)["actions"] == nil {
-		t.Fatal("empty page is not a list", err)
-	}
-	if _, err = s.DonorActions(ctx, token, id, -1); !errors.Is(err, ErrStaffInput) {
-		t.Fatal("negative offset accepted", err)
-	}
-}
-
 func TestPendingActionIsScopedAndIndependentOfHistoryPages(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)

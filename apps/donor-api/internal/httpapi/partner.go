@@ -41,7 +41,7 @@ type PartnerPortalSource interface {
 
 // StaffPartnerSource is the staff-side partner administration (§8, partner.manage).
 type StaffPartnerSource interface {
-	PendingApplications(ctx context.Context, token string, offset int64) ([]store.PartnerApplication, error)
+	PendingApplications(ctx context.Context, token, after string) (store.PendingApplicationPage, error)
 	Approve(ctx context.Context, token string, appID pgtype.UUID) (pgtype.UUID, error)
 	Reject(ctx context.Context, token string, appID pgtype.UUID, reason string) error
 	LinkInitiative(ctx context.Context, token string, partnerID, initiativeID pgtype.UUID, commitment ...int64) error
@@ -466,9 +466,12 @@ func (a *api) staffPartnerRemoveUser(w http.ResponseWriter, r *http.Request, ses
 }
 
 func (a *api) staffPartnerPending(w http.ResponseWriter, r *http.Request, session string) {
+	cursor, ok := cursorParam(w, r)
+	if !ok {
+		return
+	}
 	a.staffPartner().serve(w, r, func(ctx context.Context) (any, error) {
-		rows, err := a.StaffPartner.PendingApplications(ctx, session, 0)
-		return map[string]any{"applications": rows}, err
+		return a.StaffPartner.PendingApplications(ctx, session, cursor)
 	})
 }
 

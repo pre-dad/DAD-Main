@@ -12,18 +12,18 @@ import (
 )
 
 // maxCursorLength bounds a keyset cursor before it is decoded.
-const maxCursorLength = 200
+const maxCursorLength = 600
 
 type AdminSource interface {
 	ResetStreak(context.Context, string, pgtype.UUID, string) error
 	RecomputeRecognition(context.Context, string, pgtype.UUID, string) error
-	SearchDonors(context.Context, string, string, int64) (store.DonorSearch, error)
+	SearchDonors(context.Context, string, string, string) (store.DonorSearch, error)
 	DonorDetail(context.Context, string, pgtype.UUID, int64, int64) (store.DonorDetail, error)
-	AuditEvents(context.Context, string, int64) (store.AuditPage, error)
+	AuditEvents(context.Context, string, string) (store.AuditPage, error)
 	FailedPayments(context.Context, string, string, string) (store.FailedPaymentPage, error)
 	AccountDeletions(context.Context, string, string) (store.AccountDeletionPage, error)
-	DonorMessages(context.Context, string, pgtype.UUID, int64) (store.MessagePage, error)
-	DonorActions(context.Context, string, pgtype.UUID, int64) (store.ActionPage, error)
+	DonorMessages(context.Context, string, pgtype.UUID, string) (store.MessagePage, error)
+	DonorActions(context.Context, string, pgtype.UUID, string) (store.ActionPage, error)
 	PendingAction(context.Context, string, pgtype.UUID, pgtype.UUID, string) (store.PendingAction, error)
 	RequestClaim(context.Context, string, pgtype.UUID) error
 	ResendMessage(context.Context, string, pgtype.UUID, pgtype.UUID) (store.QueuedMessage, error)
@@ -33,10 +33,20 @@ func (a *api) admin() service {
 	return service{a.Admin != nil, staffUnavailable, readTimeout, staffStatus}
 }
 
-func (a *api) searchDonors(w http.ResponseWriter, r *http.Request, session string) {
-	offset, ok := offsetParam(r, "offset")
-	if !ok {
+// cursorParam reads the keyset cursor of a paged staff list, answering the
+// request itself when it is longer than any cursor the API issues.
+func cursorParam(w http.ResponseWriter, r *http.Request) (string, bool) {
+	cursor := r.URL.Query().Get("cursor")
+	if len(cursor) > maxCursorLength {
 		invalidFields(w, r)
+		return "", false
+	}
+	return cursor, true
+}
+
+func (a *api) searchDonors(w http.ResponseWriter, r *http.Request, session string) {
+	cursor, ok := cursorParam(w, r)
+	if !ok {
 		return
 	}
 	term := r.URL.Query().Get("q")
@@ -45,7 +55,7 @@ func (a *api) searchDonors(w http.ResponseWriter, r *http.Request, session strin
 		return
 	}
 	a.admin().serve(w, r, func(ctx context.Context) (any, error) {
-		return a.Admin.SearchDonors(ctx, session, term, offset)
+		return a.Admin.SearchDonors(ctx, session, term, cursor)
 	})
 }
 
@@ -70,13 +80,12 @@ func (a *api) donorMessages(w http.ResponseWriter, r *http.Request, session stri
 	if !ok {
 		return
 	}
-	offset, ok := offsetParam(r, "offset")
+	cursor, ok := cursorParam(w, r)
 	if !ok {
-		invalidFields(w, r)
 		return
 	}
 	a.admin().serve(w, r, func(ctx context.Context) (any, error) {
-		return a.Admin.DonorMessages(ctx, session, id, offset)
+		return a.Admin.DonorMessages(ctx, session, id, cursor)
 	})
 }
 
@@ -85,13 +94,12 @@ func (a *api) donorActions(w http.ResponseWriter, r *http.Request, session strin
 	if !ok {
 		return
 	}
-	offset, ok := offsetParam(r, "offset")
+	cursor, ok := cursorParam(w, r)
 	if !ok {
-		invalidFields(w, r)
 		return
 	}
 	a.admin().serve(w, r, func(ctx context.Context) (any, error) {
-		return a.Admin.DonorActions(ctx, session, id, offset)
+		return a.Admin.DonorActions(ctx, session, id, cursor)
 	})
 }
 
@@ -112,30 +120,27 @@ func (a *api) pendingAction(w http.ResponseWriter, r *http.Request, session stri
 }
 
 func (a *api) auditEvents(w http.ResponseWriter, r *http.Request, session string) {
-	offset, ok := offsetParam(r, "offset")
+	cursor, ok := cursorParam(w, r)
 	if !ok {
-		invalidFields(w, r)
 		return
 	}
-	a.admin().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.AuditEvents(ctx, session, offset) })
+	a.admin().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.AuditEvents(ctx, session, cursor) })
 }
 
 func (a *api) failedPayments(w http.ResponseWriter, r *http.Request, session string) {
-	query := r.URL.Query()
-	cursor := query.Get("cursor")
-	if len(cursor) > maxCursorLength {
-		invalidFields(w, r)
+	cursor, ok := cursorParam(w, r)
+	if !ok {
 		return
 	}
+	query := r.URL.Query()
 	a.admin().serve(w, r, func(ctx context.Context) (any, error) {
 		return a.Admin.FailedPayments(ctx, session, query.Get("state"), cursor)
 	})
 }
 
 func (a *api) accountDeletions(w http.ResponseWriter, r *http.Request, session string) {
-	cursor := r.URL.Query().Get("cursor")
-	if len(cursor) > maxCursorLength {
-		invalidFields(w, r)
+	cursor, ok := cursorParam(w, r)
+	if !ok {
 		return
 	}
 	a.admin().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.AccountDeletions(ctx, session, cursor) })

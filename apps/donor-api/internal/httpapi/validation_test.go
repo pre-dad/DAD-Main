@@ -63,7 +63,7 @@ func TestHandlersValidateInputBeforeCallingServices(t *testing.T) {
 		{"POST", "/donor/staff/accounts/not-a-uuid/disable", "", false, 404},
 		{"POST", "/donor/staff/accounts/" + testID + "/role", `{"role":"SUPER_ADMIN"}`, false, 503},
 		{"POST", "/donor/staff/accounts/" + testID + "/role", `{"role":"OWNER"}`, false, 422},
-		{"GET", "/donor/staff/donors?offset=x", "", false, 422},
+		{"GET", "/donor/staff/donors?cursor=" + strings.Repeat("c", 601), "", false, 422},
 		{"GET", "/donor/staff/donors?q=" + strings.Repeat("q", 321), "", false, 422},
 		{"GET", "/donor/staff/donors?q=a%00b", "", false, 422},
 		{"GET", "/donor/staff/donors/not-a-uuid", "", false, 404},
