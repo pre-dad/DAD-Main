@@ -6,7 +6,15 @@ or Apple or Google sign-in, and hold hashed,
 revocable sessions: a 30-day cookie in browsers, a rotating token pair in the app. Staff sign in with individual passkeys (WebAuthn, verified by
 go-webauthn) and receive eight-hour hashed sessions. Donor and staff cookies are
 separate, HttpOnly, and Secure on HTTPS. Staff cookies use SameSite=Strict; donor cookies
-use Lax. Anonymous login responses do not reveal whether an address exists, and a donor receives at
+use Lax. Over HTTPS the donor and partner session cookies carry the `__Host-` prefix
+(`__Host-dad_donor_session`, `__Host-dad_partner_session`), so browsers refuse one with a
+Domain or a Path other than `/`, and a sibling subdomain cannot plant one. Every sign-in
+and sign-out expires the unprefixed name as well, so a browser never holds two live
+sessions. Sessions issued before the prefix are still read from the unprefixed name, below
+the prefixed one, until they lapse (30 days for donors, 12 hours for partners); that
+fallback in `sessionCookieValue` can be deleted once the longer window has passed. Over
+plain HTTP, in development, the names are unprefixed. Native clients use bearer tokens and
+are unaffected. Anonymous login responses do not reveal whether an address exists, and a donor receives at
 most one sign-in link a minute and five an hour however many addresses ask.
 
 The back office runs on its own host, `DONOR_STAFF_ORIGIN`, which the API requires to
@@ -79,7 +87,7 @@ Partner portal users are separate from donors and staff and cannot give. They si
 through emailed single-use links: 15 minutes for a link they request, seven days for an
 approval or invitation. A user holds one live link at a time, and a link replaced before
 delivery is never sent. Requesting a link never reveals whether the address belongs to a
-partner. Sessions last 12 hours, in the `dad_partner_session` cookie or as a bearer token
+partner. Sessions last 12 hours, in the `__Host-dad_partner_session` cookie (`dad_partner_session` over HTTP) or as a bearer token
 in the app, and removing a user revokes their sessions. Administrators alone invite and
 remove users, edit the organization profile, and export reports.
 Redemption locks the invitation so concurrent exchanges create one session. Removing a

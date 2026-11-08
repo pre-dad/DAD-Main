@@ -676,6 +676,14 @@ start with an invalid configuration and names the variables to fix.
   API fetches signing keys from `appleid.apple.com` and `www.googleapis.com`, so it needs
   outbound HTTPS to both; keys are cached for an hour and a known key keeps working
   through a provider outage.
+- Replay protection: a client may send a `nonce` with `oidcSignIn`. The ID token's
+  `nonce` claim must then equal it raw or as its lowercase hex SHA-256 (Apple's native
+  flow hashes the nonce it is given; Google Credential Manager and the web flows do not),
+  and a mismatch or a token without the claim fails like any unverifiable token. By
+  default a sign-in without a nonce is still accepted, so the published mobile contract
+  keeps working. Set `DONOR_OIDC_REQUIRE_NONCE=true` to refuse it (`true` or `false`,
+  default `false`), only after the iOS and Android releases that send a nonce are the
+  oldest in use; until then those older apps could not sign in with Apple or Google.
 
 `DONOR_SMS_PROVIDER=stub` (with `DONOR_SMS_FROM`) records codes instead of sending them,
 and `DONOR_OIDC_MODE=stub` (with `DONOR_OIDC_STUB_KEY`) accepts HMAC-signed test tokens.
@@ -1217,7 +1225,8 @@ before enabling these flows with Compose. Register the exact redirect URLs `${DO
 `${DONOR_PUBLIC_ORIGIN}/account/oauth/google` with the providers. Include the web
 client IDs in the corresponding `DONOR_OIDC_*_CLIENT_ID` audience allowlists and use
 `DONOR_OIDC_MODE=live`. Apple requires HTTPS for its cross-site form-post callback.
-Each attempt has a short-lived HttpOnly state/nonce cookie; Google also uses PKCE.
+Each attempt has a short-lived, single-use HttpOnly state/nonce cookie; Google also uses PKCE. The
+callback checks the token's nonce claim against it and sends the nonce to the API, which checks it again.
 The Go verifier validates the resulting token's signature, issuer, audience, and
 expiry before issuing the normal HttpOnly donor session. Provider errors return a
 sign-in failure without logging codes, tokens, or response bodies. These flows need

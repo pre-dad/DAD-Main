@@ -7,7 +7,7 @@
    "name": "MIT",
    "identifier": "MIT"
   },
-  "description": "The DAD (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <access token>`. A request with Origin or cookies is a browser request whatever else it carries. Sign in by calling POST /donor/login, opening the emailed `/account/claim#token=\u2026` link in the app, and sending the fragment's token to POST /donor/claim as a native request, which returns a 15-minute access token and a rotating refresh token. Exchange the refresh token at POST /donor/refresh when the access token expires or a request answers 401; send one refresh at a time and keep only the newest tokens. Routes that admit the app list `native` in `x-clients`, and POST /donor/refresh, the push-device routes, POST /donor/me/company-touch, and POST /donor/me/recurring/checkout admit nothing else. The app may record referral and company-code link visits, keeping the returned token in place of the browser's cookie. Guest giving, partner applications, and every staff route are web-only.\n- **Partner portal** users are separate from donors (P-5). They sign in by calling POST /donor/partner/sign-in and opening the emailed `/partner/accept#token=\u2026` link, whose token POST /donor/partner/accept-invite exchanges for a 12-hour session: an HttpOnly cookie for a browser, or a bearer token for a native request, sent like the donor app's.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"\u2026\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `\u2026+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
+  "description": "The DAD (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <access token>`. A request with Origin or cookies is a browser request whatever else it carries. Sign in by calling POST /donor/login, opening the emailed `/account/claim#token=\u2026` link in the app, and sending the fragment's token to POST /donor/claim as a native request, which returns a 15-minute access token and a rotating refresh token. Exchange the refresh token at POST /donor/refresh when the access token expires or a request answers 401; send one refresh at a time and keep only the newest tokens. Routes that admit the app list `native` in `x-clients`, and POST /donor/refresh, the push-device routes, POST /donor/me/company-touch, and POST /donor/me/recurring/checkout admit nothing else. The app may record referral and company-code link visits, keeping the returned token in place of the browser's cookie. Guest giving, partner applications, and every staff route are web-only.\n- **Partner portal** users are separate from donors (P-5). They sign in by calling POST /donor/partner/sign-in and opening the emailed `/partner/accept#token=\u2026` link, whose token POST /donor/partner/accept-invite exchanges for a 12-hour session: an HttpOnly cookie for a browser (`__Host-dad_partner_session` over HTTPS, otherwise `dad_partner_session`), or a bearer token for a native request, sent like the donor app's.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"\u2026\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `\u2026+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
  },
  "servers": [
   {
@@ -879,7 +879,7 @@
          "oneOf": [
           {
            "type": "object",
-           "description": "Browser request: the session is set only as the `dad_donor_session` cookie.",
+           "description": "Browser request: the session is set only as the donor session cookie (`__Host-dad_donor_session` over HTTPS, otherwise `dad_donor_session`).",
            "properties": {
             "claimed": {
              "type": "boolean",
@@ -5077,7 +5077,7 @@
    "post": {
     "operationId": "oidcSignIn",
     "summary": "Sign in with Apple or Google",
-    "description": "Verifies a provider id_token and signs in the donor it belongs to. The identity is matched by a prior link, else by the token's verified email against an existing account (which records the link). 401 covers an unverifiable token and a verified identity with no matching account alike; account creation happens in the giving flow, not here. 503 when the provider is not configured.",
+    "description": "Verifies a provider id_token and signs in the donor it belongs to. The identity is matched by a prior link, else by the token's verified email against an existing account (which records the link). 401 covers an unverifiable token and a verified identity with no matching account alike; account creation happens in the giving flow, not here. 503 when the provider is not configured. Replay protection: a client sends the optional `nonce` it bound to the provider request, and the id_token's `nonce` claim must equal it either raw or as the lowercase hex SHA-256 of its UTF-8 bytes (Sign in with Apple's native flow hashes the nonce it is given; Google Credential Manager and web flows use it as is). A mismatch, or a token with no `nonce` claim, answers 401 exactly like an unverifiable token. Omitting `nonce` is accepted unless the deployment requires it (`DONOR_OIDC_REQUIRE_NONCE`), in which case it answers 401 too.",
     "tags": [
      "Account"
     ],
@@ -5113,6 +5113,12 @@
           "description": "The provider's id_token (JWT) from the native or web sign-in SDK.",
           "minLength": 1,
           "maxLength": 8192
+         },
+         "nonce": {
+          "type": "string",
+          "description": "Optional. The random value the client bound to the provider request: the raw string, which the id_token's nonce claim must equal as is or as the lowercase hex SHA-256 of it. Sent for replay protection; required once the deployment sets DONOR_OIDC_REQUIRE_NONCE.",
+          "minLength": 1,
+          "maxLength": 256
          },
          "device_name": {
           "type": "string",
@@ -11872,7 +11878,7 @@
     "type": "apiKey",
     "in": "cookie",
     "name": "dad_donor_session",
-    "description": "Web donor session: HttpOnly, Secure on HTTPS, SameSite=Lax, 30 days at most and not extended by use. Set by POST /donor/claim for browser requests. Mutations also require the exact configured `Origin`."
+    "description": "Web donor session: HttpOnly, Secure on HTTPS, SameSite=Lax, 30 days at most and not extended by use. Set by the browser sign-in routes (POST /donor/claim, passkey, phone and social sign-in). Over HTTPS the cookie is named `__Host-dad_donor_session` (Path=/, no Domain) and every sign-in also expires the unprefixed `dad_donor_session`; the server still accepts the unprefixed name, below the prefixed one, until sessions issued before the prefix lapse. Mutations also require the exact configured `Origin`."
    },
    "bearerAuth": {
     "type": "http",
@@ -11895,7 +11901,7 @@
     "type": "apiKey",
     "in": "cookie",
     "name": "dad_partner_session",
-    "description": "Partner portal session: HttpOnly, Secure on HTTPS, SameSite=Lax, 12 hours. Set by POST /donor/partner/accept-invite for browser requests. Mutations also require the exact configured `Origin`. Never a donor or staff session."
+    "description": "Partner portal session: HttpOnly, Secure on HTTPS, SameSite=Lax, 12 hours. Set by POST /donor/partner/accept-invite for browser requests. Named `__Host-dad_partner_session` (Path=/, no Domain) when the public origin is HTTPS, in which case sign-in also expires the unprefixed `dad_partner_session`; the server still reads the unprefixed name, below the prefixed one, until pre-prefix sessions lapse. Mutations also require the exact configured `Origin`. Never a donor or staff session."
    },
    "partnerBearerAuth": {
     "type": "http",
@@ -16708,7 +16714,7 @@
     "oneOf": [
      {
       "type": "object",
-      "description": "Browser request: the session is set only as the `dad_donor_session` cookie.",
+      "description": "Browser request: the session is set only as the donor session cookie (`__Host-dad_donor_session` over HTTPS, otherwise `dad_donor_session`).",
       "properties": {
        "signed_in": {
         "type": "boolean",

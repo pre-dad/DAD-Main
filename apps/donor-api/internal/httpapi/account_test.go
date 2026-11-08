@@ -83,13 +83,17 @@ func TestClaimSetsCookieOnlyAfterSuccess(t *testing.T) {
 			}
 			continue
 		}
-		if len(cookies) != 1 || cookies[0].Name != "dad_donor_session" || cookies[0].Value != "new-secret-session" ||
+		if len(cookies) != 2 || cookies[0].Name != "__Host-dad_donor_session" || cookies[0].Value != "new-secret-session" ||
 			!cookies[0].HttpOnly ||
 			!cookies[0].Secure ||
 			cookies[0].SameSite != http.SameSiteLaxMode ||
 			cookies[0].MaxAge != 30*86400 ||
-			cookies[0].Path != "/" {
-			t.Fatalf("got cookies %+v, want one HttpOnly, Secure, Lax, 30-day session cookie", cookies)
+			cookies[0].Path != "/" ||
+			cookies[0].Domain != "" {
+			t.Fatalf("got cookies %+v, want a host-prefixed HttpOnly, Secure, Lax, 30-day session cookie first", cookies)
+		}
+		if cookies[1].Name != "dad_donor_session" || cookies[1].Value != "" || cookies[1].MaxAge >= 0 {
+			t.Fatalf("got %+v, want the unprefixed cookie expired", cookies[1])
 		}
 	}
 }

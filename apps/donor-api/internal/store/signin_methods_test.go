@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"sync"
@@ -183,13 +185,13 @@ func TestOIDCSignInLinksAndAuthenticates(t *testing.T) {
 	svc := OIDCService{DB: api, Verifier: oidc.NewVerifier(settings), Settings: settings}
 
 	empty := OIDCService{DB: api, Verifier: nil, Settings: &oidc.Settings{}}
-	if _, err := empty.SignIn(ctx, oidc.Google, "x", Client{}); !errors.Is(err, ErrSignInUnavailable) {
+	if _, err := empty.SignIn(ctx, oidc.Google, "x", "", Client{}); !errors.Is(err, ErrSignInUnavailable) {
 		t.Fatalf("unconfigured = %v; want ErrSignInUnavailable", err)
 	}
 
 	// First sign-in: no prior link, matched by verified email -> links + signs in.
 	token := oidc.SignStubToken("secret", oidc.Google, "goog-sub-1", "g.apps", email, time.Now().Add(time.Hour))
-	tokens, err := svc.SignIn(ctx, oidc.Google, token, Client{})
+	tokens, err := svc.SignIn(ctx, oidc.Google, token, "", Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +209,7 @@ func TestOIDCSignInLinksAndAuthenticates(t *testing.T) {
 
 	// Second sign-in: resolved by the existing link (email no longer needed).
 	token2 := oidc.SignStubToken("secret", oidc.Google, "goog-sub-1", "g.apps", "", time.Now().Add(time.Hour))
-	if _, err := svc.SignIn(ctx, oidc.Google, token2, Client{}); err != nil {
+	if _, err := svc.SignIn(ctx, oidc.Google, token2, "", Client{}); err != nil {
 		t.Fatalf("second sign-in via link failed: %v", err)
 	}
 
@@ -220,7 +222,7 @@ func TestOIDCSignInLinksAndAuthenticates(t *testing.T) {
 		"new-"+testID(t).String()+"@example.org",
 		time.Now().Add(time.Hour),
 	)
-	newTokens, err := svc.SignIn(ctx, oidc.Apple, orphan, Client{})
+	newTokens, err := svc.SignIn(ctx, oidc.Apple, orphan, "", Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,8 +231,62 @@ func TestOIDCSignInLinksAndAuthenticates(t *testing.T) {
 		t.Fatalf("new verified identity: %+v %v", newProfile, err)
 	}
 
-	if _, err := svc.SignIn(ctx, oidc.Google, "bad.token.sig", Client{}); !errors.Is(err, ErrSignInCode) {
+	if _, err := svc.SignIn(ctx, oidc.Google, "bad.token.sig", "", Client{}); !errors.Is(err, ErrSignInCode) {
 		t.Fatalf("bad token = %v; want ErrSignInCode", err)
+	}
+}
+
+// TestOIDCNonceBinding covers the nonce policy end to end through the store:
+// raw and SHA-256 forms match, anything else is the uniform sign-in failure, and
+// requiring a nonce rejects a sign-in that supplies none.
+func TestOIDCNonceBinding(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	id, email := donor(t, pool)
+	ctx := context.Background()
+	t.Cleanup(func() { pool.Exec(ctx, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id) })
+	settings := &oidc.Settings{Mode: "stub", StubKey: "secret", ClientIDs: map[oidc.Provider][]string{oidc.Google: {"g.apps"}}}
+	svc := OIDCService{DB: api, Verifier: oidc.NewVerifier(settings), Settings: settings}
+	required := *settings
+	required.RequireNonce = true
+	strict := OIDCService{DB: api, Verifier: oidc.NewVerifier(&required), Settings: &required}
+
+	const raw = "client-nonce-0123456789"
+	sum := sha256.Sum256([]byte(raw))
+	hashed := hex.EncodeToString(sum[:])
+	token := func(claim string) string {
+		return oidc.SignStubTokenWithNonce(
+			"secret",
+			oidc.Google,
+			"nonce-sub-"+id.String(),
+			"g.apps",
+			email,
+			claim,
+			time.Now().Add(time.Hour),
+		)
+	}
+	for _, tc := range []struct {
+		name    string
+		service OIDCService
+		claim   string
+		sent    string
+		ok      bool
+	}{
+		{"raw form", svc, raw, raw, true},
+		{"hash form", svc, hashed, raw, true},
+		{"strict raw form", strict, raw, raw, true},
+		{"no nonce sent, optional mode", svc, "", "", true},
+		{"no nonce sent, token has one, optional mode", svc, raw, "", true},
+		{"no nonce sent, required mode", strict, raw, "", false},
+		{"replay with a different nonce", svc, raw, "another-nonce-0123456789", false},
+		{"token lacks the claim", svc, "", raw, false},
+		{"uppercase hash is not the lowercase form", svc, strings.ToUpper(hashed), raw, false},
+		{"hash of a different nonce", svc, hashed, "another-nonce-0123456789", false},
+	} {
+		_, err := tc.service.SignIn(ctx, oidc.Google, token(tc.claim), tc.sent, Client{})
+		if tc.ok != (err == nil) || (!tc.ok && !errors.Is(err, ErrSignInCode)) {
+			t.Errorf("%s: err = %v, want success=%v with ErrSignInCode on failure", tc.name, err, tc.ok)
+		}
 	}
 }
 
@@ -251,7 +307,7 @@ func TestOIDCLinkRechecksEmailAfterDonorLock(t *testing.T) {
 	result := make(chan error, 1)
 	go func() {
 		token := oidc.SignStubToken("fixture", oidc.Google, id.String(), "g.apps", email, time.Now().Add(time.Hour))
-		_, err := svc.SignIn(ctx, oidc.Google, token, Client{})
+		_, err := svc.SignIn(ctx, oidc.Google, token, "", Client{})
 		result <- err
 	}()
 	awaitPartnerWaiters(t, pool, 1)
@@ -301,7 +357,7 @@ func (unreachableProvider) Verify(context.Context, oidc.Provider, string) (oidc.
 func TestOIDCProviderOutageIsNotABadToken(t *testing.T) {
 	settings := &oidc.Settings{Mode: "live", ClientIDs: map[oidc.Provider][]string{oidc.Google: {"g.apps"}}}
 	svc := OIDCService{DB: as(t, dbroles.API), Verifier: unreachableProvider{}, Settings: settings}
-	_, err := svc.SignIn(context.Background(), oidc.Google, "token", Client{})
+	_, err := svc.SignIn(context.Background(), oidc.Google, "token", "", Client{})
 	if !errors.Is(err, oidc.ErrKeys) || errors.Is(err, ErrSignInCode) {
 		t.Fatalf("SignIn during a provider outage = %v; want ErrKeys", err)
 	}

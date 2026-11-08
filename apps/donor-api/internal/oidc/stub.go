@@ -35,6 +35,7 @@ type stubClaims struct {
 	Aud   string `json:"aud"`
 	Exp   int64  `json:"exp"`
 	Email string `json:"email"`
+	Nonce string `json:"nonce,omitempty"`
 }
 
 func (v *stubVerifier) Verify(_ context.Context, provider Provider, idToken string) (Identity, error) {
@@ -70,15 +71,20 @@ func (v *stubVerifier) Verify(_ context.Context, provider Provider, idToken stri
 	if claims.Exp <= 0 || time.Now().After(time.Unix(claims.Exp, 0)) {
 		return Identity{}, ErrToken
 	}
-	return Identity{Provider: provider, Subject: claims.Sub, Email: claims.Email}, nil
+	return Identity{Provider: provider, Subject: claims.Sub, Email: claims.Email, Nonce: claims.Nonce}, nil
 }
 
 // SignStubToken builds a token the stub verifier accepts. It is exported for
 // tests and local tooling only; a real client never calls it.
 func SignStubToken(key string, provider Provider, subject, clientID, email string, exp time.Time) string {
+	return SignStubTokenWithNonce(key, provider, subject, clientID, email, "", exp)
+}
+
+// SignStubTokenWithNonce is SignStubToken with a nonce claim.
+func SignStubTokenWithNonce(key string, provider Provider, subject, clientID, email, nonce string, exp time.Time) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
 	claims, _ := json.Marshal(stubClaims{
-		Iss: stubIssuers[provider], Sub: subject, Aud: clientID, Exp: exp.Unix(), Email: email,
+		Iss: stubIssuers[provider], Sub: subject, Aud: clientID, Exp: exp.Unix(), Email: email, Nonce: nonce,
 	})
 	body := header + "." + base64.RawURLEncoding.EncodeToString(claims)
 	mac := hmac.New(sha256.New, []byte(key))
