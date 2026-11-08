@@ -59,8 +59,9 @@ type AccountDeletionPage struct {
 // cursor is the keyset position: the last row's time and id. It is opaque to
 // callers and carries no data a staff reader could not already see.
 type cursor struct {
-	At time.Time   `json:"t"`
-	ID pgtype.UUID `json:"i"`
+	At  time.Time   `json:"t,omitzero"`
+	Key string      `json:"k,omitempty"`
+	ID  pgtype.UUID `json:"i,omitzero"`
 }
 
 func encodeCursor(at time.Time, id pgtype.UUID) *string {
@@ -86,6 +87,62 @@ func decodeCursor(value string) (cursor, bool, error) {
 		return cursor{}, false, ErrStaffInput
 	}
 	return c, true, nil
+}
+
+// keyCursor encodes a position in a list ordered by one unique text key.
+func keyCursor(key string) *string {
+	raw, err := json.Marshal(cursor{Key: key})
+	if err != nil {
+		return nil
+	}
+	out := base64.RawURLEncoding.EncodeToString(raw)
+	return &out
+}
+
+// decodeKeyCursor reads a text-key cursor; the empty string is the first page.
+func decodeKeyCursor(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil || len(value) > 600 {
+		return "", ErrStaffInput
+	}
+	var c cursor
+	if err = json.Unmarshal(raw, &c); err != nil || c.Key == "" || !c.At.IsZero() || c.ID.Valid {
+		return "", ErrStaffInput
+	}
+	return c.Key, nil
+}
+
+var zeroUUID = pgtype.UUID{Valid: true}
+
+// keysetBounds turns a cursor into non-null query bounds. The first page is
+// bounded by -infinity (oldest first) or infinity (newest first), so the plan
+// is the same for every page and always keeps its index range.
+func keysetBounds(value string, newestFirst bool) (pgtype.Timestamptz, pgtype.UUID, error) {
+	position, paged, err := decodeCursor(value)
+	if err != nil {
+		return pgtype.Timestamptz{}, pgtype.UUID{}, err
+	}
+	if paged {
+		return timestamp(position.At), position.ID, nil
+	}
+	infinity := pgtype.Infinity
+	if !newestFirst {
+		infinity = pgtype.NegativeInfinity
+	}
+	return pgtype.Timestamptz{InfinityModifier: infinity, Valid: true}, zeroUUID, nil
+}
+
+// keysetPage trims a query's look-ahead row and returns the cursor of the last
+// row kept when another page follows.
+func keysetPage[T any](rows []T, cursorOf func(T) *string) ([]T, *string) {
+	if len(rows) <= pageSize {
+		return rows, nil
+	}
+	rows = rows[:pageSize]
+	return rows, cursorOf(rows[len(rows)-1])
 }
 
 // FailedPayments lists unresolved failed renewals, newest first. state filters

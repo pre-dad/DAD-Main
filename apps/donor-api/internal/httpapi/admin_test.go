@@ -16,7 +16,7 @@ import (
 
 type actionsStub struct {
 	AdminSource
-	offsets []int64
+	cursors []string
 	target  pgtype.UUID
 	kind    string
 }
@@ -66,16 +66,16 @@ func TestPendingActionValidatesTargetAndKind(t *testing.T) {
 	}
 }
 
-func (s *actionsStub) DonorActions(_ context.Context, session string, _ pgtype.UUID, offset int64) (store.ActionPage, error) {
-	s.offsets = append(s.offsets, offset)
+func (s *actionsStub) DonorActions(_ context.Context, session string, _ pgtype.UUID, cursor string) (store.ActionPage, error) {
+	s.cursors = append(s.cursors, cursor)
 	if session != "staff-session" {
 		return store.ActionPage{}, store.ErrStaffDenied
 	}
-	if offset > 0 {
+	if cursor != "" {
 		return store.ActionPage{Actions: []queries.StaffActionPageRow{}}, nil
 	}
-	next := int64(50)
-	return store.ActionPage{Actions: make([]queries.StaffActionPageRow, 50), NextOffset: &next}, nil
+	next := "next-position"
+	return store.ActionPage{Actions: make([]queries.StaffActionPageRow, 50), NextCursor: &next}, nil
 }
 
 func TestStaffActionHistoryIsPaged(t *testing.T) {
@@ -92,27 +92,27 @@ func TestStaffActionHistoryIsPaged(t *testing.T) {
 		query string
 		rows  int
 		next  any
-	}{{"", 50, float64(50)}, {"?offset=50", 0, nil}} {
+	}{{"", 50, "next-position"}, {"?cursor=next-position", 0, nil}} {
 		response := get(tc.query)
 		var body map[string]any
 		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != 200 || len(body) != 2 {
 			t.Fatalf("%q: %d %s", tc.query, response.Code, response.Body)
 		}
 		rows, ok := body["actions"].([]any)
-		if !ok || len(rows) != tc.rows || body["next_offset"] != tc.next {
+		if !ok || len(rows) != tc.rows || body["next_cursor"] != tc.next {
 			t.Fatalf("%q: %s", tc.query, response.Body)
 		}
 	}
-	if len(stub.offsets) != 2 || stub.offsets[0] != 0 || stub.offsets[1] != 50 {
-		t.Fatalf("offsets passed to store: %v", stub.offsets)
+	if len(stub.cursors) != 2 || stub.cursors[0] != "" || stub.cursors[1] != "next-position" {
+		t.Fatalf("cursors passed to store: %v", stub.cursors)
 	}
-	for _, query := range []string{"?offset=-1", "?offset=x", "?offset=9223372036854775807"} {
+	for _, query := range []string{"?cursor=" + strings.Repeat("c", maxCursorLength+1)} {
 		if response := get(query); response.Code != 422 {
 			t.Fatalf("%s: got %d", query, response.Code)
 		}
 	}
-	if len(stub.offsets) != 2 {
-		t.Fatal("invalid offset reached the store")
+	if len(stub.cursors) != 2 {
+		t.Fatal("oversized cursor reached the store")
 	}
 }
 

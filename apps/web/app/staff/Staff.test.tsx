@@ -26,7 +26,7 @@ it("searches by the query in the URL and links each result to its own record", a
   const fetch = serve(
     reply(200, {
       donors: [{ id: "donor-1", email: "donor@example.org", public_name: null, claimed: true, disabled: false }],
-      next_offset: null,
+      next_cursor: null,
     }),
   );
   render(<Staff q="donor@" />);
@@ -34,14 +34,14 @@ it("searches by the query in the URL and links each result to its own record", a
     "href",
     "/staff/donors/donor-1",
   );
-  expect(fetch).toHaveBeenCalledWith("/api/donor/staff/donors?q=donor%40&offset=0", expect.anything());
+  expect(fetch).toHaveBeenCalledWith("/api/donor/staff/donors?q=donor%40", expect.anything());
   expect(screen.getByRole("searchbox", { name: "Find donor by email" })).toHaveValue("donor@");
   expect(screen.getByRole("search")).toHaveAttribute("action", "/staff");
   expect(screen.getByRole("searchbox")).toHaveAttribute("name", "q");
 });
 
 it("does not search before a query is submitted", async () => {
-  const fetch = serve(reply(200, { donors: [], next_offset: null }));
+  const fetch = serve(reply(200, { donors: [], next_cursor: null }));
   render(<Staff q={null} />);
   expect(await screen.findByText("Signed in as Sam Support · OP_PARTNERSHIPS")).toBeVisible();
   expect(fetch.mock.calls.some(([url]) => url.startsWith("/api/donor/staff/donors"))).toBe(false);
@@ -49,7 +49,7 @@ it("does not search before a query is submitted", async () => {
 });
 
 it("says when nothing matches", async () => {
-  serve(reply(200, { donors: [], next_offset: null }));
+  serve(reply(200, { donors: [], next_cursor: null }));
   render(<Staff q="nobody" />);
   expect(await screen.findByText("No matching donors.")).toBeVisible();
 });
@@ -136,7 +136,7 @@ it("says when staff accounts cannot be loaded", async () => {
 });
 
 it("offers the donor money queues only with donor access", async () => {
-  serve(reply(200, { donors: [], next_offset: null }));
+  serve(reply(200, { donors: [], next_cursor: null }));
   const { unmount } = render(<Staff q={null} />);
   expect(await screen.findByRole("link", { name: "Failed payments" })).toHaveAttribute(
     "href",
@@ -152,4 +152,23 @@ it("offers the donor money queues only with donor access", async () => {
   expect(await screen.findByRole("link", { name: "Partners" })).toBeVisible();
   expect(screen.queryByRole("link", { name: "Failed payments" })).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "Account deletions" })).not.toBeInTheDocument();
+});
+
+it("pages donor search results by cursor and returns to the previous page", async () => {
+  const donor = (id: string) => ({ id, email: `${id}@example.org`, public_name: null, claimed: true, disabled: false });
+  const fetch = vi.fn(async (url: string) => {
+    if (url.startsWith("/api/donor/staff/me")) return reply(200, actor);
+    if (url.includes("cursor=c2")) return reply(200, { donors: [donor("page2")], next_cursor: null });
+    return reply(200, { donors: [donor("page1")], next_cursor: "c2" });
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<Staff q="a&b" />);
+  expect(await screen.findByRole("link", { name: "page1@example.org" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Previous donor page" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Next donor page" }));
+  expect(await screen.findByRole("link", { name: "page2@example.org" })).toBeVisible();
+  expect(fetch).toHaveBeenCalledWith("/api/donor/staff/donors?q=a%26b&cursor=c2", expect.anything());
+  expect(screen.queryByRole("button", { name: "Next donor page" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Previous donor page" }));
+  expect(await screen.findByRole("link", { name: "page1@example.org" })).toBeVisible();
 });

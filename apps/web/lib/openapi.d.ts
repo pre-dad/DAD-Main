@@ -3466,11 +3466,8 @@ export interface components {
         };
         DonorSearch: {
             donors: components["schemas"]["DonorSummary"][];
-            /**
-             * Format: int64
-             * @description Offset of the next page, or null on the last page.
-             */
-            next_offset: number | null;
+            /** @description Cursor of the next page, or null on the last page. */
+            next_cursor: string | null;
         };
         ReferredDonor: {
             /** Format: email */
@@ -3561,11 +3558,8 @@ export interface components {
         };
         AuditPage: {
             events: components["schemas"]["AuditEvent"][];
-            /**
-             * Format: int64
-             * @description Offset of the next page, or null on the last page.
-             */
-            next_offset: number | null;
+            /** @description Cursor of the next page, or null on the last page. */
+            next_cursor: string | null;
         };
         StaffMessage: {
             /** Format: uuid */
@@ -3579,14 +3573,13 @@ export interface components {
             suppressed_reason: string | null;
             /** Format: date-time */
             available_at: string;
+            /** Format: date-time */
+            created_at: string;
         };
         MessagePage: {
             messages: components["schemas"]["StaffMessage"][];
-            /**
-             * Format: int64
-             * @description Offset of the next page, or null on the last page.
-             */
-            next_offset: number | null;
+            /** @description Cursor of the next page, or null on the last page. */
+            next_cursor: string | null;
         };
         StaffAction: {
             /** Format: uuid */
@@ -3608,14 +3601,13 @@ export interface components {
             status: string;
             /** Format: date-time */
             completed_at: string | null;
+            /** Format: date-time */
+            created_at: string;
         };
         ActionPage: {
             actions: components["schemas"]["StaffAction"][];
-            /**
-             * Format: int64
-             * @description Offset of the next page, or null on the last page.
-             */
-            next_offset: number | null;
+            /** @description Cursor of the next page, or null on the last page. */
+            next_cursor: string | null;
         };
         PendingAction: {
             action: components["schemas"]["StaffAction"] | null;
@@ -6400,8 +6392,8 @@ export interface operations {
         parameters: {
             query?: {
                 q?: string;
-                /** @description Rows to skip. Pages hold up to 50 rows; pass the previous page's `next_offset` until it is null. */
-                offset?: components["parameters"]["Offset"];
+                /** @description Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows. */
+                cursor?: components["parameters"]["Cursor"];
             };
             header?: never;
             path?: never;
@@ -6458,8 +6450,8 @@ export interface operations {
     donorMessages: {
         parameters: {
             query?: {
-                /** @description Rows to skip. Pages hold up to 50 rows; pass the previous page's `next_offset` until it is null. */
-                offset?: components["parameters"]["Offset"];
+                /** @description Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows. */
+                cursor?: components["parameters"]["Cursor"];
             };
             header?: never;
             path: {
@@ -6489,8 +6481,8 @@ export interface operations {
     donorActions: {
         parameters: {
             query?: {
-                /** @description Rows to skip. Pages hold up to 50 rows; pass the previous page's `next_offset` until it is null. */
-                offset?: components["parameters"]["Offset"];
+                /** @description Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows. */
+                cursor?: components["parameters"]["Cursor"];
             };
             header?: never;
             path: {
@@ -6551,8 +6543,8 @@ export interface operations {
     auditEvents: {
         parameters: {
             query?: {
-                /** @description Rows to skip. Pages hold up to 50 rows; pass the previous page's `next_offset` until it is null. */
-                offset?: components["parameters"]["Offset"];
+                /** @description Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows. */
+                cursor?: components["parameters"]["Cursor"];
             };
             header?: never;
             path?: never;
@@ -8624,7 +8616,10 @@ export interface operations {
     };
     staffPartnerPending: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows. */
+                cursor?: components["parameters"]["Cursor"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8652,11 +8647,14 @@ export interface operations {
                             decision_reason: string;
                             approved_partner_id: string | null;
                         }[];
+                        /** @description Cursor of the next page, or null on the last page. */
+                        next_cursor: string | null;
                     };
                 };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };

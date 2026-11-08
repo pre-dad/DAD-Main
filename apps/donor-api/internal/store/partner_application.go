@@ -383,17 +383,31 @@ func (s PartnerApplicationService) SetMatch(
 	return err
 }
 
-// PendingApplications returns the §8 approval queue (one page past 50).
-func (s PartnerApplicationService) PendingApplications(ctx context.Context, token string, offset int64) ([]PartnerApplication, error) {
+// PendingApplicationPage is one keyset page of the approval queue.
+type PendingApplicationPage struct {
+	Applications []PartnerApplication `json:"applications"`
+	NextCursor   *string              `json:"next_cursor"`
+}
+
+// PendingApplications returns the §8 approval queue, oldest first, one page at
+// a time. A decision removes a row from the queue without moving the others,
+// so the cursor stays valid across approvals and rejections.
+func (s PartnerApplicationService) PendingApplications(ctx context.Context, token, after string) (PendingApplicationPage, error) {
+	at, id, err := keysetBounds(after, false)
+	if err != nil {
+		return PendingApplicationPage{}, err
+	}
 	return staffWrite(ctx, s.Staff, token, partnerPermission,
-		func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) ([]PartnerApplication, error) {
-			rows, err := queries.New(tx).PendingPartnerApplications(ctx, offset)
+		func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (PendingApplicationPage, error) {
+			rows, err := queries.New(tx).
+				PendingPartnerApplications(ctx, queries.PendingPartnerApplicationsParams{CursorAt: at, CursorID: id})
 			if err != nil {
-				return nil, err
+				return PendingApplicationPage{}, err
 			}
-			out := make([]PartnerApplication, 0, len(rows))
+			rows, next := keysetPage(rows, func(r queries.DonorPartnerApplication) *string { return encodeCursor(r.CreatedAt.Time, r.ID) })
+			out := PendingApplicationPage{Applications: make([]PartnerApplication, 0, len(rows)), NextCursor: next}
 			for _, r := range rows {
-				out = append(out, PartnerApplication{
+				out.Applications = append(out.Applications, PartnerApplication{
 					ID: r.ID.String(), Organization: r.Organization, Website: r.Website, Type: r.Type,
 					ContactName: r.ContactName, Title: r.Title, WorkEmail: r.WorkEmail, Phone: r.Phone,
 					WorkforceSize: r.WorkforceSize, Status: r.Status, DecisionReason: r.DecisionReason,

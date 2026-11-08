@@ -13,9 +13,9 @@ SELECT * FROM donor_partner_applications WHERE id=$1 FOR UPDATE;
 -- name: PendingPartnerApplications :many
 -- §8 Partnerships approval queue, oldest first.
 SELECT * FROM donor_partner_applications
-WHERE status='PENDING'
+WHERE status='PENDING' AND (created_at, id) > (sqlc.arg(cursor_at)::timestamptz, sqlc.arg(cursor_id)::uuid)
 ORDER BY created_at ASC, id
-LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
+LIMIT 51;
 
 -- name: DecidePartnerApplication :exec
 -- Records an approve/reject decision (status + decider + time + reason) and, on

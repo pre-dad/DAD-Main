@@ -30,7 +30,7 @@ func TestControlCharactersAreRejectedBeforeStorage(t *testing.T) {
 		t.Fatalf("NUL referral capture: got %+v %v, want nothing captured", capture, err)
 	}
 	_, support := staffFixture(t, database(t), "OP_PARTNERSHIPS")
-	if _, err = (&StaffService{DB: s.DB}).SearchDonors(ctx, support, "a\x00", 0); !errors.Is(err, ErrStaffInput) {
+	if _, err = (&StaffService{DB: s.DB}).SearchDonors(ctx, support, "a\x00", ""); !errors.Is(err, ErrStaffInput) {
 		t.Fatalf("NUL search: got %v, want ErrStaffInput", err)
 	}
 }

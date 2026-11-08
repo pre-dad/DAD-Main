@@ -96,14 +96,17 @@ func (q *Queries) StaffAccountDeletions(ctx context.Context, arg StaffAccountDel
 }
 
 const staffActionPage = `-- name: StaffActionPage :many
-SELECT id,actor_id,kind,target_id,amount_minor,period_end,reason,status,completed_at
-FROM donor_staff_actions WHERE donor_id=$1 ORDER BY created_at DESC,id
-LIMIT 51 OFFSET $2::bigint
+SELECT id,actor_id,kind,target_id,amount_minor,period_end,reason,status,completed_at,created_at
+FROM donor_staff_actions WHERE donor_id=$1::uuid
+  AND created_at <= $2::timestamptz
+  AND (created_at < $2::timestamptz OR id > $3::uuid)
+ORDER BY created_at DESC,id LIMIT 51
 `
 
 type StaffActionPageParams struct {
-	DonorID    pgtype.UUID `json:"donor_id"`
-	PageOffset int64       `json:"page_offset"`
+	DonorID  pgtype.UUID        `json:"donor_id"`
+	CursorAt pgtype.Timestamptz `json:"cursor_at"`
+	CursorID pgtype.UUID        `json:"cursor_id"`
 }
 
 type StaffActionPageRow struct {
@@ -116,10 +119,11 @@ type StaffActionPageRow struct {
 	Reason      string             `json:"reason"`
 	Status      string             `json:"status"`
 	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) StaffActionPage(ctx context.Context, arg StaffActionPageParams) ([]StaffActionPageRow, error) {
-	rows, err := q.db.Query(ctx, staffActionPage, arg.DonorID, arg.PageOffset)
+	rows, err := q.db.Query(ctx, staffActionPage, arg.DonorID, arg.CursorAt, arg.CursorID)
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +141,7 @@ func (q *Queries) StaffActionPage(ctx context.Context, arg StaffActionPageParams
 			&i.Reason,
 			&i.Status,
 			&i.CompletedAt,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -150,8 +155,15 @@ func (q *Queries) StaffActionPage(ctx context.Context, arg StaffActionPageParams
 
 const staffAuditPage = `-- name: StaffAuditPage :many
 SELECT id,actor_id,action,target,created_at,details FROM donor_staff_audit
-ORDER BY created_at DESC,id LIMIT 51 OFFSET $1::bigint
+WHERE created_at <= $1::timestamptz
+  AND (created_at < $1::timestamptz OR id > $2::uuid)
+ORDER BY created_at DESC,id LIMIT 51
 `
+
+type StaffAuditPageParams struct {
+	CursorAt pgtype.Timestamptz `json:"cursor_at"`
+	CursorID pgtype.UUID        `json:"cursor_id"`
+}
 
 type StaffAuditPageRow struct {
 	ID        pgtype.UUID        `json:"id"`
@@ -162,8 +174,10 @@ type StaffAuditPageRow struct {
 	Details   []byte             `json:"details"`
 }
 
-func (q *Queries) StaffAuditPage(ctx context.Context, pageOffset int64) ([]StaffAuditPageRow, error) {
-	rows, err := q.db.Query(ctx, staffAuditPage, pageOffset)
+// Newest first, keyset-paged on (created_at DESC, id). The first page passes an
+// infinite cursor_at, so the bound is never null and the index range stays usable.
+func (q *Queries) StaffAuditPage(ctx context.Context, arg StaffAuditPageParams) ([]StaffAuditPageRow, error) {
+	rows, err := q.db.Query(ctx, staffAuditPage, arg.CursorAt, arg.CursorID)
 	if err != nil {
 		return nil, err
 	}
@@ -217,13 +231,13 @@ func (q *Queries) StaffDonorByID(ctx context.Context, id pgtype.UUID) (Donor, er
 
 const staffDonorSearch = `-- name: StaffDonorSearch :many
 SELECT id,email,public_name,claimed_at,disabled FROM donors
-WHERE email ILIKE $1::text ESCAPE '\'
-ORDER BY email,id LIMIT 51 OFFSET $2::bigint
+WHERE email ILIKE $1::text ESCAPE '\' AND email > $2::text
+ORDER BY email LIMIT 51
 `
 
 type StaffDonorSearchParams struct {
 	Term       string `json:"term"`
-	PageOffset int64  `json:"page_offset"`
+	AfterEmail string `json:"after_email"`
 }
 
 type StaffDonorSearchRow struct {
@@ -235,7 +249,7 @@ type StaffDonorSearchRow struct {
 }
 
 func (q *Queries) StaffDonorSearch(ctx context.Context, arg StaffDonorSearchParams) ([]StaffDonorSearchRow, error) {
-	rows, err := q.db.Query(ctx, staffDonorSearch, arg.Term, arg.PageOffset)
+	rows, err := q.db.Query(ctx, staffDonorSearch, arg.Term, arg.AfterEmail)
 	if err != nil {
 		return nil, err
 	}
@@ -362,14 +376,17 @@ func (q *Queries) StaffMessageByID(ctx context.Context, id pgtype.UUID) (DonorMe
 }
 
 const staffMessagePage = `-- name: StaffMessagePage :many
-SELECT id,kind,attempts,completed_at,last_error,suppressed_reason,available_at
-FROM donor_messages WHERE donor_id=$1
-ORDER BY created_at DESC,id LIMIT 51 OFFSET $2::bigint
+SELECT id,kind,attempts,completed_at,last_error,suppressed_reason,available_at,created_at
+FROM donor_messages WHERE donor_id=$1::uuid
+  AND created_at <= $2::timestamptz
+  AND (created_at < $2::timestamptz OR id > $3::uuid)
+ORDER BY created_at DESC,id LIMIT 51
 `
 
 type StaffMessagePageParams struct {
-	DonorID    pgtype.UUID `json:"donor_id"`
-	PageOffset int64       `json:"page_offset"`
+	DonorID  pgtype.UUID        `json:"donor_id"`
+	CursorAt pgtype.Timestamptz `json:"cursor_at"`
+	CursorID pgtype.UUID        `json:"cursor_id"`
 }
 
 type StaffMessagePageRow struct {
@@ -380,10 +397,11 @@ type StaffMessagePageRow struct {
 	LastError        pgtype.Text        `json:"last_error"`
 	SuppressedReason pgtype.Text        `json:"suppressed_reason"`
 	AvailableAt      pgtype.Timestamptz `json:"available_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) StaffMessagePage(ctx context.Context, arg StaffMessagePageParams) ([]StaffMessagePageRow, error) {
-	rows, err := q.db.Query(ctx, staffMessagePage, arg.DonorID, arg.PageOffset)
+	rows, err := q.db.Query(ctx, staffMessagePage, arg.DonorID, arg.CursorAt, arg.CursorID)
 	if err != nil {
 		return nil, err
 	}
@@ -399,6 +417,7 @@ func (q *Queries) StaffMessagePage(ctx context.Context, arg StaffMessagePagePara
 			&i.LastError,
 			&i.SuppressedReason,
 			&i.AvailableAt,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -411,7 +430,7 @@ func (q *Queries) StaffMessagePage(ctx context.Context, arg StaffMessagePagePara
 }
 
 const staffPendingAction = `-- name: StaffPendingAction :one
-SELECT id,actor_id,kind,target_id,amount_minor,period_end,reason,status,completed_at
+SELECT id,actor_id,kind,target_id,amount_minor,period_end,reason,status,completed_at,created_at
 FROM donor_staff_actions
 WHERE donor_id=$1 AND actor_id=$2 AND target_id=$3 AND kind=$4 AND status='AUTHORIZED'
 ORDER BY created_at DESC,id LIMIT 1
@@ -434,6 +453,7 @@ type StaffPendingActionRow struct {
 	Reason      string             `json:"reason"`
 	Status      string             `json:"status"`
 	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) StaffPendingAction(ctx context.Context, arg StaffPendingActionParams) (StaffPendingActionRow, error) {
@@ -454,6 +474,7 @@ func (q *Queries) StaffPendingAction(ctx context.Context, arg StaffPendingAction
 		&i.Reason,
 		&i.Status,
 		&i.CompletedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }

@@ -186,9 +186,11 @@ export default function DonorDetail({ donor }: { donor: string }) {
 }
 
 function ActionHistory({ donor }: { donor: string }) {
-  const [offset, setOffset] = useState(0);
+  // Keyset paging: each entry is the cursor that opened a page, the first being none.
+  const [cursors, setCursors] = useState<string[]>([]);
+  const cursor = cursors.at(-1);
   const { resource, data, reload } = useApiResource<Schema<"ActionPage">>(
-    `/donor/staff/donors/${donor}/actions?offset=${offset}`,
+    `/donor/staff/donors/${donor}/actions${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
   );
   const messages = resourceMessages(resource, {
     loading: "Loading staff actions…",
@@ -217,13 +219,17 @@ function ActionHistory({ donor }: { donor: string }) {
           ) : (
             <p>No refunds or cancellations recorded.</p>
           )}
-          {offset > 0 && (
-            <button type="button" className="secondary" onClick={() => setOffset(0)}>
-              Newest actions
+          {cursors.length > 0 && (
+            <button type="button" className="secondary" onClick={() => setCursors(cursors.slice(0, -1))}>
+              Newer actions
             </button>
           )}
-          {data.next_offset !== null && (
-            <button type="button" className="secondary" onClick={() => setOffset(data.next_offset ?? 0)}>
+          {data.next_cursor !== null && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setCursors([...cursors, data.next_cursor ?? ""])}
+            >
               Older actions
             </button>
           )}

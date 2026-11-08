@@ -1195,14 +1195,19 @@ func (q *Queries) PartnersDueMonthlyReport(ctx context.Context, arg PartnersDueM
 
 const pendingPartnerApplications = `-- name: PendingPartnerApplications :many
 SELECT id, organization, website, type, contact_name, title, work_email, phone, workforce_size, status, decided_by, decided_at, decision_reason, approved_partner_id, created_at, updated_at, receipt_hash, receipt_expires_at FROM donor_partner_applications
-WHERE status='PENDING'
+WHERE status='PENDING' AND (created_at, id) > ($1::timestamptz, $2::uuid)
 ORDER BY created_at ASC, id
-LIMIT 51 OFFSET $1::bigint
+LIMIT 51
 `
 
+type PendingPartnerApplicationsParams struct {
+	CursorAt pgtype.Timestamptz `json:"cursor_at"`
+	CursorID pgtype.UUID        `json:"cursor_id"`
+}
+
 // §8 Partnerships approval queue, oldest first.
-func (q *Queries) PendingPartnerApplications(ctx context.Context, pageOffset int64) ([]DonorPartnerApplication, error) {
-	rows, err := q.db.Query(ctx, pendingPartnerApplications, pageOffset)
+func (q *Queries) PendingPartnerApplications(ctx context.Context, arg PendingPartnerApplicationsParams) ([]DonorPartnerApplication, error) {
+	rows, err := q.db.Query(ctx, pendingPartnerApplications, arg.CursorAt, arg.CursorID)
 	if err != nil {
 		return nil, err
 	}
