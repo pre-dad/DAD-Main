@@ -1,6 +1,6 @@
 // Command provision creates or updates the database login of every process
 // from that process's database URL: the user it names, its password, and a
-// connection limit of the process's pool size. It runs as the schema owner
+// connection limit of its pool size times the replicas it may run. It runs as the schema owner
 // after migrations, which create the roles the logins join, and can be run
 // again at any time, such as after changing a password.
 package main
@@ -33,6 +33,14 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 	if err != nil {
 		return errors.New(dbroles.OwnerVariable + " is not a valid database URL")
 	}
+	replicas, err := dbroles.ParseReplicas(getenv(dbroles.ReplicasVariable))
+	if err != nil {
+		return err
+	}
+	budget, err := dbroles.ParseBudget(getenv(dbroles.BudgetVariable))
+	if err != nil {
+		return err
+	}
 	var logins []dbroles.Login
 	var missing []string
 	for _, role := range dbroles.Roles {
@@ -53,6 +61,9 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 	if len(missing) > 0 {
 		return errors.New("set " + strings.Join(missing, ", "))
 	}
+	if err = dbroles.Plan(logins, replicas, budget); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	pool, err := store.Open(ctx, ownerURL, 2)
@@ -67,7 +78,7 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 		return err
 	}
 	for _, login := range logins {
-		if _, err = fmt.Fprintf(out, "%s: login %s, connection limit %d\n", login.Role.Name, login.User, login.Limit); err != nil {
+		if _, err = fmt.Fprintf(out, "%s: login %s, connection limit %d (%d x %d replicas)\n", login.Role.Name, login.User, login.ConnectionLimit(), login.Pool, login.Replicas); err != nil {
 			return err
 		}
 	}

@@ -91,8 +91,8 @@ func TestProvisionCreatesALoginPerRole(t *testing.T) {
 		}
 		var limit int32
 		if err = conn.QueryRow(ctx, "SELECT rolconnlimit FROM pg_roles WHERE rolname=current_user").Scan(&limit); err != nil ||
-			limit != role.Pool {
-			t.Errorf("%s: connection limit %d, want %d (%v)", role.Name, limit, role.Pool, err)
+			limit != role.Pool*dbroles.DefaultReplicas(role) {
+			t.Errorf("%s: connection limit %d, want %d (%v)", role.Name, limit, role.Pool*dbroles.DefaultReplicas(role), err)
 		}
 		if err = role.Check(ctx, conn, false); err != nil {
 			t.Errorf("%s: %v", role.Name, err)
@@ -110,6 +110,7 @@ func TestProvisionCreatesALoginPerRole(t *testing.T) {
 	location, _ := url.Parse(previous)
 	location.User = url.UserPassword(location.User.Username(), secret(t))
 	location.RawQuery = "pool_max_conns=12"
+	env[dbroles.ReplicasVariable] = "api=3"
 	env[dbroles.API.Variable()] = location.String()
 	if err := run(nil, getenv, io.Discard); err != nil {
 		t.Fatalf("provisioning again: %v", err)
@@ -124,8 +125,8 @@ func TestProvisionCreatesALoginPerRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	var limit int32
-	if err = api.QueryRow(ctx, "SELECT rolconnlimit FROM pg_roles WHERE rolname=current_user").Scan(&limit); err != nil || limit != 12 {
-		t.Errorf("connection limit %d after pool_max_conns=12 (%v)", limit, err)
+	if err = api.QueryRow(ctx, "SELECT rolconnlimit FROM pg_roles WHERE rolname=current_user").Scan(&limit); err != nil || limit != 36 {
+		t.Errorf("connection limit %d after pool_max_conns=12 and api=3 (%v)", limit, err)
 	}
 }
 
@@ -174,5 +175,23 @@ func TestProvisionRefusesUnsafeLogins(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: got %v, want %q", tc.name, err, tc.want)
 		}
+	}
+}
+
+func TestProvisionRefusesLimitsOverTheBudgetBeforeChangingAnything(t *testing.T) {
+	env := environment(t)
+	env[dbroles.BudgetVariable] = "100"
+	err := run(nil, func(name string) string { return env[name] }, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "over the budget of 100") {
+		t.Fatalf("got %v", err)
+	}
+	if _, err = connect(t, env[dbroles.Monitor.Variable()]); err == nil {
+		t.Error("a refused provisioning left a login behind")
+	}
+	env[dbroles.BudgetVariable] = ""
+	env[dbroles.ReplicasVariable] = "nobody=2"
+	if err = run(nil, func(name string) string { return env[name] }, io.Discard); err == nil ||
+		!strings.Contains(err.Error(), "unknown role") {
+		t.Errorf("got %v", err)
 	}
 }
