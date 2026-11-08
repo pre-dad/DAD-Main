@@ -178,11 +178,11 @@ type OIDCService struct {
 	Settings *oidc.Settings
 }
 
-// SignIn verifies a provider id_token and issues a session for the donor it
+// SignIn verifies a provider id_token, checks its nonce binding, and issues a session for the donor it
 // belongs to. A verified identity is matched first by a prior link, then by the
 // verified email (which also records the link). A first-time verified identity
 // creates a donor account, subject to the same email-role checks as signup.
-func (s OIDCService) SignIn(ctx context.Context, provider oidc.Provider, idToken string, client Client) (Tokens, error) {
+func (s OIDCService) SignIn(ctx context.Context, provider oidc.Provider, idToken, nonce string, client Client) (Tokens, error) {
 	if s.Verifier == nil || !s.Settings.Configured(provider) {
 		return Tokens{}, ErrSignInUnavailable
 	}
@@ -192,6 +192,9 @@ func (s OIDCService) SignIn(ctx context.Context, provider oidc.Provider, idToken
 	}
 	if err != nil {
 		return Tokens{}, err
+	}
+	if !s.Settings.NonceAccepted(ident, nonce) {
+		return Tokens{}, ErrSignInCode
 	}
 	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (Tokens, error) {
 		q := queries.New(tx)

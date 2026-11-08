@@ -84,6 +84,7 @@ type liveClaims struct {
 	Iat   int64           `json:"iat"`
 	Email string          `json:"email"`
 	HD    string          `json:"hd"`
+	Nonce string          `json:"nonce"`
 	// EmailVerified is a boolean from Google and the string "true" or
 	// "false" from Apple.
 	EmailVerified json.RawMessage `json:"email_verified"`
@@ -129,7 +130,7 @@ func (v *liveVerifier) Verify(ctx context.Context, provider Provider, idToken st
 		time.Unix(claims.Iat, 0).After(now.Add(clockSkew)) {
 		return Identity{}, ErrToken
 	}
-	identity := Identity{Provider: provider, Subject: claims.Sub}
+	identity := Identity{Provider: provider, Subject: claims.Sub, Nonce: claims.Nonce}
 	// An unverified address must never link a provider account to the donor
 	// who owns that address.
 	if emailVerified(claims.EmailVerified) && (provider != Google || claims.HD != "" ||

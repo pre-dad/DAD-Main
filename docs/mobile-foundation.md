@@ -51,6 +51,22 @@ pins its dependency; changing the backend must preserve supported installed clie
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
 
+## Pending for the next release: OIDC nonce
+
+`oidcSignIn` gains an optional `nonce` (1 to 256 characters). It is not in a cut bundle
+yet; 2.11.0 clients keep working because the field is optional. A native client should
+generate a random value per attempt and send it:
+
+- Sign in with Apple: give `ASAuthorizationAppleIDRequest.nonce` the lowercase hex
+  SHA-256 of the value and send the raw value as `nonce`. Apple puts the hash in the
+  ID token, and the server accepts it.
+- Google (Credential Manager): pass the raw value as the request nonce and send the same
+  value as `nonce`.
+
+A mismatch, or a token without a `nonce` claim, fails like any unverifiable token (401).
+The server makes the field mandatory only when `DONOR_OIDC_REQUIRE_NONCE=true`, which is
+for after the apps that send it are the oldest in use.
+
 ## Compatible additions in version 2.11
 
 Version 2.11 lets an installed app submit a partner application and read its status.
@@ -410,7 +426,8 @@ apps, which call the API directly.
    Invitations and approval emails carry the same link.
 2. `POST /donor/partner/accept-invite` with `{"invite": "<link token>"}` answers
    `{"session": "<token>"}` to the app; a browser receives the HttpOnly
-   `dad_partner_session` cookie and `{"signed_in": true}` instead. The link works once.
+   `__Host-dad_partner_session` cookie (`dad_partner_session` over HTTP) and
+   `{"signed_in": true}` instead. The link works once.
 3. Every partner read and write takes the session as a bearer token. Mutations are
    rate-limited per account as on the web, sign-in and link exchange at the sign-in
    limit, and admin-only actions check the partner user's current role. `GET /donor/partner/application-status` instead

@@ -117,6 +117,21 @@ func TestLiveVerifierAcceptsProviderTokens(t *testing.T) {
 	}
 }
 
+func TestLiveVerifierCarriesNonceClaim(t *testing.T) {
+	p := newProvider(t)
+	v := p.verifier(issued)
+	claims := googleClaims()
+	claims["nonce"] = "n-0123456789"
+	id, err := v.Verify(context.Background(), Google, p.sign(rs256("k1"), claims))
+	if err != nil || id.Nonce != "n-0123456789" {
+		t.Fatalf("nonce claim: %+v %v", id, err)
+	}
+	id, err = v.Verify(context.Background(), Google, p.sign(rs256("k1"), googleClaims()))
+	if err != nil || id.Nonce != "" {
+		t.Fatalf("no nonce claim: %+v %v", id, err)
+	}
+}
+
 func TestLiveVerifierDropsUnverifiedEmail(t *testing.T) {
 	for _, verified := range []any{false, "false", nil} {
 		p := newProvider(t)

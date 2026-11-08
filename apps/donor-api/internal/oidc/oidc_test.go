@@ -2,8 +2,13 @@ package oidc
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"maps"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -118,5 +123,80 @@ func TestFromEnvironmentAcceptsSeveralClientIDs(t *testing.T) {
 		ErrConfiguration,
 	) {
 		t.Fatalf("a list of blanks: %v; want ErrConfiguration", err)
+	}
+}
+
+func TestNonceMatches(t *testing.T) {
+	const raw = "client-nonce-0123456789"
+	sum := sha256.Sum256([]byte(raw))
+	hashed := hex.EncodeToString(sum[:])
+	for _, tc := range []struct {
+		name, claim, supplied string
+		want                  bool
+	}{
+		{"raw form (Google, web)", raw, raw, true},
+		{"lowercase hex SHA-256 form (Apple native)", hashed, raw, true},
+		{"uppercase hex is not accepted", strings.ToUpper(hashed), raw, false},
+		{"base64 digest is not accepted", base64.StdEncoding.EncodeToString(sum[:]), raw, false},
+		{"different nonce", raw, "other-nonce-0123456789", false},
+		{"hash of a different nonce", hashed, "other-nonce-0123456789", false},
+		{"claim is a prefix", raw[:10], raw, false},
+		{"token lacks the claim", "", raw, false},
+		{"empty supplied nonce never matches", "", "", false},
+		{"supplied empty, claim set", raw, "", false},
+	} {
+		if got := NonceMatches(tc.claim, tc.supplied); got != tc.want {
+			t.Errorf("%s: NonceMatches = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestNonceAcceptedByMode(t *testing.T) {
+	optional, required := &Settings{}, &Settings{RequireNonce: true}
+	tagged := Identity{Nonce: "n-0123456789"}
+	for _, tc := range []struct {
+		name     string
+		settings *Settings
+		ident    Identity
+		supplied string
+		want     bool
+	}{
+		{"optional, none sent", optional, Identity{}, "", true},
+		{"optional, none sent, token has one", optional, tagged, "", true},
+		{"optional, matching", optional, tagged, "n-0123456789", true},
+		{"optional, mismatched", optional, tagged, "other", false},
+		{"optional, sent but token lacks claim", optional, Identity{}, "n-0123456789", false},
+		{"required, none sent", required, tagged, "", false},
+		{"required, matching", required, tagged, "n-0123456789", true},
+		{"required, mismatched", required, tagged, "other", false},
+	} {
+		if got := tc.settings.NonceAccepted(tc.ident, tc.supplied); got != tc.want {
+			t.Errorf("%s: NonceAccepted = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestFromEnvironmentRequireNonce(t *testing.T) {
+	base := map[string]string{"DONOR_OIDC_MODE": "live", "DONOR_OIDC_GOOGLE_CLIENT_ID": "g.apps"}
+	for value, want := range map[string]bool{"": false, "false": false, "true": true, " TRUE ": true} {
+		m := maps.Clone(base)
+		m["DONOR_OIDC_REQUIRE_NONCE"] = value
+		s, err := FromEnvironment(env(m))
+		if err != nil || s.RequireNonce != want {
+			t.Errorf("DONOR_OIDC_REQUIRE_NONCE=%q: %+v %v, want RequireNonce=%v", value, s, err, want)
+		}
+	}
+	m := maps.Clone(base)
+	m["DONOR_OIDC_REQUIRE_NONCE"] = "yes"
+	if _, err := FromEnvironment(env(m)); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("invalid value: %v; want ErrConfiguration", err)
+	}
+}
+
+func TestStubVerifierCarriesNonce(t *testing.T) {
+	token := SignStubTokenWithNonce("secret", Google, "s", "g.apps", "", "n-1", time.Now().Add(time.Hour))
+	id, err := NewVerifier(stubSettings()).Verify(context.Background(), Google, token)
+	if err != nil || id.Nonce != "n-1" {
+		t.Fatalf("identity = %+v, %v; want nonce n-1", id, err)
 	}
 }

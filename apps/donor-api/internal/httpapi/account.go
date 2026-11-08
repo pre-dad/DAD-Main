@@ -120,7 +120,7 @@ func (a *api) claim(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, newNativeSession(tokens))
 		return
 	}
-	a.setCookie(w, donorCookie, tokens.Access, int(tokens.AccessTTL.Seconds()), http.SameSiteLaxMode)
+	a.setSessionCookie(w, donorCookie, tokens.Access, int(tokens.AccessTTL.Seconds()))
 	writeJSON(w, http.StatusOK, map[string]bool{"claimed": true})
 }
 
@@ -170,6 +170,6 @@ func (a *api) logout(w http.ResponseWriter, r *http.Request) {
 
 func (a *api) clearDonorCookie(w http.ResponseWriter, r *http.Request) {
 	if !native(r) {
-		a.setCookie(w, donorCookie, "", -1, http.SameSiteLaxMode)
+		a.setSessionCookie(w, donorCookie, "", -1)
 	}
 }

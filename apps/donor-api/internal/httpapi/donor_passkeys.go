@@ -92,7 +92,7 @@ func (a *api) finishDonorPasskeySignIn(w http.ResponseWriter, r *http.Request) {
 		if client.App {
 			return newNativeSession(tokens), nil
 		}
-		a.setCookie(w, donorCookie, tokens.Access, int(tokens.AccessTTL.Seconds()), http.SameSiteLaxMode)
+		a.setSessionCookie(w, donorCookie, tokens.Access, int(tokens.AccessTTL.Seconds()))
 		return map[string]bool{"signed_in": true}, nil
 	})
 }

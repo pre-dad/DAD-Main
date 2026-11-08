@@ -61,7 +61,7 @@ const partnerSessionMaxAge = 12 * time.Hour
 // request, otherwise the web portal's cookie, as donorSession does.
 func partnerSession(r *http.Request) string {
 	if !native(r) {
-		return cookieValue(r, partnerCookie)
+		return sessionCookieValue(r, partnerCookie)
 	}
 	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
 	if !strings.EqualFold(scheme, "Bearer") || !validToken(token) {
@@ -177,13 +177,13 @@ func (a *api) partnerAccept(w http.ResponseWriter, r *http.Request) {
 		if native(r) {
 			return map[string]string{"session": token}, nil
 		}
-		a.setCookie(w, partnerCookie, token, int(partnerSessionMaxAge.Seconds()), http.SameSiteLaxMode)
+		a.setSessionCookie(w, partnerCookie, token, int(partnerSessionMaxAge.Seconds()))
 		return map[string]bool{"signed_in": true}, nil
 	})
 }
 
 func (a *api) partnerSignOut(w http.ResponseWriter, r *http.Request, session string) {
-	a.setCookie(w, partnerCookie, "", -1, http.SameSiteLaxMode)
+	a.setSessionCookie(w, partnerCookie, "", -1)
 	a.partnerPortal().serve(w, r, func(ctx context.Context) (any, error) {
 		return map[string]any{"signed_out": true}, a.PartnerPortal.SignOut(ctx, session)
 	})
