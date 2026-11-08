@@ -18,9 +18,16 @@ import (
 // that is a member of it.
 type Role struct {
 	Name string
-	// Pool is the number of connections the process opens, and the
-	// connection limit of its login.
+	// Pool is the number of connections one instance of the process opens.
+	// Its login's connection limit is Pool times the replicas provisioned
+	// (see Replicas).
 	Pool int32
+}
+
+// Key names the role in a replica list: the role name without its dad_ and
+// worker_ prefixes, with hyphens (api, projections, email-changes, staff-cli).
+func (r Role) Key() string {
+	return strings.ReplaceAll(strings.TrimPrefix(strings.TrimPrefix(r.Name, "dad_"), "worker_"), "_", "-")
 }
 
 var (

@@ -10,13 +10,34 @@ connects with its own login, which holds only what that process needs
 ([database roles](#database-roles)). Each process's database pool is sized for its role:
 the API opens up to 40 connections, and each worker, the monitor, the reconcile job,
 migrations, the staff command, and `rekey` up to 2 (`Pool` in `internal/dbroles/roles.go`;
-each login's `CONNECTION LIMIT` is set to the same number when you provision it). One
-replica of every process therefore needs up to 60 connections: the API's 40, six workers
-at 2, and the monitor, reconcile job, staff command and `rekey` at 2 each. A migration
-adds 2 while it runs. PostgreSQL's default `max_connections` is 100, of which 3 are
-reserved for superusers. When adding API replicas, raise `max_connections` (or put a
-[transaction-mode pooler](#connection-pooling) in front) so the total stays below it; `pool_max_conns=N` in a
-process's database URL overrides its size.
+`pool_max_conns=N` in a process's database URL overrides its size). One instance of every
+process therefore needs up to 60 connections: the API's 40, six workers at 2, and the monitor,
+reconcile job, staff command and `rekey` at 2 each. A migration adds 2 while it runs.
+
+Each login's `CONNECTION LIMIT` is its pool size times the instances of that process that may
+run at once, since a pooler such as RDS Proxy opens every instance's server connections as that
+one login ([provisioning](#provisioning-logins)). Provisioning fails when the limits together
+exceed the connection budget below.
+
+| Login | Pool | Instances | Connection limit |
+| --- | --- | --- | --- |
+| `dad_api` | 40 | 16 | 640 |
+| each of the six workers | 2 | 2 | 4 (24) |
+| monitor, reconcile, staff, `rekey` | 2 | 2 | 4 (16) |
+| Total | | | 680 of 850 |
+
+The API's 16 is the production autoscaling ceiling of 12 tasks plus 4 for the extra tasks a
+rolling deployment starts before it stops the old ones; every other process runs one instance,
+and 2 covers a deployment or a one-off run.
+
+The budget leaves room for `max_connections`. RDS sets it to `DBInstanceClassMemory / 9531392`:
+about 900 on a `db.t3.large` (8 GiB) and 1,800 on a `db.m6g.xlarge` (16 GiB). Take off the 3
+connections reserved for superusers and about 45 for a migration, the owner's own sessions,
+RDS's monitoring, and an operator at `psql`, which leaves 850 and 1,750. The default is 850;
+set `DONOR_ROLE_CONNECTION_BUDGET` when the instance class changes, and check the real value
+with `SHOW max_connections`. The limits are ceilings, not reservations: they bound what a
+faulty or runaway process may take, while the connections actually open stay at the pool sizes
+times the running tasks.
 
 Back up the database together with its separately stored encryption keys, then verify a
 restore. Losing the email or content encryption key makes its encrypted records
@@ -245,16 +266,20 @@ fails until the declaration matches.
 `./scripts/deploy.sh provision-roles` (or `make provision` with the variables loaded) runs
 as the schema owner after migrations. For each process it reads the user and password from
 the process's URL, creates or updates that login, makes it a member of the process's role,
-and sets its connection limit to the process's pool size, or to `pool_max_conns` in its
-URL. Only a SCRAM verifier computed locally reaches the server, never the password. It
+and sets its connection limit to the process's pool size (or `pool_max_conns` in its URL)
+times its replicas: `DONOR_ROLE_REPLICAS`, such as `api=12,push=3`, names the most instances of
+each role (keys: `api`, `stripe`, `projections`, `login-email`, `email-changes`, `messages`,
+`push`, `monitor`, `staff-cli`, `rekey`, `reconcile`), and a role it omits allows 16 API tasks
+or 2 of any other process. Provisioning fails, changing nothing, when the limits together exceed
+`DONOR_ROLE_CONNECTION_BUDGET` (default 850; see [database and containers](#database-and-containers)). Only a SCRAM verifier computed locally reaches the server, never the password. It
 refuses a URL naming the owner, a group role, a superuser or other privileged role, the
 same user for two processes, a password shorter than 16 printable ASCII characters, or a
 database other than the owner's, and it refuses while a role's privileges reach any user
 besides its configured login, such as a login left from a rename: revoke the role from it
 or drop it, then run provisioning again. It can be run at any time and changes nothing
-else. Connection limits assume one instance of each process, as Compose runs them; a
-one-off run of a process, such as the Stripe worker's `--retry-event`, shares its login's
-limit, and more replicas of a process need a higher limit than provisioning sets.
+else. A one-off run of a process, such as the Stripe worker's `--retry-event`, shares its login's
+limit; raise a role's replicas, and run provisioning again, before running more instances of
+it than the limit admits.
 
 Under Compose, `./scripts/deploy.sh monitor`, `reconcile`, `rekey`, and `staff` run those
 commands as their own services with their own logins, and the Stripe worker's retry runs as
@@ -317,7 +342,12 @@ pooler must track protocol-level prepared statements (PgBouncer 1.21 or later wi
 neither fails most requests with SQLSTATE 42P05 or 26000. The `role` URL parameter that
 local development uses is a startup parameter poolers do not forward; deployed processes
 use their own logins instead. Size the pooler's server connections to the database's
-`max_connections`, and leave each process's own pool size unchanged.
+`max_connections`, and leave each process's own pool size unchanged. For RDS Proxy, set
+`MaxConnectionsPercent` to 80 so the proxy holds at most about 720 of a `db.t3.large`'s 900
+connections, inside the 850 budget and leaving the rest to migrations and operators, and
+`MaxIdleConnectionsPercent` to 20 or less; each login's limit above then caps what any one
+process family may take of that, so no single role can starve the others. Raise the budget and
+`MaxConnectionsPercent` together with the instance class.
 
 ## Stripe
 
@@ -483,7 +513,7 @@ and park delivery after five failures. Requesting a replacement invalidates prio
 The queue workers (`login-email`, `email-changes`, `messages`, `push`) accept
 `--concurrency N` (up to 8) to run N claim loops in one process. Each loop claims a row with
 `FOR UPDATE SKIP LOCKED`, so none is delivered twice; N may not exceed the login's pool size,
-so raise `pool_max_conns` in the worker's database URL and re-run `make provision` first.
+so raise `pool_max_conns` in the worker's database URL and re-run `make provision` first (its connection limit is the pool size times its replicas).
 Projection refresh handles grace expiry, recurring boundaries, permanent recognition,
 and prior-year summaries. A projection is recomputed when facts that change it arrive and
 at its next time boundary: a due date, period end, grace deadline, cancellation,
