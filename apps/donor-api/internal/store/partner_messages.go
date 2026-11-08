@@ -49,8 +49,9 @@ func queuePartnerMessage(
 // PartnerMessageWorker delivers queued partner status emails (§7.5): metrics
 // verified, initiative complete, and the monthly report. The approval email is
 // the signer's sign-in link (PartnerLoginEmailWorker). It reuses the donor mail
-// transport and the same lease + bounded-retry shape as MessageWorker, fanning
-// each intent out to the org's current recipients.
+// transport and the same claim + lease + bounded-retry shape as MessageWorker.
+// Each intent is expanded into one delivery per current recipient, and every
+// delivery is sent, retried and parked independently.
 type PartnerMessageWorker struct {
 	DB        *pgxpool.Pool
 	Settings  mail.Settings
@@ -108,54 +109,26 @@ func partnerMessageSuppression(ctx context.Context, q *queries.Queries, job quer
 	return "", nil
 }
 
-// DeliverNext renders and sends the next due partner message to each of the
-// org's recipients. It reports whether it found work.
+// DeliverNext does one bounded step of partner mail: it expands the next due
+// intent into per-recipient deliveries, or else sends one due delivery. It
+// reports whether it found work.
 func (w PartnerMessageWorker) DeliverNext(ctx context.Context, now time.Time) (bool, error) {
 	site, err := mailSite(w.Settings, w.Origin, w.Transport)
 	if err != nil {
 		return false, err
 	}
-	job, recipients, worked, err := w.prepare(ctx, site, now)
-	if err != nil || !worked || job == nil {
+	if worked, err := w.fanOut(ctx, site, now); err != nil || worked {
 		return worked, err
 	}
-	var sendErr error
-	for i, r := range recipients {
-		// The Message-ID must be @-free (MessageID rejects '@'), so it is keyed
-		// by the job id and the recipient index rather than the email address.
-		messageID, idErr := mail.MessageID(w.Settings.Sender, "partner", job.ID.String()+":"+strconv.Itoa(i))
-		if idErr != nil {
-			sendErr = idErr
-			break
-		}
-		if sendErr = w.Transport.Send(ctx, mail.Message{
-			From: w.Settings.Sender, To: r.Email, Subject: job.Subject.String, Body: job.Body.String, ID: messageID,
-		}); sendErr != nil {
-			break
-		}
-	}
-	q := queries.New(w.DB)
-	if sendErr != nil {
-		return true, q.FailPartnerMessage(ctx, queries.FailPartnerMessageParams{
-			ID: job.ID, LastError: text("DeliveryError"), AvailableAt: messageRetryAt(now, job.Attempts+1),
-		})
-	}
-	return true, q.CompletePartnerMessage(ctx, queries.CompletePartnerMessageParams{
-		ID: job.ID, CompletedAt: timestamp(now), SuppressedReason: pgtype.Text{},
-	})
+	return w.deliver(ctx, now)
 }
 
-// prepare claims the next due intent, suppressing or completing it when it
-// should not send (no approved partner, no recipients), and rendering its body
-// on first use. It reserves the job with a lease so another worker leaves it
-// alone while its sends are in flight.
-func (w PartnerMessageWorker) prepare(
-	ctx context.Context,
-	site publicSite,
-	now time.Time,
-) (*queries.DonorPartnerMessage, []queries.PartnerMessageRecipientsRow, bool, error) {
-	var job *queries.DonorPartnerMessage
-	var recipients []queries.PartnerMessageRecipientsRow
+// fanOut claims the next due intent and expands it into one delivery per
+// current recipient, suppressing it when the partner is no longer approved or
+// has nobody to mail. The expansion is one set-based statement, so it is a
+// short step however large the organisation, and repeating it adds nothing. It
+// also expands intents queued before deliveries existed.
+func (w PartnerMessageWorker) fanOut(ctx context.Context, site publicSite, now time.Time) (bool, error) {
 	worked := false
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
@@ -176,15 +149,6 @@ func (w PartnerMessageWorker) prepare(
 				ID: row.ID, CompletedAt: timestamp(now), SuppressedReason: text(reason),
 			})
 		}
-		recipients, err = q.PartnerMessageRecipients(ctx, row.PartnerID)
-		if err != nil {
-			return err
-		}
-		if len(recipients) == 0 {
-			return q.CompletePartnerMessage(ctx, queries.CompletePartnerMessageParams{
-				ID: row.ID, CompletedAt: timestamp(now), SuppressedReason: text("no_recipients"),
-			})
-		}
 		if !row.Body.Valid {
 			subject, body, err := renderPartnerMessage(ctx, q, row, site)
 			if err != nil {
@@ -198,18 +162,77 @@ func (w PartnerMessageWorker) prepare(
 			if err = q.RenderPartnerMessage(ctx, queries.RenderPartnerMessageParams{ID: row.ID, Subject: text(subject), Body: text(body)}); err != nil {
 				return err
 			}
-			row.Subject, row.Body = text(subject), text(body)
 		}
-		if err = q.ClaimPartnerMessage(ctx, queries.ClaimPartnerMessageParams{ID: row.ID, AvailableAt: timestamp(now.Add(deliveryLease))}); err != nil {
+		recipients, err := q.FanOutPartnerMessage(ctx, queries.FanOutPartnerMessageParams{
+			MessageID: row.ID, PartnerID: row.PartnerID, AvailableAt: timestamp(now),
+		})
+		if err != nil {
 			return err
 		}
-		job = &row
+		if recipients == 0 {
+			return q.CompletePartnerMessage(ctx, queries.CompletePartnerMessageParams{
+				ID: row.ID, CompletedAt: timestamp(now), SuppressedReason: text("no_recipients"),
+			})
+		}
+		return q.FinishPartnerMessageFanOut(ctx, queries.FinishPartnerMessageFanOutParams{ID: row.ID, FannedOutAt: timestamp(now)})
+	})
+	return worked, err
+}
+
+// deliver sends the next due delivery. The claim counts the attempt and takes
+// the lease before the send, so a crash mid-send is retried after the lease and
+// parked after maxDeliveryAttempts, and the stable Message-ID lets a lost
+// acknowledgement resend the same email.
+func (w PartnerMessageWorker) deliver(ctx context.Context, now time.Time) (bool, error) {
+	var message *mail.Message
+	var id pgtype.UUID
+	var attempts int32
+	worked := false
+	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
+		q := queries.New(tx)
+		row, err := q.NextPartnerDelivery(ctx, queries.NextPartnerDeliveryParams{
+			AsOf: timestamp(now), LeaseUntil: timestamp(now.Add(deliveryLease)),
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		worked, id, attempts = true, row.ID, row.Attempts
+		reason := ""
+		switch {
+		case !row.PartnerApproved:
+			reason = "partner_not_approved"
+		case row.Disabled || !row.Accepted:
+			reason = "recipient_inactive"
+		}
+		if reason != "" {
+			return q.CompletePartnerDelivery(ctx, queries.CompletePartnerDeliveryParams{
+				ID: row.ID, CompletedAt: timestamp(now), SuppressedReason: text(reason),
+			})
+		}
+		// The Message-ID must be @-free (MessageID rejects '@'), so it is keyed
+		// by the message id and the recipient ordinal rather than the address.
+		messageID, err := mail.MessageID(w.Settings.Sender, "partner", row.MessageID.String()+":"+strconv.Itoa(int(row.Ordinal)))
+		if err != nil {
+			return err
+		}
+		message = &mail.Message{
+			From: w.Settings.Sender, To: row.Email, Subject: row.Subject.String, Body: row.Body.String, ID: messageID,
+		}
 		return nil
 	})
-	if err != nil {
-		return nil, nil, false, err
+	if err != nil || message == nil {
+		return worked, err
 	}
-	return job, recipients, worked, nil
+	q := queries.New(w.DB)
+	if sendErr := w.Transport.Send(ctx, *message); sendErr != nil {
+		return true, q.FailPartnerDelivery(ctx, queries.FailPartnerDeliveryParams{
+			ID: id, LastError: text("DeliveryError"), AvailableAt: messageRetryAt(now, attempts),
+		})
+	}
+	return true, q.CompletePartnerDelivery(ctx, queries.CompletePartnerDeliveryParams{ID: id, CompletedAt: timestamp(now)})
 }
 
 // PartnerMonthlyService queues the monthly partner report (§6.11) once per

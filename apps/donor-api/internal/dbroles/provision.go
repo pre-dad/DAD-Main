@@ -22,8 +22,15 @@ type Login struct {
 	User     string
 	Password string
 	Database string
-	// Limit is the pool size the URL's pool_max_conns sets, or the role's.
-	Limit int32
+	// Pool is the pool size the URL's pool_max_conns sets, or the role's.
+	Pool int32
+	// Replicas is how many instances of the process may run at once; zero is one.
+	Replicas int32
+}
+
+// ConnectionLimit is the login's CONNECTION LIMIT: every replica's pool.
+func (l Login) ConnectionLimit() int32 {
+	return l.Pool * max(l.Replicas, 1)
 }
 
 // minPassword keeps logins out of reach of guessing; generated passwords
@@ -36,13 +43,13 @@ func ParseLogin(role Role, url string) (Login, error) {
 	if err != nil {
 		return Login{}, fmt.Errorf("%s is not a valid database URL", role.Variable())
 	}
-	login := Login{Role: role, User: config.User, Password: config.Password, Database: config.Database, Limit: role.Pool}
+	login := Login{Role: role, User: config.User, Password: config.Password, Database: config.Database, Pool: role.Pool, Replicas: 1}
 	if size := config.RuntimeParams["pool_max_conns"]; size != "" {
 		limit, err := strconv.ParseInt(size, 10, 32)
 		if err != nil || limit < 1 {
 			return Login{}, fmt.Errorf("%s has an invalid pool_max_conns", role.Variable())
 		}
-		login.Limit = int32(limit)
+		login.Pool = int32(limit)
 	}
 	switch {
 	case login.User == "" || strings.HasPrefix(login.User, "pg_") || slices.ContainsFunc(Roles, func(r Role) bool { return r.Name == login.User }):
@@ -132,7 +139,7 @@ func provision(ctx context.Context, tx pgx.Tx, login Login) error {
 		statement = "ALTER ROLE " + user
 	}
 	// The verifier, never the password, reaches the server and its logs.
-	statement += fmt.Sprintf(" WITH LOGIN CONNECTION LIMIT %d PASSWORD '%s'", login.Limit, verifier)
+	statement += fmt.Sprintf(" WITH LOGIN CONNECTION LIMIT %d PASSWORD '%s'", login.ConnectionLimit(), verifier)
 	if _, err = tx.Exec(ctx, statement); err != nil {
 		return fmt.Errorf("create or update login %s (the owner needs CREATEROLE): %w", login.User, err)
 	}

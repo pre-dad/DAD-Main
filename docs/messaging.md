@@ -16,7 +16,7 @@ configured provider before enabling live donations. SMTP delivery is at least on
 | Streak ended | Latest renewal still failed when the 7-day grace window ended; giving donor | Essential status notice; suppressed if the payment recovered or the gift was cancelled first | `internal/store/messages.go` and `outbox.go` |
 | Event waitlist promotion | A waitlisted reservation becomes confirmed; the reserving donor | Transactional; suppressed once the reservation no longer holds | `internal/store/events.go` and `messages.go` |
 | Event cancelled | Staff cancel an event; every donor holding or waitlisted for a place | Transactional; no opt-out | `internal/store/event_staff.go` and `messages.go` |
-| Partner status | Partner approval, a verified figure published, an initiative marked complete, and a monthly summary; each recipient of the partner organisation | Operational notice to partner users, not donors; stopped if the partner is no longer approved | `internal/store/partner_push.go` and `partner_messages.go` |
+| Partner status | Partner approval, a verified figure published, an initiative marked complete, and a monthly summary; each recipient of the partner organisation, delivered and retried per recipient | Operational notice to partner users, not donors; stopped if the partner is no longer approved | `internal/store/partner_push.go` and `partner_messages.go` |
 | Partner invitation/sign-in | Partner approval or invitation (7-day invitation), or a sign-in request; the partner user | Essential authentication; single-use link | `internal/store/partner_sign_in.go` |
 | Enrolment confirmation | Program submission; enrolled person | R2 activation only; final preference classification requires approval | Prepared copy below; no R1 sending trigger |
 
