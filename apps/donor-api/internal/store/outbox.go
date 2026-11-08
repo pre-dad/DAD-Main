@@ -82,6 +82,10 @@ func RefreshDueProjections(ctx context.Context, pool *pgxpool.Pool, now time.Tim
 	processed := 0
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		q := queries.New(tx)
+		version, err := currentRulesVersion(ctx, q)
+		if err != nil {
+			return err
+		}
 		ids, err := q.DueProjectionDonors(ctx, queries.DueProjectionDonorsParams{NextRefreshAt: timestamp(now), Batch: int32(batch)})
 		if err != nil {
 			return err
@@ -89,7 +93,7 @@ func RefreshDueProjections(ctx context.Context, pool *pgxpool.Pool, now time.Tim
 		if len(ids) == 0 {
 			ids, err = q.OutdatedProjectionDonors(
 				ctx,
-				queries.OutdatedProjectionDonorsParams{RulesVersion: projectionRules, ComputedAt: timestamp(now), Batch: int32(batch)},
+				queries.OutdatedProjectionDonorsParams{RulesVersion: version, ComputedAt: timestamp(now), Batch: int32(batch)},
 			)
 			if err != nil {
 				return err
@@ -105,7 +109,7 @@ func RefreshDueProjections(ctx context.Context, pool *pgxpool.Pool, now time.Tim
 				if !ok {
 					return refreshErr
 				}
-				if err := q.DeferProjection(ctx, queries.DeferProjectionParams{DonorID: id, RefreshError: text(category), AsOf: timestamp(now), RulesVersion: projectionRules}); err != nil {
+				if err := q.DeferProjection(ctx, queries.DeferProjectionParams{DonorID: id, RefreshError: text(category), AsOf: timestamp(now), RulesVersion: version}); err != nil {
 					return err
 				}
 			}

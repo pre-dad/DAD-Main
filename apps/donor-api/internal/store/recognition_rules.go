@@ -196,7 +196,7 @@ func (s WordingService) SetRules(ctx context.Context, token string, in Recogniti
 			if err := q.SetMilestoneRules(ctx, queries.SetMilestoneRulesParams{Days: in.Milestones, UpdatedAt: timestamp(now), ActorID: actor.ID}); err != nil {
 				return struct{}{}, err
 			}
-			if err := q.RefreshRecognitionSchedule(ctx, timestamp(now)); err != nil {
+			if err := q.BumpRecognitionEpoch(ctx); err != nil {
 				return struct{}{}, err
 			}
 			return struct{}{}, auditStaff(
