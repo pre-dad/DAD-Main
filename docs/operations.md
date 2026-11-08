@@ -481,8 +481,16 @@ backoff, records an error class, and counts as parked in the monitor; other dono
 refreshing. Unknown streak state displays Updating; it must not silently become zero.
 
 Global rankings use `donor_projection_schedules` to claim one refresh every 15 minutes
-across projection replicas, even when no donors qualify. The schedule and ranking changes
-commit together, so a failed refresh remains due. Publishing an event records a durable
+across projection replicas, even when no donors qualify. One refresh ranks the whole
+population in a single repeatable-read snapshot and writes it in id-ordered chunks of
+5,000 donors, each its own short transaction that inserts, updates only the rows whose
+percentile, city or city rank changed, deletes donors who left the population, and awards
+the ranking badges. A transaction-scoped advisory lock on the snapshot connection keeps
+one instance refreshing at a time; it needs both connections of the projection worker's
+pool. Population sizes live in `donor_ranking_populations`, written after the last chunk.
+A refresh that fails part-way leaves each chunk old or new and stays due, so the next worker
+step recomputes from a fresh snapshot and converges. Apply migration
+`0086_ranking_populations.sql` before binaries that read it. Publishing an event records a durable
 alert job in the same transaction; projection workers resume it in batches of at most 256
 eligible volunteers. Republishing does not restart the job. Each batch rechecks publication,
 cancellation, start time, and notification choices; delivery rechecks the recipient again.
