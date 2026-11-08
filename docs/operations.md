@@ -370,8 +370,23 @@ cancellation are recorded from their own events. A failed call is retried every 
 minutes; after ten attempts it parks and the monitor's `reversals` queue counts it.
 Check the error class and the payment in Stripe, then refund or cancel it there.
 
+Each event is processed in three steps, so a slow Stripe call never holds a database
+connection, a row lock, or a donor lock. A short statement claims the next due event: it
+counts the attempt and pushes `available_at` six minutes ahead, which is the lease and
+outlasts the worker's five-minute step budget. The worker then reads the refund,
+subscription, and card state it needs from Stripe with no transaction open. Finally one
+transaction confirms the attempt still holds the lease, takes the donor lock, applies the
+event, and marks it processed. If the worker crashes after the claim, nothing was
+applied, and the event becomes due again when the lease expires, counted as one attempt.
+A worker whose lease was taken over, or whose event an operator reset, applies nothing.
+If another gift or refund state is recorded while the donor lock is being taken, the
+attempt rolls back and reads Stripe again rather than calling it under the lock. A
+worker stopped by shutdown gives its claim back uncounted. The claim is safe for
+several workers, since each takes a different event and the donor lock serialises events for
+one donor, but the worker command still runs one Stripe loop.
+
 Monitor the oldest unprocessed `donor_stripe_events`, attempt counts, and worker health.
-A failed event waits before its next attempt, doubling from one minute up to an hour,
+A failed event waits before its next attempt, doubling from one minute up to an hour (an event whose worker crashed instead waits out the six-minute lease),
 so a provider outage or an event that arrives before its gift is retried later rather
 than immediately. Events park after ten failed attempts. Investigate the error class
 (`PaymentUnavailable`, `MissingRecord`, `InvalidFacts`, or `ProcessingError`) and current

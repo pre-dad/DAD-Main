@@ -1,16 +1,38 @@
--- name: NextStripeEvent :one
-SELECT * FROM donor_stripe_events WHERE processed_at IS NULL AND attempts<10 AND available_at<=now()
-ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
+-- name: ClaimStripeEvent :one
+-- Leases the next due event to one attempt: the attempt is counted and the event
+-- is not due again until lease_until, so a crashed worker's event is retried
+-- after the lease expires. The returned attempts and available_at identify the
+-- attempt in the statements below.
+UPDATE donor_stripe_events e SET attempts = e.attempts + 1, available_at = sqlc.arg(lease_until)::timestamptz
+WHERE e.id = (
+    SELECT due.id FROM donor_stripe_events due
+    WHERE due.processed_at IS NULL AND due.attempts < 10 AND due.available_at <= sqlc.arg(as_of)::timestamptz
+    ORDER BY due.available_at, due.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+RETURNING *;
 
--- name: IncrementEventAttempt :exec
-UPDATE donor_stripe_events SET attempts=attempts+1 WHERE id=$1;
+-- name: LockClaimedStripeEvent :one
+-- Fails with no rows when the attempt no longer owns the event: another worker
+-- reclaimed it after the lease expired, an operator reset it, or it is done.
+SELECT id FROM donor_stripe_events
+WHERE id = $1 AND attempts = $2 AND available_at = $3 AND processed_at IS NULL
+FOR UPDATE;
 
 -- name: CompleteStripeEvent :exec
-UPDATE donor_stripe_events SET processed_at=$2,last_error=NULL WHERE id=$1;
+UPDATE donor_stripe_events SET processed_at = $2, last_error = NULL WHERE id = $1;
 
--- name: FailStripeEvent :exec
-UPDATE donor_stripe_events SET last_error=$2,
-available_at=now()+least(power(2,attempts)*interval '30 seconds',interval '1 hour') WHERE id=$1;
+-- name: FailStripeEvent :execrows
+UPDATE donor_stripe_events SET last_error = $2,
+available_at = now() + least(power(2, attempts) * interval '30 seconds', interval '1 hour')
+WHERE id = $1 AND attempts = $3 AND available_at = $4 AND processed_at IS NULL;
+
+-- name: ReleaseStripeEvent :execrows
+-- Gives back a claim whose attempt never reached a verdict, so the interrupted
+-- attempt is not counted against the event.
+UPDATE donor_stripe_events SET attempts = attempts - 1, available_at = sqlc.arg(as_of)::timestamptz
+WHERE id = $1 AND attempts = $2 AND available_at = $3 AND processed_at IS NULL;
 
 -- name: CheckoutDraft :one
 SELECT * FROM donor_checkouts WHERE id=$1;
