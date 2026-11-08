@@ -9,7 +9,12 @@ import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 type Pending = ResponseBody<"/donor/staff/partners/pending", "get">;
 
 export default function Pending() {
-  const { resource, data, reload } = useApiResource<Pending>("/donor/staff/partners/pending");
+  // Keyset paging: each entry is the cursor that opened a page, the first being none.
+  const [cursors, setCursors] = useState<string[]>([]);
+  const cursor = cursors.at(-1);
+  const { resource, data, reload } = useApiResource<Pending>(
+    `/donor/staff/partners/pending${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+  );
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
@@ -91,8 +96,26 @@ export default function Pending() {
             </article>
           ))
         ) : (
-          <p>No applications are awaiting review.</p>
+          <p>{cursors.length ? "No more applications on this page." : "No applications are awaiting review."}</p>
         ))}
+      {data && (
+        <p className="actions">
+          {cursors.length > 0 && (
+            <button type="button" className="secondary" onClick={() => setCursors(cursors.slice(0, -1))}>
+              Earlier applications
+            </button>
+          )}
+          {data.next_cursor !== null && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setCursors([...cursors, data.next_cursor ?? ""])}
+            >
+              Later applications
+            </button>
+          )}
+        </p>
+      )}
       <Announcer status={status} alert={error} />
     </Page>
   );

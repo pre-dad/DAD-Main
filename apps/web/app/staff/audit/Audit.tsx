@@ -8,8 +8,12 @@ import { formatDateTime } from "@/lib/dates";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
 export default function Audit() {
-  const [offset, setOffset] = useState(0);
-  const { resource, data, reload } = useApiResource<Schema<"AuditPage">>(`/donor/staff/audit?offset=${offset}`);
+  // Keyset paging: each entry is the cursor that opened a page, the first being none.
+  const [cursors, setCursors] = useState<string[]>([]);
+  const cursor = cursors.at(-1);
+  const { resource, data, reload } = useApiResource<Schema<"AuditPage">>(
+    `/donor/staff/audit${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+  );
   const messages = resourceMessages(resource, {
     loading: "Loading audit history…",
     failure: "Audit history could not be loaded right now. Please retry in a moment.",
@@ -55,13 +59,17 @@ export default function Audit() {
           ) : (
             <p>No events recorded.</p>
           )}
-          {offset > 0 && (
-            <button type="button" className="secondary" onClick={() => setOffset(Math.max(0, offset - 50))}>
+          {cursors.length > 0 && (
+            <button type="button" className="secondary" onClick={() => setCursors(cursors.slice(0, -1))}>
               Newer events
             </button>
           )}
-          {data.next_offset !== null && (
-            <button type="button" className="secondary" onClick={() => setOffset(data.next_offset ?? 0)}>
+          {data.next_cursor !== null && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setCursors([...cursors, data.next_cursor ?? ""])}
+            >
               Older events
             </button>
           )}
