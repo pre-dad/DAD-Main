@@ -83,9 +83,11 @@ func TestHandlersValidateInputBeforeCallingServices(t *testing.T) {
 		{"POST", "/donor/staff/donors/" + testID + "/gifts/" + testID + "/refund", `{"amount_minor":0,` + reason + `}`, true, 422},
 		{"POST", "/donor/staff/donors/" + testID + "/gifts/" + testID + "/refund", `{"amount_minor":100,"reason":"no"}`, true, 422},
 		{"POST", "/donor/staff/donors/" + testID + "/cancellation", `{"subscription_id":"` + testID + `",` + reason + `}`, true, 422},
-		{"GET", "/donor/staff/exports/.secrets.csv", "", false, 404},
-		{"GET", "/donor/staff/exports/Gifts.csv", "", false, 404},
-		{"GET", "/donor/staff/exports/gifts.json", "", false, 404},
+		{"GET", "/donor/staff/exports/jobs/not-a-uuid", "", false, 404},
+		{"GET", "/donor/staff/exports/jobs/not-a-uuid/file", "", false, 404},
+		{"GET", "/donor/staff/exports/gifts.csv", "", false, 404},
+		{"POST", "/donor/staff/exports/jobs", `{"dataset":"gifts","extra":1}`, false, 422},
+		{"POST", "/donor/staff/exports/jobs", `{"dataset":"gifts"}`, false, 503},
 		{"GET", "/donor/staff/content/sources/not-a-uuid", "", false, 404},
 	} {
 		r := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))

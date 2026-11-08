@@ -1178,15 +1178,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/exports/{file}": {
+    "/donor/staff/exports/jobs": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Download a dataset as CSV */
-        get: operations["export"];
+        /**
+         * The staff member's recent exports
+         * @description Exports not yet expired, newest first.
+         */
+        get: operations["exportJobs"];
+        put?: never;
+        /**
+         * Queue an export
+         * @description Builds the dataset in the background, so large datasets finish instead of aborting mid-download. Asking again for a dataset still being built answers with that job. At most three exports can be in progress per staff member.
+         */
+        post: operations["requestExport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/exports/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An export's progress */
+        get: operations["exportJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/exports/jobs/{job_id}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download a finished export as CSV
+         * @description Only the staff member who requested the export may download it, and only while their role permits the dataset and before it expires (24 hours after it finishes). Each download is audited.
+         */
+        get: operations["downloadExport"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3685,6 +3729,42 @@ export interface components {
         };
         ExportDatasets: {
             datasets: string[];
+        };
+        ExportRequest: {
+            /** @description A name from GET /donor/staff/exports. */
+            dataset: string;
+        };
+        ExportJob: {
+            /** Format: uuid */
+            id: string;
+            dataset: string;
+            /** @enum {string} */
+            state: "queued" | "running" | "complete" | "failed";
+            /**
+             * @description Present when the export failed: it exceeded the 50 MB stored-size cap, its requester lost access, or it kept erroring.
+             * @enum {string}
+             */
+            failure?: "too_large" | "forbidden" | "error";
+            /** Format: date-time */
+            requested_at: string;
+            /**
+             * Format: date-time
+             * @description Present once the export finished or failed.
+             */
+            completed_at?: string;
+            /**
+             * Format: date-time
+             * @description When the file is purged.
+             */
+            expires_at: string;
+            /**
+             * Format: int64
+             * @description Rows written so far.
+             */
+            row_count: number;
+        };
+        ExportJobs: {
+            jobs: components["schemas"]["ExportJob"][];
         };
         StoredSource: {
             /** Format: uuid */
@@ -6813,19 +6893,99 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
-    export: {
+    exportJobs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportJobs"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    requestExport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportJob"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    exportJob: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description A dataset name from GET /donor/staff/exports, plus `.csv`. */
-                file: string;
+                /** @description A malformed ID is 404, like an unknown one or one that belongs to another staff member. */
+                job_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Streamed CSV attachment. A failure after the first row aborts the connection rather than returning a truncated file. */
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportJob"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    downloadExport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one or one that belongs to another staff member. */
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description CSV attachment, streamed from the stored file. A failure after the first byte aborts the connection rather than returning a truncated file. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6837,6 +6997,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             503: components["responses"]["Unavailable"];
         };
     };

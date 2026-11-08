@@ -149,17 +149,21 @@ func TestRolesAreRefusedWhatTheyDoNotNeed(t *testing.T) {
 	}{
 		{dbroles.API, []string{
 			"UPDATE donor_referral_corrections SET rules_version=0", "DELETE FROM donor_referral_corrections",
+			"UPDATE donor_export_jobs SET state='complete'", "DELETE FROM donor_export_jobs", "INSERT INTO donor_export_chunks (job_id, seq, data) VALUES (gen_random_uuid(), 0, ''::bytea)",
 			"DROP TABLE donor_gifts", "ALTER TABLE donors ADD COLUMN extra integer", "CREATE TABLE extra (id integer)",
 			"TRUNCATE donor_messages", "UPDATE donor_gifts SET amount_minor=1", "DELETE FROM donors", "CREATE ROLE extra",
 		}},
 		{dbroles.ProjectionWorker, []string{
 			"UPDATE donor_referral_corrections SET rules_version=0", "DELETE FROM donor_referral_corrections",
 			"SELECT encrypted_token FROM donor_login_emails", "SELECT encrypted_token FROM donor_email_changes",
-			"UPDATE donors SET email='taken@example.org'", "SELECT email FROM donor_staff", "INSERT INTO donor_gifts (id) VALUES (gen_random_uuid())",
+			"UPDATE donors SET email='taken@example.org'", "UPDATE donor_staff SET role='SUPER_ADMIN'", "SELECT token_hash FROM donor_staff_sessions",
+			"INSERT INTO donor_gifts (id) VALUES (gen_random_uuid())", "SELECT encrypted_data FROM donor_content_sources",
+			"UPDATE donor_staff_audit SET action='x'", "DELETE FROM donor_staff_audit", "INSERT INTO donor_export_jobs (id) VALUES (gen_random_uuid())",
 		}},
 		{dbroles.Monitor, []string{
 			"SELECT body FROM donor_messages", "SELECT email FROM donors", "SELECT data FROM donor_stripe_events",
 			"SELECT new_email FROM donor_email_changes", "UPDATE donor_messages SET attempts=0", "DELETE FROM donor_push_notifications",
+			"SELECT data FROM donor_export_chunks", "SELECT actor_id FROM donor_export_jobs",
 		}},
 		{dbroles.Rekey, []string{"SELECT new_email FROM donor_email_changes", "SELECT donor_id FROM donor_login_emails", "SELECT name FROM donor_content_sources"}},
 		{dbroles.MessageWorker, []string{"SELECT encrypted_data FROM donor_content_sources", "SELECT token_hash FROM donor_sessions", "INSERT INTO donor_messages (id) VALUES (gen_random_uuid())"}},

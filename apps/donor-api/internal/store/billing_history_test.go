@@ -1,12 +1,11 @@
 package store
 
 import (
-	"bytes"
 	"context"
 	"encoding/csv"
 	"errors"
-	"io"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,15 +105,11 @@ func TestBillingHistoryExportsVerifiedFactsWithFinancialPermission(t *testing.T)
 	f.process(t)
 	_, finance := staffFixture(t, f.db, "SUPER_ADMIN")
 	_, support := staffFixture(t, f.db, "OP_PARTNERSHIPS")
-	s := &StaffService{DB: f.service.DB}
-	if err := s.Export(ctx, support, "billing-history", io.Discard); !errors.Is(err, ErrStaffForbidden) {
+	s, worker := newExportRig(t)
+	if _, err := s.RequestExport(ctx, support, "billing-history"); !errors.Is(err, ErrStaffForbidden) {
 		t.Fatalf("support exported billing history: %v", err)
 	}
-	var body bytes.Buffer
-	if err := s.Export(ctx, finance, "billing-history", &body); err != nil {
-		t.Fatal(err)
-	}
-	rows, err := csv.NewReader(&body).ReadAll()
+	rows, err := csv.NewReader(strings.NewReader(exportCSV(t, s, worker, finance, "billing-history"))).ReadAll()
 	if err != nil || len(rows) < 2 {
 		t.Fatalf("missing billing export: %v", err)
 	}

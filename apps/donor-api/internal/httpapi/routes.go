@@ -143,7 +143,10 @@ func (a *api) routes() []route {
 		a.staffWrite("POST /donor/staff/donors/{donor_id}/cancellation", a.cancelSubscription),
 
 		a.staffRead("GET /donor/staff/exports", a.exportDatasets),
-		a.staffRead("GET /donor/staff/exports/{file}", a.export),
+		a.staffWrite("POST /donor/staff/exports/jobs", a.requestExport),
+		a.staffRead("GET /donor/staff/exports/jobs", a.exportJobs),
+		a.staffRead("GET /donor/staff/exports/jobs/{job_id}", a.exportJob),
+		a.staffRead("GET /donor/staff/exports/jobs/{job_id}/file", a.downloadExport),
 
 		a.staffRead("GET /donor/staff/content", a.contentInventory),
 		a.staffRead("GET /donor/staff/content/rules", a.recognitionRules),
