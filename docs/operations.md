@@ -495,8 +495,20 @@ projection whenever no projection is due. Saving badge or milestone rules in the
 console does the same without rewriting any projection: it adds one to the single-row
 `donor_recognition_epoch`, and a projection is current only when its `rules_version` is at
 least `projectionRules` plus that epoch. The projections worker then recomputes the
-outdated donors in batches of `ProjectionBatch`, resuming across steps because each batch
-claims whatever is still outdated. Until a donor is refreshed the dashboard already shows
+outdated donors in transactions of `OutdatedBatch` (256), resuming across steps because each
+transaction claims whatever is still outdated. A step keeps starting transactions for
+`CatchUpSlice` (60 s of the 120 s step budget) before the other sweeps run, and every
+transaction claims due projections (at most `ProjectionBatch`, 64) before any outdated one,
+so a rules change delays a due projection by one transaction (about a second), not the
+backlog. Replicas claim disjoint donors with `SKIP LOCKED`, so convergence scales with the
+number of projections workers. Measured on a local PostgreSQL 14 with 200,000 seeded donors
+(about 7 gifts each): one worker refreshes about 250 donors a second at 256 to 5,000 per
+transaction and 140 to 200 at 64, so 1,000,000 donors converge in about 65 minutes with one
+worker and about 35 with two. A transaction locks its donors until it commits, so a donor
+write waits at most as long as one transaction: under a second at 256, 8 s at 2,000, 20 s at
+5,000. That is why the batch is not larger; raise `OutdatedBatch` only if a rules change must
+converge faster than adding a replica allows. Watch convergence by counting projections whose
+`rules_version` is below `projectionRules` plus the epoch. Until a donor is refreshed the dashboard already shows
 the saved ladder, thresholds and wording, since those are read live; earned badges and the
 next milestone date follow at the donor's refresh, as before. Convergence is complete when no projection has a `rules_version` below
 `projectionRules` plus the epoch. Apply migration `0087_recognition_rules_epoch.sql` before these binaries. A donor whose facts cannot be projected is deferred with

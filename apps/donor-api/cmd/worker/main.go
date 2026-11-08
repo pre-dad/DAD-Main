@@ -145,7 +145,7 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 			if err != nil {
 				return false, err
 			}
-			processed, err := store.RefreshDueProjections(ctx, pool, now, store.ProjectionBatch)
+			processed, err := store.CatchUpProjections(ctx, pool, func() time.Time { return time.Now().UTC() }, store.CatchUpSlice)
 			if err != nil {
 				return purged || processed > 0, err
 			}

@@ -264,3 +264,112 @@ func TestRulesSavedDuringARefreshConvergeToTheLatestEpoch(t *testing.T) {
 		t.Fatalf("%d of %d donors current at the latest epoch", n, len(f.ids))
 	}
 }
+
+func fixedClock(at time.Time) func() time.Time { return func() time.Time { return at } }
+
+func TestCatchUpProjectionsConvergesInBoundedTransactions(t *testing.T) {
+	pool := database(t)
+	worker := as(t, dbroles.ProjectionWorker)
+	ctx := context.Background()
+	f := newEpochFixture(t, 2*OutdatedBatch+88)
+	f.save(t, 7)
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if n, err := CatchUpProjections(cancelled, worker, fixedClock(f.now), time.Hour); err == nil || n != 0 {
+		t.Fatalf("cancelled catch-up claimed %d: %v", n, err)
+	}
+	if n := f.current(t, pool); n != 0 {
+		t.Fatalf("cancelled catch-up refreshed %d donors", n)
+	}
+
+	// An exhausted slice still runs one transaction, never more than one batch.
+	n, err := CatchUpProjections(ctx, worker, fixedClock(f.now), 0)
+	if err != nil || n != OutdatedBatch || f.current(t, pool) != OutdatedBatch {
+		t.Fatalf("first step claimed %d, %d current: %v", n, f.current(t, pool), err)
+	}
+	n, err = CatchUpProjections(ctx, worker, fixedClock(f.now), 0)
+	if err != nil || n != OutdatedBatch || f.current(t, pool) != 2*OutdatedBatch {
+		t.Fatalf("second step claimed %d, %d current: %v", n, f.current(t, pool), err)
+	}
+	// A generous slice finishes the remainder and stops when nothing is left.
+	n, err = CatchUpProjections(ctx, worker, fixedClock(f.now), time.Hour)
+	if err != nil || n != 88 || f.current(t, pool) != len(f.ids) {
+		t.Fatalf("final step claimed %d, %d current: %v", n, f.current(t, pool), err)
+	}
+	if n, err = CatchUpProjections(ctx, worker, fixedClock(f.now), time.Hour); err != nil || n != 0 {
+		t.Fatalf("converged catch-up claimed %d: %v", n, err)
+	}
+}
+
+func TestCatchUpProjectionsServesDueDonorsBeforeTheBacklog(t *testing.T) {
+	pool := database(t)
+	worker := as(t, dbroles.ProjectionWorker)
+	ctx := context.Background()
+	f := newEpochFixture(t, OutdatedBatch+10)
+	f.save(t, 7)
+	due := f.ids[len(f.ids)-1]
+	mustExec(t, pool, "UPDATE donor_metric_projections SET next_refresh_at=$2 WHERE donor_id=$1", due, f.now.Add(-time.Minute))
+
+	n, err := CatchUpProjections(ctx, worker, fixedClock(f.now), 0)
+	if err != nil || n != 1 {
+		t.Fatalf("first transaction claimed %d, want only the due donor: %v", n, err)
+	}
+	if got := f.current(t, pool); got != 1 {
+		t.Fatalf("%d donors current after the due refresh, want 1", got)
+	}
+	// Another donor falls due mid-backlog: the very next transaction takes it.
+	mustExec(t, pool, "UPDATE donor_metric_projections SET next_refresh_at=$2 WHERE donor_id=$1", f.ids[0], f.now.Add(-time.Minute))
+	if n, err = CatchUpProjections(ctx, worker, fixedClock(f.now), 0); err != nil || n != 1 {
+		t.Fatalf("second transaction claimed %d, want only the newly due donor: %v", n, err)
+	}
+	if n, err = CatchUpProjections(ctx, worker, fixedClock(f.now), time.Hour); err != nil || n != OutdatedBatch+8 {
+		t.Fatalf("backlog claimed %d, want %d: %v", n, OutdatedBatch+8, err)
+	}
+	if f.current(t, pool) != len(f.ids) {
+		t.Fatalf("%d of %d donors current", f.current(t, pool), len(f.ids))
+	}
+}
+
+func TestConcurrentCatchUpRefreshesEachDonorOnce(t *testing.T) {
+	pool := database(t)
+	worker := as(t, dbroles.ProjectionWorker)
+	ctx := context.Background()
+	f := newEpochFixture(t, 3*OutdatedBatch)
+	f.save(t, 7)
+
+	const replicas = 3
+	claimed := make([]int, replicas)
+	var wg sync.WaitGroup
+	for i := range replicas {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			n, err := CatchUpProjections(ctx, worker, fixedClock(f.now), time.Hour)
+			if err != nil {
+				t.Error(err)
+			}
+			claimed[i] = n
+		}()
+	}
+	wg.Wait()
+	total := 0
+	for _, n := range claimed {
+		total += n
+	}
+	if total != len(f.ids) || f.current(t, pool) != len(f.ids) {
+		t.Fatalf("replicas claimed %v (total %d) for %d donors, %d current", claimed, total, len(f.ids), f.current(t, pool))
+	}
+}
+
+func TestCatchUpProjectionsStopsWhenTheSliceIsSpent(t *testing.T) {
+	worker := as(t, dbroles.ProjectionWorker)
+	f := newEpochFixture(t, 3*OutdatedBatch)
+	f.save(t, 7)
+	// The clock is read once per transaction; the slice is real time, so a
+	// tiny slice ends the loop after the first transaction that outlasts it.
+	n, err := CatchUpProjections(context.Background(), worker, fixedClock(f.now), time.Nanosecond)
+	if err != nil || n != OutdatedBatch {
+		t.Fatalf("spent slice claimed %d, want one batch of %d: %v", n, OutdatedBatch, err)
+	}
+}
