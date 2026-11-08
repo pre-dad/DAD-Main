@@ -990,12 +990,26 @@ month-end boundaries, and ambiguous responses. Local test doubles do not prove t
 provider behaviors. Physical QR scanning, assistive-technology checks, and viral-load
 acceptance also require explicit evidence.
 
+## Partner mail delivery
+
+A partner status message is queued once per event as an organisation-level intent. The
+messages worker first expands the oldest due intent into one delivery per accepted,
+enabled partner user in a single set-based statement, then sends one delivery per step.
+Each delivery has its own attempt count, lease and backoff: claiming it counts the
+attempt and holds a five-minute lease, a failed send retries on the donor-mail backoff,
+and after five attempts it is parked for the queue monitor. A crash mid-send therefore
+retries after the lease and still reaches the cap, one recipient's failure never
+resends to the others, and the Message-ID is stable per recipient (message id and
+recipient ordinal, never the address). A user disabled or not yet accepted by send time
+is skipped and recorded as `recipient_inactive`. Intents queued before deliveries existed
+are expanded the same way. Delivery rows are removed with their message or user.
+
 ## Queue alerts and incident response
 
 Run `./scripts/deploy.sh monitor [--max-age 10m]` (or `go run ./cmd/monitor` from
 `apps/donor-api` with the database environment loaded). It emits only aggregate JSON counts,
 parked counts, and oldest due age for Stripe, projections, financial mail (including
-partner messages), login mail, email changes, push notifications, deleted-account
+partner messages and their per-recipient deliveries), login mail, email changes, push notifications, deleted-account
 reversals, and subscriptions. It exits nonzero if any job is parked or a due item is
 older than five minutes; `--max-age 10m` changes the age threshold. Future scheduled sends
 are excluded. An ongoing subscription last synced before its billing period ended is due

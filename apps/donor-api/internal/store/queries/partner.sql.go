@@ -131,17 +131,18 @@ func (q *Queries) ClaimPartnerLoginEmail(ctx context.Context, arg ClaimPartnerLo
 	return err
 }
 
-const claimPartnerMessage = `-- name: ClaimPartnerMessage :exec
-UPDATE donor_partner_messages SET available_at=$2 WHERE id=$1
+const completePartnerDelivery = `-- name: CompletePartnerDelivery :exec
+UPDATE donor_partner_message_deliveries SET completed_at=$2,suppressed_reason=$3 WHERE id=$1
 `
 
-type ClaimPartnerMessageParams struct {
-	ID          pgtype.UUID        `json:"id"`
-	AvailableAt pgtype.Timestamptz `json:"available_at"`
+type CompletePartnerDeliveryParams struct {
+	ID               pgtype.UUID        `json:"id"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	SuppressedReason pgtype.Text        `json:"suppressed_reason"`
 }
 
-func (q *Queries) ClaimPartnerMessage(ctx context.Context, arg ClaimPartnerMessageParams) error {
-	_, err := q.db.Exec(ctx, claimPartnerMessage, arg.ID, arg.AvailableAt)
+func (q *Queries) CompletePartnerDelivery(ctx context.Context, arg CompletePartnerDeliveryParams) error {
+	_, err := q.db.Exec(ctx, completePartnerDelivery, arg.ID, arg.CompletedAt, arg.SuppressedReason)
 	return err
 }
 
@@ -221,6 +222,21 @@ func (q *Queries) DisablePartnerUser(ctx context.Context, arg DisablePartnerUser
 	return result.RowsAffected(), nil
 }
 
+const failPartnerDelivery = `-- name: FailPartnerDelivery :exec
+UPDATE donor_partner_message_deliveries SET last_error=$2,available_at=$3 WHERE id=$1
+`
+
+type FailPartnerDeliveryParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	LastError   pgtype.Text        `json:"last_error"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+}
+
+func (q *Queries) FailPartnerDelivery(ctx context.Context, arg FailPartnerDeliveryParams) error {
+	_, err := q.db.Exec(ctx, failPartnerDelivery, arg.ID, arg.LastError, arg.AvailableAt)
+	return err
+}
+
 const failPartnerLoginEmail = `-- name: FailPartnerLoginEmail :exec
 UPDATE donor_partner_login_emails SET last_error=$2, available_at=$3 WHERE id=$1 AND completed_at IS NULL
 `
@@ -248,6 +264,47 @@ type FailPartnerMessageParams struct {
 
 func (q *Queries) FailPartnerMessage(ctx context.Context, arg FailPartnerMessageParams) error {
 	_, err := q.db.Exec(ctx, failPartnerMessage, arg.ID, arg.LastError, arg.AvailableAt)
+	return err
+}
+
+const fanOutPartnerMessage = `-- name: FanOutPartnerMessage :execrows
+INSERT INTO donor_partner_message_deliveries (id,message_id,partner_user_id,ordinal,available_at)
+SELECT gen_random_uuid(),$1,u.id,(row_number() OVER (ORDER BY u.email,u.id))::int-1,$2
+FROM donor_partner_users u
+WHERE u.partner_id=$3 AND u.disabled=false AND u.accepted_at IS NOT NULL
+ON CONFLICT (message_id,partner_user_id) DO NOTHING
+`
+
+type FanOutPartnerMessageParams struct {
+	MessageID   pgtype.UUID        `json:"message_id"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	PartnerID   pgtype.UUID        `json:"partner_id"`
+}
+
+// Expands an intent into one delivery per recipient: the org's users who can
+// receive mail, accepted (completed first sign-in) and not disabled. A pending
+// invitee has their own invite email and is not yet a recipient of status
+// notices. The ordinal numbers recipients for a stable Message-ID, and the
+// unique recipient makes a repeat expansion add nothing.
+func (q *Queries) FanOutPartnerMessage(ctx context.Context, arg FanOutPartnerMessageParams) (int64, error) {
+	result, err := q.db.Exec(ctx, fanOutPartnerMessage, arg.MessageID, arg.AvailableAt, arg.PartnerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const finishPartnerMessageFanOut = `-- name: FinishPartnerMessageFanOut :exec
+UPDATE donor_partner_messages SET fanned_out_at=$2,completed_at=$2 WHERE id=$1
+`
+
+type FinishPartnerMessageFanOutParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	FannedOutAt pgtype.Timestamptz `json:"fanned_out_at"`
+}
+
+func (q *Queries) FinishPartnerMessageFanOut(ctx context.Context, arg FinishPartnerMessageFanOutParams) error {
+	_, err := q.db.Exec(ctx, finishPartnerMessageFanOut, arg.ID, arg.FannedOutAt)
 	return err
 }
 
@@ -493,6 +550,66 @@ func (q *Queries) LockPartnerOrg(ctx context.Context, id pgtype.UUID) (pgtype.UU
 	return id_2, err
 }
 
+const nextPartnerDelivery = `-- name: NextPartnerDelivery :one
+WITH next AS (
+    SELECT q.id FROM donor_partner_message_deliveries q
+    WHERE q.completed_at IS NULL AND q.attempts<5 AND q.available_at<=$1
+    ORDER BY q.available_at,q.id LIMIT 1 FOR UPDATE SKIP LOCKED
+), claimed AS (
+    UPDATE donor_partner_message_deliveries d
+    SET attempts=d.attempts+1,available_at=$2
+    FROM next WHERE d.id=next.id
+    RETURNING d.id,d.message_id,d.partner_user_id,d.ordinal,d.attempts
+)
+SELECT c.id,c.message_id,c.ordinal,c.attempts,
+    m.subject,m.body,
+    u.email,u.disabled,(u.accepted_at IS NOT NULL)::boolean AS accepted,
+    (s.approved_at IS NOT NULL)::boolean AS partner_approved
+FROM claimed c
+JOIN donor_partner_messages m ON m.id=c.message_id
+JOIN donor_partner_users u ON u.id=c.partner_user_id
+JOIN donor_partner_signups s ON s.id=m.partner_id
+`
+
+type NextPartnerDeliveryParams struct {
+	AsOf       pgtype.Timestamptz `json:"as_of"`
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+}
+
+type NextPartnerDeliveryRow struct {
+	ID              pgtype.UUID `json:"id"`
+	MessageID       pgtype.UUID `json:"message_id"`
+	Ordinal         int32       `json:"ordinal"`
+	Attempts        int32       `json:"attempts"`
+	Subject         pgtype.Text `json:"subject"`
+	Body            pgtype.Text `json:"body"`
+	Email           string      `json:"email"`
+	Disabled        bool        `json:"disabled"`
+	Accepted        bool        `json:"accepted"`
+	PartnerApproved bool        `json:"partner_approved"`
+}
+
+// Reserves the oldest due delivery for one send: the attempt is counted and the
+// lease taken in the same statement, so a send that crashes the worker is still
+// retried later and eventually parked.
+func (q *Queries) NextPartnerDelivery(ctx context.Context, arg NextPartnerDeliveryParams) (NextPartnerDeliveryRow, error) {
+	row := q.db.QueryRow(ctx, nextPartnerDelivery, arg.AsOf, arg.LeaseUntil)
+	var i NextPartnerDeliveryRow
+	err := row.Scan(
+		&i.ID,
+		&i.MessageID,
+		&i.Ordinal,
+		&i.Attempts,
+		&i.Subject,
+		&i.Body,
+		&i.Email,
+		&i.Disabled,
+		&i.Accepted,
+		&i.PartnerApproved,
+	)
+	return i, err
+}
+
 const nextPartnerLoginEmail = `-- name: NextPartnerLoginEmail :one
 SELECT id, partner_user_id, kind, encrypted_token, expires_at, attempts, last_error, available_at, completed_at, created_at FROM donor_partner_login_emails WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
@@ -517,7 +634,7 @@ func (q *Queries) NextPartnerLoginEmail(ctx context.Context, availableAt pgtype.
 }
 
 const nextPartnerMessage = `-- name: NextPartnerMessage :one
-SELECT id, partner_id, kind, dedup_key, context, available_at, completed_at, attempts, last_error, suppressed_reason, subject, body, created_at FROM donor_partner_messages WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+SELECT id, partner_id, kind, dedup_key, context, available_at, completed_at, attempts, last_error, suppressed_reason, subject, body, created_at, fanned_out_at FROM donor_partner_messages WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
 `
 
@@ -538,6 +655,7 @@ func (q *Queries) NextPartnerMessage(ctx context.Context, availableAt pgtype.Tim
 		&i.Subject,
 		&i.Body,
 		&i.CreatedAt,
+		&i.FannedOutAt,
 	)
 	return i, err
 }
@@ -742,40 +860,6 @@ func (q *Queries) PartnerLogo(ctx context.Context, id pgtype.UUID) ([]byte, erro
 	var logo_png []byte
 	err := row.Scan(&logo_png)
 	return logo_png, err
-}
-
-const partnerMessageRecipients = `-- name: PartnerMessageRecipients :many
-SELECT email,name FROM donor_partner_users
-WHERE partner_id=$1 AND disabled=false AND accepted_at IS NOT NULL
-ORDER BY email
-`
-
-type PartnerMessageRecipientsRow struct {
-	Email string `json:"email"`
-	Name  string `json:"name"`
-}
-
-// The org's users who can receive mail: accepted (completed first sign-in) and
-// not disabled. A pending invitee has their own invite email and is not yet a
-// recipient of status notices.
-func (q *Queries) PartnerMessageRecipients(ctx context.Context, partnerID pgtype.UUID) ([]PartnerMessageRecipientsRow, error) {
-	rows, err := q.db.Query(ctx, partnerMessageRecipients, partnerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []PartnerMessageRecipientsRow{}
-	for rows.Next() {
-		var i PartnerMessageRecipientsRow
-		if err := rows.Scan(&i.Email, &i.Name); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const partnerOrgByID = `-- name: PartnerOrgByID :one

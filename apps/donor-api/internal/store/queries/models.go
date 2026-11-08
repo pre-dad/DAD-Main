@@ -332,6 +332,7 @@ type DonorPartnerMessage struct {
 	Subject          pgtype.Text        `json:"subject"`
 	Body             pgtype.Text        `json:"body"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	FannedOutAt      pgtype.Timestamptz `json:"fanned_out_at"`
 }
 
 type DonorPartnerPushNotification struct {
