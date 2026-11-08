@@ -484,7 +484,7 @@ outdated donors in batches of `ProjectionBatch`, resuming across steps because e
 claims whatever is still outdated. Until a donor is refreshed the dashboard already shows
 the saved ladder, thresholds and wording, since those are read live; earned badges and the
 next milestone date follow at the donor's refresh, as before. Convergence is complete when no projection has a `rules_version` below
-`projectionRules` plus the epoch. A donor whose facts cannot be projected is deferred with
+`projectionRules` plus the epoch. Apply migration `0087_recognition_rules_epoch.sql` before these binaries. A donor whose facts cannot be projected is deferred with
 backoff, records an error class, and counts as parked in the monitor; other donors keep
 refreshing. Unknown streak state displays Updating; it must not silently become zero.
 
