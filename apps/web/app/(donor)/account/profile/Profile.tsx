@@ -10,15 +10,7 @@ import { ApiError, api, failureMessage, type RequestBody, type Schema } from "@/
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { Passkeys } from "./Passkeys";
 import { Sessions } from "./Sessions";
-
-/** Volunteer interests offered on the web (E-1). A saved interest outside this list is kept. */
-export const volunteerInterests: Record<string, string> = {
-  "food-security": "Food banks and meal programs",
-  mentoring: "Mentoring and tutoring",
-  "community-cleanup": "Community clean-ups",
-  housing: "Housing and shelter",
-  "fundraising-events": "Fundraising events",
-};
+import { VolunteerInterests } from "./VolunteerInterests";
 
 const field = (form: FormData, name: string) => String(form.get(name) ?? "").trim();
 
@@ -97,11 +89,6 @@ export default function Profile() {
       );
       setMessage("Your details were saved.");
     }, "Your details were not saved. Please retry in a moment.");
-  };
-  const toggleInterest = (interest: string, chosen: boolean) => {
-    if (!data) return;
-    const others = data.volunteer_interests.filter((saved) => saved !== interest);
-    setData({ ...data, volunteer_interests: chosen ? [...others, interest] : others });
   };
   const deleteAccount = () => {
     if (!window.confirm("Delete your DAD account? This can’t be undone.")) return;
@@ -336,19 +323,11 @@ export default function Profile() {
                     I volunteer
                   </label>
                   {data.volunteer && (
-                    <fieldset>
-                      <legend>What interests you?</legend>
-                      {Object.entries(volunteerInterests).map(([interest, label]) => (
-                        <label className="choice" key={interest}>
-                          <input
-                            type="checkbox"
-                            checked={data.volunteer_interests.includes(interest)}
-                            onChange={(event) => toggleInterest(interest, event.target.checked)}
-                          />{" "}
-                          {label}
-                        </label>
-                      ))}
-                    </fieldset>
+                    <VolunteerInterests
+                      interests={data.volunteer_interests}
+                      onChange={(volunteer_interests) => setData({ ...data, volunteer_interests })}
+                      disabled={busy}
+                    />
                   )}
                 </fieldset>
                 <button className="button" disabled={busy} type="submit">

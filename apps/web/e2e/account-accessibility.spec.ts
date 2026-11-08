@@ -144,6 +144,8 @@ for (const [path, fixture] of Object.entries(profiles)) {
     if (path === "/account/profile") {
       await page.getByText("Change account email", { exact: true }).click();
       await expect(page.getByLabel("New email address")).toBeVisible();
+      // Axe measures targets at the current scroll; the sticky header must not hide the one scrolled under it.
+      await page.evaluate(() => scrollTo(0, 0));
     }
     const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
     expect(results.violations).toEqual([]);
@@ -180,6 +182,57 @@ test("the profile lists where the donor is signed in and signs out another devic
   await expect(section.getByRole("listitem")).toHaveCount(1);
   await expect(section.getByText("You’re not signed in anywhere else.")).toBeVisible();
   expect(revoked).toBe(1);
+  expect((await accessibility()).violations).toEqual([]);
+  expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
+});
+
+test("volunteer interests are added, removed, saved and reloaded by keyboard alone", async ({ page }) => {
+  let saved = { ...profiles["/account/profile"].data };
+  const posts: { version: number; volunteer_interests: string[] }[] = [];
+  await page.route("**/api/donor/me/profile", (route) => route.fulfill({ json: saved }));
+  await page.route("**/api/donor/me/sessions", (route) => route.fulfill({ json: { sessions: [thisBrowser, phone] } }));
+  await page.route("**/api/donor/me/passkeys", (route) => route.fulfill({ json: passkeys }));
+  await page.route("**/api/donor/me/preferences", async (route) => {
+    const body = route.request().postDataJSON();
+    posts.push(body);
+    saved = { ...saved, ...body, version: saved.version + 1 };
+    await route.fulfill({ json: saved });
+  });
+  await page.goto("/account/profile");
+  const interests = page.getByRole("group", { name: "What interests you?" });
+  await expect(interests.getByRole("listitem")).toHaveText(["mentoringRemove"]);
+  const accessibility = () =>
+    new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  expect((await accessibility()).violations).toEqual([]);
+
+  const box = interests.getByRole("textbox", { name: "Add an interest" });
+  await box.focus();
+  await page.keyboard.type("  Dog walking ");
+  await page.keyboard.press("Enter");
+  await expect(interests.getByRole("status")).toHaveText("Added Dog walking. 2 of 20 interests.");
+  await expect(box).toBeFocused();
+  await page.keyboard.type("MENTORING");
+  await page.keyboard.press("Enter");
+  await expect(interests.getByRole("alert")).toHaveText("“MENTORING” is already on your list.");
+  await expect(interests.getByRole("listitem")).toHaveCount(2);
+  expect((await accessibility()).violations).toEqual([]);
+
+  await interests.getByRole("button", { name: "Remove mentoring" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(interests.getByRole("status")).toHaveText("Removed mentoring. 1 of 20 interests.");
+  await expect(interests.getByRole("listitem")).toHaveText(["Dog walkingRemove"]);
+  expect(posts).toEqual([]);
+
+  await page.getByRole("button", { name: "Save preferences" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("Preferences saved.")).toBeVisible();
+  expect(posts).toHaveLength(1);
+  expect(posts[0]).toMatchObject({ version: 1, volunteer_interests: ["Dog walking"] });
+
+  await page.reload();
+  await expect(interests.getByRole("listitem")).toHaveText(["Dog walkingRemove"]);
+  await interests.getByRole("button", { name: "Remove Dog walking" }).click();
+  await expect(interests.getByText("No interests added yet.")).toBeVisible();
   expect((await accessibility()).violations).toEqual([]);
   expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
 });
