@@ -196,8 +196,8 @@ func TestRankingRefreshPercentileCityRankAndOptOut(t *testing.T) {
 		t.Fatalf("top donor city_rank=%d want 1", got)
 	}
 	// Tie on 300 local days: the earlier start ranks ahead (rank 2 vs 3).
-	if e, l := cityRank(tieEarlier), cityRank(tieLater); !(e < l) {
-		t.Fatalf("tie-break failed: earlier=%d later=%d (earlier should rank ahead)", e, l)
+	if e, l := cityRank(tieEarlier), cityRank(tieLater); e != 2 || l != 3 {
+		t.Fatalf("tie-break failed: earlier=%d later=%d, want 2 and 3", e, l)
 	}
 
 	// The opted-out donor has no ranking row at all.

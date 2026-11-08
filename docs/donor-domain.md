@@ -171,9 +171,15 @@ identify the channel without the referred donor's name or amount. Send the initi
 account-claim email with replacement-link access, without promotional reminders.
 The donor app's notifications follow the same facts: a referral converted (with its
 channel, not the referred donor's name or amount), a failed renewal putting a streak at
-risk (once per failed period), and a streak milestone. Each is optional and starts on
-once the app is allowed to notify, since the device's permission prompt is the opt-in;
-preferences are rechecked before sending.
+risk (once per failed period), a streak milestone, a streak that ended after grace, an
+earned badge, a waitlist promotion, event reminders and nearby events, and an event
+cancellation. Each except the cancellation is optional and starts on once the app is
+allowed to notify, since the device's permission prompt is the opt-in; preferences are
+rechecked before sending. [Messaging](messaging.md) lists every message and notification.
+A donor who volunteers (E-1) may also list event interests. They are free-form text, not a
+fixed list: up to 20 entries of at most 60 characters, trimmed, non-empty and unique, which
+the donor adds and removes in the profile. The API enforces the same bounds, and the profile
+returns them as `volunteer_interests`.
 Marketing consent is separate. Receipts/security/essential payment notices are distinct
 from optional messages, subject to approved legal classification. Prepare the enrolment
 template at R1 and activate it with R2 enrolment. Finance approves summary treatment;
@@ -206,5 +212,4 @@ An address already attached to another donor is rejected after verification; acc
 are never merged automatically. Historical checkout and processor billing records retain
 their original details.
 
-The inactive enrolment queue and header-only export exist at R1. There is no enrolment
-trigger until R2; the [prepared confirmation wording](messaging.md) does not promise funds.
+R1 has no enrolment queue, export or trigger; all of that arrives with R2. The [prepared confirmation wording](messaging.md) does not promise funds.

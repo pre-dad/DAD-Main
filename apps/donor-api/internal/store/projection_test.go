@@ -693,10 +693,8 @@ func TestRefreshNextProjectionDefersUnprojectableDonor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, row := range rows {
-		if row.Queue == "projections" && (row.Due != 1 || row.Parked != 1) {
-			t.Fatal("unprojectable donor not surfaced", row)
-		}
+	if row := queueHealthRow(t, rows, "projections"); row.Due != 1 || row.Parked != 1 {
+		t.Fatal("unprojectable donor not surfaced", row)
 	}
 	if worked, err := RefreshNextProjection(ctx, worker, now.Add(5*time.Minute)); err != nil || !worked {
 		t.Fatal(worked, err)
@@ -767,7 +765,7 @@ func TestRefreshDueProjectionsBatchesDonors(t *testing.T) {
 		t.Fatalf("outdated fallback: processed %d want 1: %v", processed, err)
 	}
 	o, err := q.Projection(ctx, outdated)
-	if err != nil || o.RulesVersion != projectionRules || !o.ComputedAt.Time.Equal(now) {
+	if err != nil || o.RulesVersion != currentVersion(t) || !o.ComputedAt.Time.Equal(now) {
 		t.Fatalf("outdated donor not recomputed: %+v %v", o, err)
 	}
 
@@ -895,7 +893,7 @@ func TestProjectionWaitsForItsNextBoundaryAndSummarizesAtNewYear(t *testing.T) {
 		wantNext = sevenDays
 	}
 	if p, err := projectFacts(ctx, h.q, donor, summer); err != nil || !p.NextRefreshAt.Time.Equal(wantNext) ||
-		p.RulesVersion != projectionRules {
+		p.RulesVersion != currentVersion(t) {
 		t.Fatalf("projection did not schedule its nearest boundary: %+v %v", p, err)
 	}
 	newYear := time.Date(2028, 1, 1, 0, 0, 0, 0, recognition.NewYork)
@@ -952,7 +950,7 @@ func TestProjectionsFromEarlierRulesAreRecomputed(t *testing.T) {
 		t.Fatal("recomputed twice, or a projection computed after the clock taken", worked, err)
 	}
 	p, err := queries.New(pool).Projection(ctx, outdated)
-	if err != nil || p.RulesVersion != projectionRules || !p.ComputedAt.Time.Equal(now) {
+	if err != nil || p.RulesVersion != currentVersion(t) || !p.ComputedAt.Time.Equal(now) {
 		t.Fatalf("outdated projection: %+v %v", p, err)
 	}
 }

@@ -5,12 +5,22 @@ VALUES ($1, $2, $3, $4, $5, $6);
 -- name: InsertObservedEvent :exec
 INSERT INTO analytics_events(id,name,donor_id,source,properties,occurred_at,journey_id,dedup_key)
 VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING;
+-- name: InsertObservedEvents :exec
+INSERT INTO analytics_events(id,name,donor_id,source,properties,occurred_at,journey_id)
+SELECT unnest(sqlc.arg(ids)::uuid[]),unnest(sqlc.arg(names)::text[]),sqlc.narg(donor_id)::uuid,sqlc.arg(source)::text,
+ unnest(sqlc.arg(properties)::jsonb[]),unnest(sqlc.arg(occurred_at)::timestamptz[]),unnest(sqlc.arg(journeys)::uuid[])
+ON CONFLICT DO NOTHING;
 -- name: AttachCheckoutJourney :exec
 UPDATE donor_checkouts SET journey_id=$2 WHERE id=$1 AND journey_id IS NULL;
 -- name: DeleteDonorAnalytics :exec
 DELETE FROM analytics_events WHERE donor_id=$1;
--- name: PurgeAnalytics :exec
-DELETE FROM analytics_events WHERE received_at<$1;
+-- name: PurgeAnalytics :execrows
+-- One bounded batch of events past retention, oldest first, so a pass never
+-- holds a long transaction or scans the table.
+DELETE FROM analytics_events WHERE id=ANY(ARRAY(
+ SELECT id FROM analytics_events WHERE received_at<sqlc.arg(received_before)::timestamptz
+ ORDER BY received_at LIMIT sqlc.arg(batch)
+));
 -- name: BindAnalyticsJourney :exec
 UPDATE analytics_events SET donor_id=$2 WHERE journey_id=$1 AND donor_id IS NULL;
 -- name: JourneyReport :one

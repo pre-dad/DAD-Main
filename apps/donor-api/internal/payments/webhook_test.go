@@ -247,3 +247,57 @@ func TestReceiverPropagatesPersistenceFailure(t *testing.T) {
 		t.Fatal("acknowledged uncommitted event")
 	}
 }
+
+func TestSignatureIsBoundToSecretTimestampAndBody(t *testing.T) {
+	body, signature := signed(t, event(), time.Now())
+	at := time.Now()
+	otherSecret := fmt.Sprintf("t=%d,v1=%x", at.Unix(), stripe.ComputeSignature(at, body, "whsec_another_secret"))
+	moved := fmt.Sprintf("t=%d,v1=%x", at.Add(time.Minute).Unix(), stripe.ComputeSignature(at, body, testSecret))
+	for name, header := range map[string]string{
+		"another secret":    otherSecret,
+		"timestamp altered": moved,
+		"missing":           "",
+		"no signature":      fmt.Sprintf("t=%d", at.Unix()),
+		"no timestamp":      "v1=" + strings.SplitN(signature, "v1=", 2)[1],
+		"garbage":           "v1=zz",
+		"wrong scheme":      strings.Replace(signature, "v1=", "v0=", 1),
+	} {
+		if verified, err := verifyEvent(body, header, testSecret); !errors.Is(err, ErrInvalidEvent) || verified != nil {
+			t.Errorf("%s: %v %v; want ErrInvalidEvent", name, verified, err)
+		}
+	}
+	if _, err := verifyEvent(body, signature, testSecret); err != nil {
+		t.Fatalf("the genuine signature: %v", err)
+	}
+}
+
+func TestOversizedWebhookBodyIsRejectedBeforeVerification(t *testing.T) {
+	huge := event()
+	huge["padding"] = strings.Repeat("x", MaxWebhookBytes)
+	body, signature := signed(t, huge, time.Now())
+	if len(body) <= MaxWebhookBytes {
+		t.Fatalf("fixture body is %d bytes", len(body))
+	}
+	if _, err := verifyEvent(body, signature, testSecret); !errors.Is(err, ErrInvalidEvent) {
+		t.Fatalf("oversized body: %v; want ErrInvalidEvent", err)
+	}
+}
+
+func TestReceiverWithoutInboxOrSecretNeverAcknowledges(t *testing.T) {
+	body, signature := signed(t, event(), time.Now())
+	if err := (Receiver{Secret: testSecret}).Receive(context.Background(), body, signature); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("no inbox: %v; want ErrUnavailable", err)
+	}
+	inbox := &failingInbox{}
+	if err := (Receiver{Inbox: inbox}).Receive(context.Background(), body, signature); !errors.Is(err, ErrUnavailable) || inbox.called {
+		t.Fatalf("no secret: %v, inbox called %v; want ErrUnavailable without saving", err, inbox.called)
+	}
+	forged := &failingInbox{}
+	if err := (Receiver{Secret: testSecret, Inbox: forged}).Receive(context.Background(), body, "t=1,v1=00"); !errors.Is(
+		err,
+		ErrInvalidEvent,
+	) ||
+		forged.called {
+		t.Fatalf("bad signature: %v, inbox called %v; want ErrInvalidEvent without saving", err, forged.called)
+	}
+}

@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -95,5 +96,57 @@ func TestContinuousModeBacksOffAndRecoversFromFailures(t *testing.T) {
 	}
 	if gap := calls[4].Sub(calls[3]); gap >= 50*time.Millisecond {
 		t.Fatalf("successful work waited %v before continuing", gap)
+	}
+}
+
+func TestRunConcurrentRunsEveryLoopAndStopsThemTogether(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var running, peak atomic.Int32
+	started := make(chan struct{}, 3)
+	done := make(chan error, 1)
+	go func() {
+		done <- RunConcurrent(ctx, 3, false, time.Millisecond, StepBudget, func(ctx context.Context) (bool, error) {
+			n := running.Add(1)
+			defer running.Add(-1)
+			for {
+				old := peak.Load()
+				if n <= old || peak.CompareAndSwap(old, n) {
+					break
+				}
+			}
+			started <- struct{}{}
+			<-ctx.Done()
+			return false, nil
+		})
+	}()
+	for range 3 {
+		<-started
+	}
+	if peak.Load() != 3 {
+		t.Fatalf("peak concurrency %d, want 3", peak.Load())
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("loops outlived shutdown")
+	}
+	if running.Load() != 0 {
+		t.Fatal("a loop is still running")
+	}
+}
+
+func TestRunConcurrentOnceReturnsAfterEachLoopsStep(t *testing.T) {
+	var calls atomic.Int32
+	err := RunConcurrent(context.Background(), 2, true, time.Hour, StepBudget, func(context.Context) (bool, error) {
+		calls.Add(1)
+		return true, nil
+	})
+	if err != nil || calls.Load() != 2 {
+		t.Fatal(err, calls.Load())
 	}
 }

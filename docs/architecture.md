@@ -6,7 +6,7 @@ Go workers reconcile signed Stripe events, refresh donor projections, apply refe
 retention, deliver email, and send donor app notifications.
 
 ```text
-Browser → Next.js /api/donor/* → Go HTTP API → PostgreSQL
+Browser → Next.js /api/* proxy → Go HTTP API → PostgreSQL
              ↓                     ↓               ↑
        Stripe-hosted UI        Stripe API      Go workers
                                                 ↓
@@ -70,9 +70,10 @@ The app registers its installation's push token on its own session with `POST
 long as the sign-in, and a token registered by another session moves to the new one.
 Each projection refresh queues push intents in the same transaction as the facts
 behind them, next to the email outbox: recent verified gifts, referral conversions,
-failed renewals initially and on grace day five, and streak milestones. Stable keys
-identify the gift, referred donor, failed period and reminder day, or donor and streak
-run. Full refunds suppress gift-processed pushes; recovery and cancellation suppress
+failed renewals initially and on grace day five, streak milestones and lapses, earned
+badges, and event promotions, reminders, nearby publications and cancellations. Stable
+keys identify the gift, referred donor, failed period and reminder day, donor and streak
+run, badge, or event and window. Full refunds suppress gift-processed pushes; recovery and cancellation suppress
 payment reminders. Only donors with a live
 registered device get intents. The push worker delivers each to every live device of the
 donor through APNs or FCM (`internal/push`), rechecking preferences and facts first,
@@ -108,7 +109,9 @@ wait for lease expiry. Checkout completion is not collection. Gifts, billing per
 refund state, append-only observations, projections, and notification intents commit
 together. Money is integer USD cents. Referral credit is one level only.
 
-Reads never call Stripe. The Stripe worker syncs a subscription's current state, including
+Reads never call Stripe. The Stripe worker claims each event with a lease, calls Stripe with no
+transaction open, and applies the event in a second transaction that first confirms the lease
+([operations](operations.md#stripe)). It syncs a subscription's current state, including
 its billing anchor and whether Stripe holds a schedule or pending update, whenever an
 event about it arrives: each `customer.subscription.*` event it accepts, a completed
 checkout that binds it, and an invoice while an amount change is pending. When it has no
@@ -155,7 +158,7 @@ before adoption; removal of obsolete deployed data is a separate operational dec
 ## Boundaries
 
 The donor product, the partner portal, staff operations, and marketing content run at R1.
-The recipient queue/export is inactive. There are no AI, evidence-processing, blockchain,
+There is no recipient or enrolment queue or export. There are no AI, evidence-processing, blockchain,
 recipient eligibility, or aid-payment services.
 
 This build is test-mode only. Readiness confirms a usable, migrated database; it does not

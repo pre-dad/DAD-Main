@@ -53,8 +53,9 @@ type liveVerifier struct {
 	client    *http.Client
 	now       func() time.Time
 
-	mu   sync.Mutex
-	sets map[Provider]*keySet
+	mu     sync.Mutex
+	sets   map[Provider]*keySet
+	failed map[Provider]time.Time
 }
 
 type keySet struct {
@@ -69,6 +70,7 @@ func newLiveVerifier(clientIDs map[Provider][]string) *liveVerifier {
 		client:    &http.Client{Timeout: 5 * time.Second},
 		now:       time.Now,
 		sets:      map[Provider]*keySet{},
+		failed:    map[Provider]time.Time{},
 	}
 }
 
@@ -82,6 +84,7 @@ type liveClaims struct {
 	Iat   int64           `json:"iat"`
 	Email string          `json:"email"`
 	HD    string          `json:"hd"`
+	Nonce string          `json:"nonce"`
 	// EmailVerified is a boolean from Google and the string "true" or
 	// "false" from Apple.
 	EmailVerified json.RawMessage `json:"email_verified"`
@@ -127,7 +130,7 @@ func (v *liveVerifier) Verify(ctx context.Context, provider Provider, idToken st
 		time.Unix(claims.Iat, 0).After(now.Add(clockSkew)) {
 		return Identity{}, ErrToken
 	}
-	identity := Identity{Provider: provider, Subject: claims.Sub}
+	identity := Identity{Provider: provider, Subject: claims.Sub, Nonce: claims.Nonce}
 	// An unverified address must never link a provider account to the donor
 	// who owns that address.
 	if emailVerified(claims.EmailVerified) && (provider != Google || claims.HD != "" ||
@@ -160,9 +163,9 @@ func (v *liveVerifier) key(ctx context.Context, provider Provider, kid string) (
 			return nil, ErrToken
 		}
 	}
-	keys, err := v.fetch(ctx, provider)
-	if err != nil {
-		// A provider outage should not end sign-in while the key is still known.
+	// A provider outage should not end sign-in while the key is still known,
+	// nor make every sign-in wait out a failing fetch while holding the lock.
+	stale := func(err error) (*rsa.PublicKey, error) {
 		if set != nil {
 			if key, ok := set.keys[kid]; ok {
 				return key, nil
@@ -170,6 +173,22 @@ func (v *liveVerifier) key(ctx context.Context, provider Provider, kid string) (
 		}
 		return nil, err
 	}
+	if failedAt, ok := v.failed[provider]; ok && now.Sub(failedAt) < keysRefetchGap {
+		return stale(ErrKeys)
+	}
+	keys, err := v.fetch(ctx, provider)
+	if err == nil && len(keys) == 0 {
+		err = fmt.Errorf("%w: no usable signing keys", ErrKeys)
+	}
+	if err != nil {
+		// A caller that gave up says nothing about the provider, and must not
+		// hold every other sign-in off it for a backoff window.
+		if ctx.Err() == nil {
+			v.failed[provider] = now
+		}
+		return stale(err)
+	}
+	delete(v.failed, provider)
 	v.sets[provider] = &keySet{keys: keys, fetchedAt: now}
 	if key, ok := keys[kid]; ok {
 		return key, nil

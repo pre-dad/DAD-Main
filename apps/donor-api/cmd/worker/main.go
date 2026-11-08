@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -35,6 +36,7 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 	kinds := strings.Join(slices.Sorted(maps.Keys(dbroles.Workers)), ", ")
 	kind := flags.String("kind", "", kinds)
 	once := flags.Bool("once", false, "process at most one item")
+	concurrency := flags.Int("concurrency", 1, "parallel claim loops for queue workers (1-"+strconv.Itoa(maxConcurrency)+")")
 	retry := flags.String("retry-event", "", "reset an unprocessed Stripe event's attempt budget")
 	if err := flags.Parse(args); err != nil {
 		return configError("invalid worker arguments")
@@ -45,6 +47,11 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 	}
 	if *retry != "" && (*kind != "stripe" || !strings.HasPrefix(*retry, "evt_")) {
 		return configError("--retry-event requires --kind stripe and an evt_ identifier")
+	}
+	if *concurrency < 1 || *concurrency > maxConcurrency || (*concurrency > 1 && !parallelSafe[*kind]) {
+		return configError(
+			"--concurrency must be 1, or 2 to " + strconv.Itoa(maxConcurrency) + " for login-email, email-changes, messages and push",
+		)
 	}
 	if getenv("DONOR_GO_WORKERS_ENABLED") != "true" {
 		return configError("workers require DONOR_GO_WORKERS_ENABLED=true")
@@ -60,6 +67,9 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 		return configError("worker database is unreachable")
 	}
 	defer pool.Close()
+	if int32(*concurrency) > pool.Config().MaxConns {
+		return configError("--concurrency exceeds the pool size; raise pool_max_conns in " + role.Variable() + " and re-run provisioning")
+	}
 	check, finish := context.WithTimeout(ctx, 10*time.Second)
 	defer finish()
 	if err = migrations.Verify(check, pool); err != nil {
@@ -84,8 +94,14 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 	if *kind == "stripe" {
 		budget = workers.ProcessorStepBudget
 	}
-	return workers.Run(ctx, *once, 2*time.Second, budget, step)
+	return workers.RunConcurrent(ctx, *concurrency, *once, 2*time.Second, budget, step)
 }
+
+const maxConcurrency = 8
+
+// parallelSafe lists the kinds whose steps claim a single outbox row with
+// FOR UPDATE SKIP LOCKED, so parallel loops never deliver the same row twice.
+var parallelSafe = map[string]bool{"login-email": true, "email-changes": true, "messages": true, "push": true}
 
 type deliverer interface {
 	DeliverNext(context.Context, time.Time) (bool, error)
@@ -129,7 +145,7 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 			if err != nil {
 				return false, err
 			}
-			processed, err := store.RefreshDueProjections(ctx, pool, now, store.ProjectionBatch)
+			processed, err := store.CatchUpProjections(ctx, pool, func() time.Time { return time.Now().UTC() }, store.CatchUpSlice)
 			if err != nil {
 				return purged || processed > 0, err
 			}

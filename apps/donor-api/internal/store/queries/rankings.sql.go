@@ -11,49 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const awardRankingBadges = `-- name: AwardRankingBadges :exec
-WITH rules AS (
-  SELECT coalesce((SELECT threshold FROM donor_badge_rules WHERE code='NAT2'),2) AS nat_threshold,
-         coalesce((SELECT min_population FROM donor_badge_rules WHERE code='NAT2'),100) AS nat_population,
-         coalesce((SELECT threshold FROM donor_badge_rules WHERE code='CITY50'),50) AS city_threshold,
-         coalesce((SELECT min_population FROM donor_badge_rules WHERE code='CITY50'),100) AS city_population
-), qualifying AS (
-  SELECT donor_id, 'NAT2'::varchar AS code, NULL::varchar AS city FROM donor_rankings, rules
-  WHERE computed_at = $1::timestamptz
-    AND national_percentile <= rules.nat_threshold AND national_population >= rules.nat_population
-  UNION ALL
-  SELECT donor_id, 'CITY50'::varchar, donor_rankings.city::varchar FROM donor_rankings, rules
-  WHERE computed_at = $1::timestamptz
-    AND city_rank <= rules.city_threshold AND donor_rankings.city_population >= rules.city_population
-), earned AS (
-  INSERT INTO donor_badges (donor_id, code, source, earned_at, city)
-  SELECT donor_id, code, 'AUTO', $1::timestamptz, city FROM qualifying
-  ON CONFLICT (donor_id, code) DO NOTHING
-  RETURNING donor_id, code
-)
-INSERT INTO donor_push_notifications (id, donor_id, category, dedup_key, context, available_at, expires_at)
-SELECT gen_random_uuid(), e.donor_id, 'BADGE_EARNED', 'push:badge:' || e.donor_id::text || ':' || e.code,
-  json_build_object('code', e.code), $1::timestamptz, $2::timestamptz
-FROM earned e
-WHERE EXISTS (SELECT 1 FROM donor_sessions s WHERE s.donor_id = e.donor_id AND s.push_token IS NOT NULL
-  AND coalesce(s.refresh_expires_at, s.expires_at) > $1::timestamptz)
-ON CONFLICT (dedup_key) DO NOTHING
-`
-
-type AwardRankingBadgesParams struct {
-	ComputedAt pgtype.Timestamptz `json:"computed_at"`
-	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
-}
-
-// Top 2% and Top 50 City for every donor the rollup just ranked into them,
-// queueing the badge-earned push for each new one, in one pass. A rank taken
-// in a population smaller than the rule's minimum awards nothing. The
-// fallbacks match defaultBadgeRules for a rule staff never saved.
-func (q *Queries) AwardRankingBadges(ctx context.Context, arg AwardRankingBadgesParams) error {
-	_, err := q.db.Exec(ctx, awardRankingBadges, arg.ComputedAt, arg.ExpiresAt)
-	return err
-}
-
 const claimProjectionSchedule = `-- name: ClaimProjectionSchedule :execrows
 INSERT INTO donor_projection_schedules(id,next_run_at) VALUES($1,$2)
 ON CONFLICT(id) DO UPDATE SET next_run_at=EXCLUDED.next_run_at
@@ -75,7 +32,10 @@ func (q *Queries) ClaimProjectionSchedule(ctx context.Context, arg ClaimProjecti
 }
 
 const donorRanking = `-- name: DonorRanking :one
-SELECT r.national_percentile, r.city, r.city_rank, r.national_population, r.city_population, r.computed_at
+SELECT r.national_percentile, r.city, r.city_rank,
+  coalesce((SELECT population FROM donor_ranking_populations WHERE scope='NATIONAL' AND city=''), 0)::int AS national_population,
+  coalesce((SELECT population FROM donor_ranking_populations WHERE scope='CITY' AND city=r.city), 0)::int AS city_population,
+  r.computed_at
 FROM donor_rankings r
 JOIN donors d ON d.id=r.donor_id
 JOIN donor_metric_projections p ON p.donor_id=r.donor_id
@@ -106,71 +66,6 @@ func (q *Queries) DonorRanking(ctx context.Context, donorID pgtype.UUID) (DonorR
 		&i.ComputedAt,
 	)
 	return i, err
-}
-
-const pruneStaleRankings = `-- name: PruneStaleRankings :exec
-DELETE FROM donor_rankings WHERE computed_at < $1
-`
-
-// Remove rows for donors no longer in the eligible population (opted out,
-// lapsed, disabled) as of the given refresh time.
-func (q *Queries) PruneStaleRankings(ctx context.Context, computedAt pgtype.Timestamptz) error {
-	_, err := q.db.Exec(ctx, pruneStaleRankings, computedAt)
-	return err
-}
-
-const refreshRankings = `-- name: RefreshRankings :exec
-WITH eligible AS (
-  SELECT d.id AS donor_id, d.city AS city,
-         ($1::timestamptz AT TIME ZONE coalesce(d.timezone,'America/New_York'))::date
-           - (p.streak_since AT TIME ZONE coalesce(d.timezone,'America/New_York'))::date AS streak,
-         p.streak_since AS since
-  FROM donors d
-  JOIN donor_metric_projections p ON p.donor_id = d.id
-  LEFT JOIN donor_preferences pref ON pref.donor_id = d.id
-  WHERE d.disabled = false
-    AND p.current_streak IS NOT NULL
-    AND p.current_streak > 0
-    AND p.streak_since IS NOT NULL
-    AND p.next_refresh_at > $1::timestamptz
-    AND COALESCE(pref.rankings_opted_out, false) = false
-),
-ranked AS (
-  SELECT donor_id, city, since,
-         -- percent_rank is 0 for the top; map to a top-percentile 1..100
-         -- (1 = best). A single-row population is the top, percentile 1.
-         GREATEST(1, LEAST(100,
-           CEIL(PERCENT_RANK() OVER (ORDER BY streak DESC, since ASC) * 100)::int
-         )) AS national_percentile,
-         CASE WHEN city IS NOT NULL
-              THEN RANK() OVER (PARTITION BY city ORDER BY streak DESC, since ASC)::int
-         END AS city_rank,
-         (count(*) OVER ())::int AS national_population,
-         CASE WHEN city IS NOT NULL THEN (count(*) OVER (PARTITION BY city))::int ELSE 0 END AS city_population
-  FROM eligible
-)
-INSERT INTO donor_rankings (donor_id, national_percentile, city, city_rank, national_population, city_population, computed_at)
-SELECT donor_id, national_percentile, city, city_rank, national_population, city_population, $1::timestamptz
-FROM ranked
-ON CONFLICT (donor_id) DO UPDATE SET
-  national_percentile = EXCLUDED.national_percentile,
-  city = EXCLUDED.city,
-  city_rank = EXCLUDED.city_rank,
-  national_population = EXCLUDED.national_population,
-  city_population = EXCLUDED.city_population,
-  computed_at = EXCLUDED.computed_at
-`
-
-// Recompute the whole ranking population in one set-based pass (PRD §13 risk #6:
-// periodic, never per request). The eligible population is donors with a current
-// streak who have not opted out; ties break on the earlier streak start, so a
-// longer-standing identical streak ranks higher. national_percentile is the
-// top-percentile bucket (1 = top 1%); city_rank is 1-based within donor.city.
-// Each row also records the size of the population each rank was taken in.
-// Replaces the prior snapshot wholesale.
-func (q *Queries) RefreshRankings(ctx context.Context, computedAt pgtype.Timestamptz) error {
-	_, err := q.db.Exec(ctx, refreshRankings, computedAt)
-	return err
 }
 
 const saveProjectionSchedule = `-- name: SaveProjectionSchedule :exec

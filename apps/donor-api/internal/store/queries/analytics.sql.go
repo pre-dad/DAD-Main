@@ -87,6 +87,36 @@ func (q *Queries) InsertObservedEvent(ctx context.Context, arg InsertObservedEve
 	return err
 }
 
+const insertObservedEvents = `-- name: InsertObservedEvents :exec
+INSERT INTO analytics_events(id,name,donor_id,source,properties,occurred_at,journey_id)
+SELECT unnest($1::uuid[]),unnest($2::text[]),$3::uuid,$4::text,
+ unnest($5::jsonb[]),unnest($6::timestamptz[]),unnest($7::uuid[])
+ON CONFLICT DO NOTHING
+`
+
+type InsertObservedEventsParams struct {
+	Ids        []pgtype.UUID        `json:"ids"`
+	Names      []string             `json:"names"`
+	DonorID    pgtype.UUID          `json:"donor_id"`
+	Source     string               `json:"source"`
+	Properties [][]byte             `json:"properties"`
+	OccurredAt []pgtype.Timestamptz `json:"occurred_at"`
+	Journeys   []pgtype.UUID        `json:"journeys"`
+}
+
+func (q *Queries) InsertObservedEvents(ctx context.Context, arg InsertObservedEventsParams) error {
+	_, err := q.db.Exec(ctx, insertObservedEvents,
+		arg.Ids,
+		arg.Names,
+		arg.DonorID,
+		arg.Source,
+		arg.Properties,
+		arg.OccurredAt,
+		arg.Journeys,
+	)
+	return err
+}
+
 const journeyReport = `-- name: JourneyReport :one
 WITH landings AS (
  SELECT journey_id,min(occurred_at) AS landed FROM analytics_events
@@ -122,13 +152,26 @@ func (q *Queries) JourneyReport(ctx context.Context, arg JourneyReportParams) (J
 	return i, err
 }
 
-const purgeAnalytics = `-- name: PurgeAnalytics :exec
-DELETE FROM analytics_events WHERE received_at<$1
+const purgeAnalytics = `-- name: PurgeAnalytics :execrows
+DELETE FROM analytics_events WHERE id=ANY(ARRAY(
+ SELECT id FROM analytics_events WHERE received_at<$1::timestamptz
+ ORDER BY received_at LIMIT $2
+))
 `
 
-func (q *Queries) PurgeAnalytics(ctx context.Context, receivedAt pgtype.Timestamptz) error {
-	_, err := q.db.Exec(ctx, purgeAnalytics, receivedAt)
-	return err
+type PurgeAnalyticsParams struct {
+	ReceivedBefore pgtype.Timestamptz `json:"received_before"`
+	Batch          int32              `json:"batch"`
+}
+
+// One bounded batch of events past retention, oldest first, so a pass never
+// holds a long transaction or scans the table.
+func (q *Queries) PurgeAnalytics(ctx context.Context, arg PurgeAnalyticsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeAnalytics, arg.ReceivedBefore, arg.Batch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const sevenDayShareReport = `-- name: SevenDayShareReport :one

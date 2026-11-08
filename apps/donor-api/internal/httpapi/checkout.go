@@ -54,10 +54,14 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request := payments.CheckoutRequest{
-		Journey: cookieValue(
-			r,
-			"dad_analytics_journey",
-		), Name: body.Name, Zip: body.Zip, City: body.City, RequestID: key, Email: *body.Email, Amount: *body.Amount, Frequency: frequency,
+		Journey:   cookieValue(r, journeyCookie),
+		Name:      body.Name,
+		Zip:       body.Zip,
+		City:      body.City,
+		RequestID: key,
+		Email:     *body.Email,
+		Amount:    *body.Amount,
+		Frequency: frequency,
 	}
 	if visitor := cookieValue(r, referralCookie); visitor != "" {
 		request.Visitor = &visitor

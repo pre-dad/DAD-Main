@@ -85,31 +85,29 @@ func TestQueueHealthCountsParkedAndIgnoresFutureAndCompleted(t *testing.T) {
 	if len(rows) != 8 {
 		t.Fatal(rows)
 	}
-	for _, row := range rows {
-		if row.Queue == "messages" {
-			if row.Due != 2 || row.Parked != 1 || row.OldestSeconds != 3600 {
-				t.Fatal(row)
-			}
-		}
-		if row.Queue == "push" {
-			if row.Due != 2 || row.Parked != 1 || row.OldestSeconds != 120 {
-				t.Fatal(row)
-			}
-		}
-		if row.Queue == "subscriptions" {
-			if row.Due != 1 || row.Parked != 0 || row.OldestSeconds != 86400 {
-				t.Fatal(row)
-			}
-		}
-		if row.Queue == "reversals" {
-			if row.Due != 2 || row.Parked != 1 || row.OldestSeconds != 1800 {
-				t.Fatal(row)
-			}
-		}
-		if row.Queue == "projections" {
-			if row.Due != 1 {
-				t.Fatal(row)
-			}
+	for queue, want := range map[string]struct{ due, parked, oldest int64 }{
+		"messages":      {2, 1, 3600},
+		"push":          {2, 1, 120},
+		"subscriptions": {1, 0, 86400},
+		"reversals":     {2, 1, 1800},
+	} {
+		row := queueHealthRow(t, rows, queue)
+		if row.Due != want.due || row.Parked != want.parked || row.OldestSeconds != want.oldest {
+			t.Fatalf("%s: %+v, want %+v", queue, row, want)
 		}
 	}
+	if row := queueHealthRow(t, rows, "projections"); row.Due != 1 {
+		t.Fatal(row)
+	}
+}
+
+func queueHealthRow(t *testing.T, rows []queries.QueueHealthRow, queue string) queries.QueueHealthRow {
+	t.Helper()
+	for _, row := range rows {
+		if row.Queue == queue {
+			return row
+		}
+	}
+	t.Fatalf("queue health reports no %q queue: %+v", queue, rows)
+	return queries.QueueHealthRow{}
 }

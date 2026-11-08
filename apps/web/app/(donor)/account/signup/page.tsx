@@ -43,7 +43,7 @@ export default function Signup() {
           City
           <input name="city" autoComplete="address-level2" maxLength={80} required />
         </label>
-        <button type="submit" disabled={busy}>
+        <button className="button full" type="submit" disabled={busy}>
           Verify my email
         </button>
         <Announcer status={status} alert={error} />

@@ -491,17 +491,27 @@ func (q *Queries) PublishEvent(ctx context.Context, arg PublishEventParams) erro
 }
 
 const queueEventAlertBatch = `-- name: QueueEventAlertBatch :one
-WITH recipients AS MATERIALIZED (
-  SELECT d.id,e.id AS event_id,e.starts_at
-  FROM donor_events e
-  JOIN donors d ON NOT d.disabled AND (
-    (e.city<>'' AND lower(d.city)=lower(e.city))
-    OR (e.zip<>'' AND left(d.zip,3)=left(e.zip,3)))
-  JOIN donor_preferences p ON p.donor_id=d.id AND p.volunteer AND p.push_event_nearby
+WITH target AS (
+  SELECT e.id,e.city,e.zip,e.starts_at FROM donor_events e
   WHERE e.id=$1 AND e.publish_state='PUBLISHED' AND e.cancelled_at IS NULL
     AND e.type<>'INVITE_ONLY' AND e.starts_at>$2::timestamptz
-    AND ($3::uuid IS NULL OR d.id>$3::uuid)
-  ORDER BY d.id LIMIT $4::int
+), recipients AS MATERIALIZED (
+  SELECT id,event_id,starts_at FROM (
+    (SELECT d.id,e.id AS event_id,e.starts_at
+     FROM target e
+     JOIN donors d ON e.city<>'' AND lower(d.city)=lower(e.city) AND NOT d.disabled
+       AND ($3::uuid IS NULL OR d.id>$3::uuid)
+     JOIN donor_preferences p ON p.donor_id=d.id AND p.volunteer AND p.push_event_nearby
+     ORDER BY d.id LIMIT $4::int)
+    UNION
+    (SELECT d.id,e.id AS event_id,e.starts_at
+     FROM target e
+     JOIN donors d ON e.zip<>'' AND left(d.zip,3)=left(e.zip,3) AND NOT d.disabled
+       AND ($3::uuid IS NULL OR d.id>$3::uuid)
+     JOIN donor_preferences p ON p.donor_id=d.id AND p.volunteer AND p.push_event_nearby
+     ORDER BY d.id LIMIT $4::int)
+  ) audience
+  ORDER BY id LIMIT $4::int
 ), queued AS (
   INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at)
   SELECT gen_random_uuid(),id,'EVENT_NEARBY','push:event-nearby:'||event_id::text||':'||id::text,
@@ -526,6 +536,9 @@ type QueueEventAlertBatchRow struct {
 	Queued     int64       `json:"queued"`
 }
 
+// Each audience (the event's city, its ZIP prefix) is read in donor order from
+// its own index, so a batch costs its size however large the audience is; a
+// donor in both is queued once.
 func (q *Queries) QueueEventAlertBatch(ctx context.Context, arg QueueEventAlertBatchParams) (QueueEventAlertBatchRow, error) {
 	row := q.db.QueryRow(ctx, queueEventAlertBatch,
 		arg.EventID,

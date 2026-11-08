@@ -127,3 +127,27 @@ func TestStaffRoutesRefuseRequestsStartedOnAnotherHost(t *testing.T) {
 		}
 	}
 }
+
+// Generating a partner report retains it, so the partner portal's Lax cookie
+// must not be usable by a link on another site.
+func TestPartnerReportRefusesRequestsStartedOnAnotherSite(t *testing.T) {
+	server := NewServer("", Services{Origin: testPublicOrigin, StaffOrigin: testStaffOrigin})
+	send := func(site string) int {
+		r := routeRequest("GET /donor/partner/report.pdf", "")
+		r.Header.Set("Sec-Fetch-Site", site)
+		r.AddCookie(&http.Cookie{Name: partnerCookie, Value: "session"})
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, r)
+		return response.Code
+	}
+	for _, site := range []string{"same-site", "cross-site"} {
+		if code := send(site); code != http.StatusForbidden {
+			t.Errorf("report from a %s page: got %d, want 403", site, code)
+		}
+	}
+	for _, site := range []string{"same-origin", "none", ""} {
+		if code := send(site); code == http.StatusForbidden {
+			t.Errorf("report with Sec-Fetch-Site %q refused", site)
+		}
+	}
+}

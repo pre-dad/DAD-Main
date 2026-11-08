@@ -1,3 +1,5 @@
+// Command migrate applies the donor database migrations as the schema owner.
+// With -adopt-existing it validates and adopts an existing R1 schema instead.
 package main
 
 import (
@@ -21,7 +23,7 @@ func run(args []string, getenv func(string) string) error {
 	}
 	dsn := dbroles.ConnectionURL(dbroles.OwnerVariable, getenv)
 	if dsn == "" {
-		return errors.New("DONOR_GO_DATABASE_URL is required")
+		return errors.New(dbroles.OwnerVariable + " is required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

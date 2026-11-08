@@ -3,11 +3,13 @@ package store
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
 
 	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/payments"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -327,5 +329,95 @@ func TestPreferenceChangeKeepsOmittedChoices(t *testing.T) {
 		!saved.RankingsOptedOut || saved.NetworkVisible || !saved.Volunteer ||
 		len(saved.VolunteerInterests) != 1 || saved.VolunteerInterests[0] != "mentoring" {
 		t.Fatalf("omitted choices changed: %+v %v", saved.Preferences, err)
+	}
+}
+
+func TestPreferenceSavesRefuseStaleAndOutOfRangeVersionsWithoutAuditing(t *testing.T) {
+	s, token, id := donorServiceFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+	for _, version := range []int32{-1, 1, math.MaxInt32} {
+		if _, err := s.SavePreferences(ctx, token, PreferenceChange{Version: version, MarketingEmails: true}); !errors.Is(
+			err,
+			ErrPreferenceConflict,
+		) {
+			t.Fatalf("version %d against an unsaved record: %v", version, err)
+		}
+	}
+	if _, err := s.SavePreferences(ctx, token, PreferenceChange{Version: 0, MarketingEmails: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SavePreferences(ctx, token, PreferenceChange{Version: 0, MarketingEmails: false}); !errors.Is(
+		err,
+		ErrPreferenceConflict,
+	) {
+		t.Fatalf("a save from before the last one overwrote it: %v", err)
+	}
+	profile, err := s.Profile(ctx, token)
+	if err != nil || profile.Version != 1 || !profile.MarketingEmails {
+		t.Fatalf("refused save changed the record: %+v %v", profile.Preferences, err)
+	}
+	var events int
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_preference_events WHERE donor_id=$1", id).Scan(&events); err != nil ||
+		events != 1 {
+		t.Fatalf("%d consent events for one accepted save: %v", events, err)
+	}
+}
+
+func TestCaptureReferralRefusesUnknownChannelsAndMalformedCodes(t *testing.T) {
+	s, token, _ := donorServiceFixture(t)
+	ctx := context.Background()
+	now := time.Now()
+	shared, err := s.SaveSharing(ctx, token, "Sam", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := *shared.ReferralCode
+	if _, err = s.CaptureReferral(ctx, code, "EMAIL", "", now); !errors.Is(err, payments.ErrFacts) {
+		t.Fatalf("an unknown channel was recorded: %v", err)
+	}
+	for _, bad := range []string{"", "has space", "semi;colon", strings.Repeat("a", 65), "tab\tcode"} {
+		if capture, err := s.CaptureReferral(ctx, bad, "LINK", "", now); err != nil || capture.Token != "" || capture.PublicName != nil {
+			t.Fatalf("code %q made a visitor: %+v %v", bad, capture, err)
+		}
+	}
+	touch, err := s.CaptureReferral(ctx, code, "LINK", "", now)
+	if err != nil || touch.Token == "" {
+		t.Fatal(touch, err)
+	}
+	// A malformed code never replaces the earlier touch; it keeps the visitor's token while it lasts.
+	kept, err := s.CaptureReferral(ctx, "has space", "IRL", touch.Token, now.Add(time.Hour))
+	if err != nil || kept.Token != touch.Token {
+		t.Fatalf("a malformed code dropped the visitor's touch: %+v %v", kept, err)
+	}
+	expired, err := s.CaptureReferral(ctx, "has space", "IRL", touch.Token, now.Add(referralWindow+time.Hour))
+	if err != nil || expired.Token != "" {
+		t.Fatalf("an expired touch was kept alive by a malformed code: %+v %v", expired, err)
+	}
+}
+
+func TestGiftPagesRefuseOffsetsThatCannotBePaged(t *testing.T) {
+	s, token, _ := donorServiceFixture(t)
+	ctx := context.Background()
+	for _, offset := range []int64{-1, math.MaxInt64, math.MaxInt64 - pageSize + 1} {
+		if _, err := s.Gifts(ctx, token, offset); !errors.Is(err, payments.ErrFacts) {
+			t.Errorf("offset %d: %v; want payments.ErrFacts", offset, err)
+		}
+	}
+	if gifts, err := s.Gifts(ctx, token, math.MaxInt64-pageSize); err != nil || len(gifts.Gifts) != 0 || gifts.NextOffset != nil {
+		t.Fatalf("the last representable offset: %+v %v", gifts, err)
+	}
+}
+
+func TestPageKeepsAFullPageAndReportsWhereTheNextBegins(t *testing.T) {
+	rows := make([]int, pageSize+1)
+	if got, next := page(rows, 100); len(got) != pageSize || next == nil || *next != 100+pageSize {
+		t.Fatalf("look-ahead row: %d rows, next %v", len(got), next)
+	}
+	if got, next := page(rows[:pageSize], 100); len(got) != pageSize || next != nil {
+		t.Fatalf("exactly one full page must not promise another: %d rows, next %v", len(got), next)
+	}
+	if got, next := page([]int(nil), 0); len(got) != 0 || next != nil {
+		t.Fatalf("empty page: %d rows, next %v", len(got), next)
 	}
 }

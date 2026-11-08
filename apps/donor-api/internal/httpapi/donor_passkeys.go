@@ -80,7 +80,7 @@ func (a *api) finishDonorPasskeySignIn(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	client := store.Client{CompanyToken: cookieValue(r, companyCookie)}
+	client := store.Client{CompanyToken: cookieValue(r, companyCookie), JourneyID: cookieValue(r, journeyCookie)}
 	if native(r) {
 		client, _ = body.client()
 	}
@@ -92,7 +92,7 @@ func (a *api) finishDonorPasskeySignIn(w http.ResponseWriter, r *http.Request) {
 		if client.App {
 			return newNativeSession(tokens), nil
 		}
-		a.setCookie(w, donorCookie, tokens.Access, int(tokens.AccessTTL.Seconds()), http.SameSiteLaxMode)
+		a.setSessionCookie(w, donorCookie, tokens.Access, int(tokens.AccessTTL.Seconds()))
 		return map[string]bool{"signed_in": true}, nil
 	})
 }

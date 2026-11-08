@@ -1,8 +1,0 @@
-# Self-hosted runner labels used across this repo's workflows. Registering them
-# here lets actionlint validate `runs-on` for the self-hosted jobs instead of
-# flagging the custom labels as unknown.
-self-hosted-runner:
-  labels:
-    - dad
-    - linux
-    - macos

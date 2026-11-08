@@ -15,8 +15,11 @@ type PhoneSignInSource interface {
 }
 
 type OIDCSignInSource interface {
-	SignIn(ctx context.Context, provider oidc.Provider, idToken string, client store.Client) (store.Tokens, error)
+	SignIn(ctx context.Context, provider oidc.Provider, idToken, nonce string, client store.Client) (store.Tokens, error)
 }
+
+// maxOIDCNonce bounds the client nonce; Apple and Google accept far less.
+const maxOIDCNonce = 256
 
 const signInMethodUnavailable = "This sign-in method is temporarily unavailable"
 
@@ -94,13 +97,14 @@ func (a *api) oidcSignInHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		IDToken  string  `json:"id_token"`
+		Nonce    string  `json:"nonce"`
 		Device   *string `json:"device_name"`
 		Platform *string `json:"platform"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if body.IDToken == "" {
+	if body.IDToken == "" || len(body.Nonce) > maxOIDCNonce {
 		invalidFields(w, r)
 		return
 	}
@@ -110,7 +114,7 @@ func (a *api) oidcSignInHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.oidcSignIn().serve(w, r, func(ctx context.Context) (any, error) {
-		tokens, err := a.OIDCSignIn.SignIn(ctx, provider, body.IDToken, client)
+		tokens, err := a.OIDCSignIn.SignIn(ctx, provider, body.IDToken, body.Nonce, client)
 		if err != nil {
 			return nil, err
 		}
@@ -122,7 +126,7 @@ func (a *api) oidcSignInHandler(w http.ResponseWriter, r *http.Request) {
 // honouring them only for a native request, exactly as passkey sign-in does.
 func signInClient(r *http.Request, device, platform *string) (store.Client, bool) {
 	if !native(r) {
-		return store.Client{CompanyToken: cookieValue(r, companyCookie), JourneyID: cookieValue(r, "dad_analytics_journey")}, true
+		return store.Client{CompanyToken: cookieValue(r, companyCookie), JourneyID: cookieValue(r, journeyCookie)}, true
 	}
 	client := store.Client{App: true}
 	if device != nil {
@@ -142,6 +146,6 @@ func (a *api) sessionResponse(w http.ResponseWriter, client store.Client, tokens
 	if client.App {
 		return newNativeSession(tokens)
 	}
-	a.setCookie(w, donorCookie, tokens.Access, int(tokens.AccessTTL.Seconds()), http.SameSiteLaxMode)
+	a.setSessionCookie(w, donorCookie, tokens.Access, int(tokens.AccessTTL.Seconds()))
 	return map[string]bool{"signed_in": true}
 }

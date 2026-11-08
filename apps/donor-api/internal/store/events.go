@@ -22,8 +22,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// EventService is the Growth staff surface for events (PRD §8). An event is
-// editable while DRAFT and only becomes donor-visible once published.
+// EventService is the Growth staff surface for events (PRD §8). An event only
+// becomes donor-visible once published, and stays editable until it is cancelled.
 type EventService struct{ Staff *StaffService }
 
 const eventPermission = "event.manage"
@@ -224,7 +224,8 @@ func (s EventService) Update(ctx context.Context, token string, id pgtype.UUID, 
 	return err
 }
 
-// Publish makes a DRAFT event donor-visible.
+// Publish makes a DRAFT event donor-visible. Publishing a published event is a
+// no-op, so its published time and alert fan-out are not repeated.
 func (s EventService) Publish(ctx context.Context, token string, id pgtype.UUID) error {
 	_, err := staffWrite(ctx, s.Staff, token, eventPermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (struct{}, error) {
@@ -235,6 +236,9 @@ func (s EventService) Publish(ctx context.Context, token string, id pgtype.UUID)
 			}
 			if event.CancelledAt.Valid {
 				return struct{}{}, ErrEventCancelled
+			}
+			if event.PublishState == "PUBLISHED" {
+				return struct{}{}, nil
 			}
 			now := time.Now().UTC()
 			if err := q.PublishEvent(ctx, queries.PublishEventParams{ID: id, PublishedAt: timestamp(now)}); err != nil {

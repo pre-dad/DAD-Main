@@ -966,3 +966,74 @@ func TestGiftListsAndStaffDetailShowRefundsAndSubscription(t *testing.T) {
 		t.Fatalf("staff detail: %v", view)
 	}
 }
+
+func TestValidGiftAmountIsWholeDollarsADayFromOneToThirty(t *testing.T) {
+	for _, c := range []struct {
+		minor int64
+		want  bool
+	}{
+		{-3000, false}, {0, false}, {100, false}, {2999, false}, {3000, true}, {3001, false}, {4500, false}, {6000, true},
+		{89999, false}, {90000, true}, {90001, false}, {93000, false}, {9_000_000, false},
+	} {
+		if got := ValidGiftAmount(c.minor); got != c.want {
+			t.Errorf("ValidGiftAmount(%d) = %v, want %v", c.minor, got, c.want)
+		}
+	}
+}
+
+// A refused amount change must reach neither the processor nor the database.
+func TestRefusedAmountChangesLeaveNothingBehind(t *testing.T) {
+	r := newRecurringFixture(t)
+	ctx := context.Background()
+	for _, c := range []struct {
+		name string
+		edit func(*AmountRequest)
+		want error
+	}{
+		{"below the one dollar a day floor", func(a *AmountRequest) { a.Amount = 1500 }, payments.ErrFacts},
+		{"not a whole number of dollars a day", func(a *AmountRequest) { a.Amount = 4500 }, payments.ErrFacts},
+		{"a day over the ceiling", func(a *AmountRequest) { a.Amount = 93000 }, payments.ErrFacts},
+		{"unchanged amount", func(a *AmountRequest) { a.Amount = 3000 }, ErrSubscriptionConflict},
+		{"stale previous amount", func(a *AmountRequest) { a.Previous = 6000 }, ErrSubscriptionConflict},
+		{"unknown subscription", func(a *AmountRequest) { a.AttemptID = testID(t) }, ErrSubscriptionConflict},
+	} {
+		request := AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 9000, Previous: 3000, EffectiveAt: r.end}
+		c.edit(&request)
+		if _, err := r.service.ChangeAmount(ctx, r.token, request); !errors.Is(err, c.want) {
+			t.Errorf("%s: got %v, want %v", c.name, err, c.want)
+		}
+		var stored int
+		if err := r.db.QueryRow(ctx, "SELECT count(*) FROM donor_amount_changes WHERE id=$1", request.RequestID).Scan(&stored); err != nil ||
+			stored != 0 {
+			t.Errorf("%s persisted %d amount changes: %v", c.name, stored, err)
+		}
+	}
+	if len(r.sub.keys) != 0 {
+		t.Fatalf("refused changes reached the processor: %v", r.sub.keys)
+	}
+}
+
+// Once a gift is set to stop at period end, an amount change is refused and a
+// repeat cancellation does not reach the processor again.
+func TestStoppingGiftRefusesFurtherCommands(t *testing.T) {
+	r := newRecurringFixture(t)
+	ctx := context.Background()
+	if _, err := r.service.Cancel(ctx, r.token, CancellationRequest{RequestID: testID(t), AttemptID: r.attempt, PeriodEnd: r.end}); err != nil {
+		t.Fatal(err)
+	}
+	mutations := len(r.sub.keys)
+	if _, err := r.service.ChangeAmount(ctx, r.token, AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 9000, Previous: 3000, EffectiveAt: r.end}); !errors.Is(
+		err,
+		ErrSubscriptionConflict,
+	) {
+		t.Fatalf("amount change for a stopping gift: got %v, want ErrSubscriptionConflict", err)
+	}
+	// A repeat cancellation is already satisfied: it reports the stop date without a second processor call.
+	again, err := r.service.Cancel(ctx, r.token, CancellationRequest{RequestID: testID(t), AttemptID: r.attempt, PeriodEnd: r.end})
+	if err != nil || !jsonTime(t, jsonView(t, again)["subscription"].(map[string]any)["stops_at"]).Equal(r.end) {
+		t.Fatalf("second cancellation: %v, %v; want the existing stop date", again, err)
+	}
+	if len(r.sub.keys) != mutations {
+		t.Fatalf("refused commands reached the processor: %v", r.sub.keys[mutations:])
+	}
+}

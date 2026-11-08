@@ -69,6 +69,15 @@ func (q *Queries) BadgeRules(ctx context.Context) ([]BadgeRulesRow, error) {
 	return items, nil
 }
 
+const bumpRecognitionEpoch = `-- name: BumpRecognitionEpoch :exec
+UPDATE donor_recognition_epoch SET epoch=epoch+1
+`
+
+func (q *Queries) BumpRecognitionEpoch(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, bumpRecognitionEpoch)
+	return err
+}
+
 const donorBadges = `-- name: DonorBadges :many
 SELECT code, source, earned_at, revoked_at, city FROM donor_badges
 WHERE donor_id=$1
@@ -296,6 +305,17 @@ func (q *Queries) QueueBadgePush(ctx context.Context, arg QueueBadgePushParams) 
 	return err
 }
 
+const recognitionEpoch = `-- name: RecognitionEpoch :one
+SELECT epoch FROM donor_recognition_epoch
+`
+
+func (q *Queries) RecognitionEpoch(ctx context.Context) (int32, error) {
+	row := q.db.QueryRow(ctx, recognitionEpoch)
+	var epoch int32
+	err := row.Scan(&epoch)
+	return epoch, err
+}
+
 const recognitionWording = `-- name: RecognitionWording :many
 SELECT kind,key,title,body FROM donor_recognition_wording WHERE kind=$1
 `
@@ -330,15 +350,6 @@ func (q *Queries) RecognitionWording(ctx context.Context, kind string) ([]Recogn
 		return nil, err
 	}
 	return items, nil
-}
-
-const refreshRecognitionSchedule = `-- name: RefreshRecognitionSchedule :exec
-UPDATE donor_metric_projections SET next_refresh_at=least(next_refresh_at,$1)
-`
-
-func (q *Queries) RefreshRecognitionSchedule(ctx context.Context, nextRefreshAt pgtype.Timestamptz) error {
-	_, err := q.db.Exec(ctx, refreshRecognitionSchedule, nextRefreshAt)
-	return err
 }
 
 const resetRecognitionWording = `-- name: ResetRecognitionWording :exec

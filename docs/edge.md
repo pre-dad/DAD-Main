@@ -4,11 +4,13 @@
 Browser → Cloudflare (WAF, rate limits, cache) → nginx (TLS, origin lock, hosts, limits) → web → API
 ```
 
-The `nginx` Compose service is the only one with public ports (80 and 443). It runs the
-pinned official image as its unprivileged user on a read-only filesystem, terminates TLS,
-routes the public and staff hosts to the web service, and sets the client address the
-API rate-limits on. The web service publishes no host port; the API binds to loopback.
-Configuration lives in `deploy/nginx` and is mounted read-only.
+The `nginx` Compose service is the only one with public ports (80 and 443, which the
+unprivileged container serves as 8080 and 8443). It runs the pinned official image as its
+unprivileged user on a read-only filesystem, terminates TLS, routes the public and staff
+hosts to the web service, and sets the client address the API rate-limits on. The web
+service publishes no host port; the API's port is published on loopback only.
+Configuration lives in `deploy/nginx` and is mounted read-only. On ECS the same
+configuration is baked into an image instead; see [AWS deployment](aws-deployment.md).
 
 ## Modes
 
@@ -31,6 +33,7 @@ one host for both.
 | `INGRESS_TLS_DIR` | `/etc/dad/tls` | Host directory with `fullchain.pem` and `privkey.pem`, readable by uid 101. |
 | `INGRESS_ORIGIN_PULL_CA` | `deploy/nginx/cloudflare-origin-pull-ca.pem` | CA that signs the edge's client certificate (cloudflare mode). |
 | `INGRESS_STAFF_ACCESS` | `deploy/nginx/staff-access.conf` (allows all) | nginx `allow`/`deny` rules for the staff host. |
+| `INGRESS_TLS_FULLCHAIN`, `INGRESS_TLS_PRIVKEY` | unset | ECS only: the certificate chain and key as PEM text. The image writes them to `/etc/nginx/tls` at start; set both or neither. |
 | `DONOR_STAFF_ORIGIN` | required | Staff origin, also passed to the web build and the API. |
 
 nginx renders its configuration only at start, and a replaced single-file mount keeps
@@ -47,6 +50,8 @@ which picks up renewed certificates without dropping any. Use those commands rat
 - **Direct mode:** a publicly trusted certificate, such as Let's Encrypt. nginx does not
   serve HTTP-01 challenges, so use DNS-01 (for example certbot with a DNS plugin) and a
   deploy hook that copies the files into `INGRESS_TLS_DIR` and runs `reload-ingress`.
+- **ECS:** a Cloudflare Origin CA certificate, supplied as the `INGRESS_TLS_FULLCHAIN` and
+  `INGRESS_TLS_PRIVKEY` secrets (`deploy/nginx/04-tls-from-env.sh` writes them to disk).
 
 Store the key as `root:101`, mode `0640`. TLS 1.2 and 1.3 with ECDHE suites only. There
 is no OCSP stapling: Origin CA certificates have no responder and Let's Encrypt no longer
@@ -58,9 +63,9 @@ from the app's responses.
 
 | Request | Result |
 | --- | --- |
-| Public host, `/staff*` or `/api/donor/staff*` (any case) | `404 {"detail":"Not found"}` |
+| Public host, `/staff` or `/api/donor/staff`, or anything below them (any case) | `404 {"detail":"Not found"}` |
 | Public host, anything else | web service |
-| Staff host, `/`, `/staff*`, `/api/donor/staff/*`, `/_next/*`, `/favicon.ico`, `/robots.txt` | web service |
+| Staff host, `/`, `/staff`, `/staff/*`, `/api/donor/staff/*`, `/_next/*`, `/favicon.ico`, `/icon.svg`, `/robots.txt` | web service |
 | Staff host, anything else | `404 {"detail":"Not found"}` |
 | Unknown TLS server name | handshake refused |
 | Known server name with another `Host` | `421` |
@@ -112,7 +117,7 @@ before each costs a signature check.
 | --- | --- | --- | --- | --- |
 | Auth | `/api/donor/login`, `/claim`, `/email-change/confirm`, `/passkeys/sign-in`, `/phone/sign-in`, `/oidc/{provider}/sign-in`, `/partner/sign-in`, `/partner/accept-invite`; `/api/donor/staff/sign-in`, `/activate`; and each sign-in and activation's `/options` | 30/min, block 10 min | 20/min, burst 20 | 10/min |
 | Visitor | `/api/donor/checkouts`, `/api/donor/referrals/{code}`, `/api/donor/company/{code}`, `/api/donor/public/partner-apply`, `/api/donor/partner/applications` | 240/min, block 1 min | 120/min, burst 60 | 60/min |
-| General | pages, assets, other API calls | 1,200/min uncached, challenge | 30/s, burst 300 | account writes 30/min, staff writes 60/min |
+| General | pages, assets, other API calls | 1,200/min uncached, challenge | 30/s, burst 300 | account writes 30/min, analytics 120/min, staff writes 60/min |
 | Stripe webhook | `/api/donor/stripe/webhook` | skipped | 20/s, burst 500 | signature verified |
 
 nginx also caps each client at 100 concurrent requests and answers rejections with
@@ -224,7 +229,7 @@ In order:
    "/api/") or starts_with(http.request.uri.path, "/account") or
    starts_with(http.request.uri.path, "/staff")`.
 2. Static pages: `http.host eq "donors.example.org" and http.request.uri.path in {"/"
-   "/donate" "/how-it-works" "/legal" "/partners"} and not
+   "/about" "/apply" "/donate" "/how-it-works" "/legal" "/partners"} and not
    any(lower(http.request.headers.names[*])[*] == "rsc")` → eligible for cache, Edge TTL
    5 minutes (ignoring the origin), Browser TTL from the origin, cache key ignoring the
    query string.
@@ -234,8 +239,9 @@ short because a cached page outliving a deploy references `/_next/static` files 
 build no longer has; purge these URLs after `./scripts/deploy.sh up`. Next's client
 router fetches the same URLs with an `RSC` header for a different payload, which
 Cloudflare does not vary on, hence the exclusion. `/_next/static/*` is cached by default
-and immutable. `/r/{code}`, `/spend`, `/initiatives/*`, `/donate/thanks`, `/account`,
-and `/staff` are rendered per request (`private, no-store`) and are never cached. A
+and immutable. `/r/{code}`, `/c/{code}`, `/spend`, `/initiatives/*`, `/events/*`,
+`/donate/thanks`, `/app/return`, `/account`, `/partner`, and `/staff` are rendered per
+request (`private, no-store`) and are never cached. A
 referral landing (`/r/{code}`) therefore always costs one render and one referral
 capture at the origin: it is the hottest origin path during a referral spike. The
 referrer's name it shows is looked up once a minute per code and web process, not per

@@ -41,6 +41,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   id-token: write
 
 concurrency:
@@ -51,16 +52,64 @@ env:
   AWS_REGION: us-east-2
 
 jobs:
+  # A push starts this workflow and CI side by side, so nothing else stops a red commit
+  # from deploying. This job waits for the CI run on the same commit and fails unless it
+  # succeeded; a superseded commit's cancelled run therefore never deploys either.
+  ci-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    outputs:
+      enabled: ${{ steps.switch.outputs.enabled }}
+    steps:
+      # The one on-switch: the repository-level variable APP_DEPLOY_ROLE_ARN. A job-level
+      # `if:` sees only repository variables, so the switch is evaluated here, once, and
+      # reported, instead of silently skipping jobs.
+      - id: switch
+        env:
+          DEPLOY_ROLE: ${{ vars.APP_DEPLOY_ROLE_ARN }}
+        run: |
+          if [ -n "$DEPLOY_ROLE" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Deploy is off: set the repository variable APP_DEPLOY_ROLE_ARN (an environment-level value is not enough) to turn it on."
+          fi
+
+      - name: Wait for CI on this commit
+        if: steps.switch.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 2700))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            run="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&per_page=20" \
+              --jq '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at) | last // empty | "\(.status) \(.conclusion // "-") \(.html_url)"')"
+            read -r status conclusion url <<<"${run:-none - -}"
+            echo "CI for $SHA: $status $conclusion $url"
+            if [ "$status" = completed ]; then
+              [ "$conclusion" = success ] && exit 0
+              echo "::error::CI did not succeed on $SHA ($conclusion): $url"
+              exit 1
+            fi
+            sleep 30
+          done
+          echo "::error::CI did not finish on $SHA within 45 minutes"
+          exit 1
+
   deploy:
+    needs: ci-gate
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    # Only run once the account is bootstrapped and the OIDC app-deploy role ARN
-    # is configured as the per-environment variable APP_DEPLOY_ROLE_ARN. Before
-    # bootstrap the variable is empty, so the job is skipped (green) instead of
-    # hard-failing on a role that does not exist yet. The pipeline "wakes up" on
-    # the first push after the variable is set. See docs/aws-deployment.md
-    # and https://github.com/pre-dad/DAD-infra (apps/dad-main).
-    if: ${{ vars.APP_DEPLOY_ROLE_ARN != '' }}
+    # Runs only once the account is bootstrapped and the OIDC app-deploy role ARN is set as
+    # the repository variable APP_DEPLOY_ROLE_ARN (evaluated by ci-gate's switch step). The
+    # environment's own value overrides it inside the steps. Before bootstrap the job is
+    # skipped (green) instead of hard-failing on a role that does not exist yet. The
+    # pipeline "wakes up" on the first push after the variable is set. See
+    # docs/aws-deployment.md and https://github.com/pre-dad/DAD-infra (apps/dad-main).
+    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
     # Resolve the environment from the trigger: dev push -> staging; main push ->
     # production; workflow_dispatch -> the chosen input (the environment's branch rule
     # still applies, so production can only be dispatched from main).
@@ -134,15 +183,32 @@ jobs:
           DONOR_STAFF_ORIGIN: ${{ vars.DONOR_STAFF_ORIGIN }}
         run: |
           set -euo pipefail
-          docker build -t "$REGISTRY/dad/api:$IMAGE_TAG" -f apps/donor-api/Dockerfile apps/donor-api
-          docker build -t "$REGISTRY/dad/web:$IMAGE_TAG" \
+          # The api and web Dockerfiles copy `apps/...` paths, so they build from the
+          # repository root (as docker-compose.prod.yml does); nginx copies from its own
+          # directory. scripts/check-docker-contexts.sh enforces this in CI.
+          # ECR tags are immutable, so a re-run of the same commit must not push again.
+          published() {
+            local found
+            found="$(aws ecr batch-get-image --repository-name "dad/$1" \
+              --image-ids "imageTag=$IMAGE_TAG" --query 'images[0].imageId.imageTag' --output text)"
+            [ "$found" = "$IMAGE_TAG" ]
+          }
+          build_push() {
+            # build_push <name> <dockerfile> <context> [docker build args...]
+            local name="$1" dockerfile="$2" context="$3"
+            shift 3
+            if published "$name"; then
+              echo "dad/$name:$IMAGE_TAG is already in ECR; not rebuilding"
+              return
+            fi
+            docker build -t "$REGISTRY/dad/$name:$IMAGE_TAG" "$@" -f "$dockerfile" "$context"
+            docker push "$REGISTRY/dad/$name:$IMAGE_TAG"
+          }
+          build_push api apps/donor-api/Dockerfile .
+          build_push web apps/web/Dockerfile . \
             --build-arg "DONOR_PUBLIC_ORIGIN=$DONOR_PUBLIC_ORIGIN" \
-            --build-arg "DONOR_STAFF_ORIGIN=$DONOR_STAFF_ORIGIN" \
-            -f apps/web/Dockerfile apps/web
-          docker build -t "$REGISTRY/dad/nginx:$IMAGE_TAG" -f deploy/nginx/Dockerfile deploy/nginx
-          docker push "$REGISTRY/dad/api:$IMAGE_TAG"
-          docker push "$REGISTRY/dad/web:$IMAGE_TAG"
-          docker push "$REGISTRY/dad/nginx:$IMAGE_TAG"
+            --build-arg "DONOR_STAFF_ORIGIN=$DONOR_STAFF_ORIGIN"
+          build_push nginx deploy/nginx/Dockerfile deploy/nginx
 
       # Register a task-definition revision per family pinned to this image tag. An ECS
       # service or run-task runs a specific revision, and CDK's revisions carry the tag of

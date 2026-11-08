@@ -175,6 +175,45 @@ func (q *Queries) ClaimDeletedAccountReversal(ctx context.Context, arg ClaimDele
 	return i, err
 }
 
+const claimStripeEvent = `-- name: ClaimStripeEvent :one
+UPDATE donor_stripe_events e SET attempts = e.attempts + 1, available_at = $1::timestamptz
+WHERE e.id = (
+    SELECT due.id FROM donor_stripe_events due
+    WHERE due.processed_at IS NULL AND due.attempts < 10 AND due.available_at <= $2::timestamptz
+    ORDER BY due.available_at, due.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+RETURNING stripe_event_id, event_type, occurred_at, data, processed_at, attempts, last_error, id, created_at, available_at
+`
+
+type ClaimStripeEventParams struct {
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+	AsOf       pgtype.Timestamptz `json:"as_of"`
+}
+
+// Leases the next due event to one attempt: the attempt is counted and the event
+// is not due again until lease_until, so a crashed worker's event is retried
+// after the lease expires. The returned attempts and available_at identify the
+// attempt in the statements below.
+func (q *Queries) ClaimStripeEvent(ctx context.Context, arg ClaimStripeEventParams) (DonorStripeEvent, error) {
+	row := q.db.QueryRow(ctx, claimStripeEvent, arg.LeaseUntil, arg.AsOf)
+	var i DonorStripeEvent
+	err := row.Scan(
+		&i.StripeEventID,
+		&i.EventType,
+		&i.OccurredAt,
+		&i.Data,
+		&i.ProcessedAt,
+		&i.Attempts,
+		&i.LastError,
+		&i.ID,
+		&i.CreatedAt,
+		&i.AvailableAt,
+	)
+	return i, err
+}
+
 const completeDeletedAccountReversal = `-- name: CompleteDeletedAccountReversal :exec
 UPDATE donor_deleted_account_reversals SET completed_at = $2, last_error = NULL WHERE id = $1
 `
@@ -190,7 +229,7 @@ func (q *Queries) CompleteDeletedAccountReversal(ctx context.Context, arg Comple
 }
 
 const completeStripeEvent = `-- name: CompleteStripeEvent :exec
-UPDATE donor_stripe_events SET processed_at=$2,last_error=NULL WHERE id=$1
+UPDATE donor_stripe_events SET processed_at = $2, last_error = NULL WHERE id = $1
 `
 
 type CompleteStripeEventParams struct {
@@ -247,19 +286,30 @@ func (q *Queries) FailDeletedAccountReversal(ctx context.Context, arg FailDelete
 	return err
 }
 
-const failStripeEvent = `-- name: FailStripeEvent :exec
-UPDATE donor_stripe_events SET last_error=$2,
-available_at=now()+least(power(2,attempts)*interval '30 seconds',interval '1 hour') WHERE id=$1
+const failStripeEvent = `-- name: FailStripeEvent :execrows
+UPDATE donor_stripe_events SET last_error = $2,
+available_at = now() + least(power(2, attempts) * interval '30 seconds', interval '1 hour')
+WHERE id = $1 AND attempts = $3 AND available_at = $4 AND processed_at IS NULL
 `
 
 type FailStripeEventParams struct {
-	ID        pgtype.UUID `json:"id"`
-	LastError pgtype.Text `json:"last_error"`
+	ID          pgtype.UUID        `json:"id"`
+	LastError   pgtype.Text        `json:"last_error"`
+	Attempts    int32              `json:"attempts"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
 }
 
-func (q *Queries) FailStripeEvent(ctx context.Context, arg FailStripeEventParams) error {
-	_, err := q.db.Exec(ctx, failStripeEvent, arg.ID, arg.LastError)
-	return err
+func (q *Queries) FailStripeEvent(ctx context.Context, arg FailStripeEventParams) (int64, error) {
+	result, err := q.db.Exec(ctx, failStripeEvent,
+		arg.ID,
+		arg.LastError,
+		arg.Attempts,
+		arg.AvailableAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const giftByPayment = `-- name: GiftByPayment :one
@@ -346,15 +396,6 @@ func (q *Queries) HasGift(ctx context.Context, donorID pgtype.UUID) (bool, error
 	var column_1 bool
 	err := row.Scan(&column_1)
 	return column_1, err
-}
-
-const incrementEventAttempt = `-- name: IncrementEventAttempt :exec
-UPDATE donor_stripe_events SET attempts=attempts+1 WHERE id=$1
-`
-
-func (q *Queries) IncrementEventAttempt(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, incrementEventAttempt, id)
-	return err
 }
 
 const insertBillingObservation = `-- name: InsertBillingObservation :exec
@@ -546,6 +587,27 @@ func (q *Queries) LatestAmountChange(ctx context.Context, checkoutID pgtype.UUID
 	return i, err
 }
 
+const lockClaimedStripeEvent = `-- name: LockClaimedStripeEvent :one
+SELECT id FROM donor_stripe_events
+WHERE id = $1 AND attempts = $2 AND available_at = $3 AND processed_at IS NULL
+FOR UPDATE
+`
+
+type LockClaimedStripeEventParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	Attempts    int32              `json:"attempts"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+}
+
+// Fails with no rows when the attempt no longer owns the event: another worker
+// reclaimed it after the lease expired, an operator reset it, or it is done.
+func (q *Queries) LockClaimedStripeEvent(ctx context.Context, arg LockClaimedStripeEventParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockClaimedStripeEvent, arg.ID, arg.Attempts, arg.AvailableAt)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const markPeriodPaid = `-- name: MarkPeriodPaid :exec
 UPDATE donor_billing_periods SET status='PAID' WHERE id=$1
 `
@@ -553,29 +615,6 @@ UPDATE donor_billing_periods SET status='PAID' WHERE id=$1
 func (q *Queries) MarkPeriodPaid(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, markPeriodPaid, id)
 	return err
-}
-
-const nextStripeEvent = `-- name: NextStripeEvent :one
-SELECT stripe_event_id, event_type, occurred_at, data, processed_at, attempts, last_error, id, created_at, available_at FROM donor_stripe_events WHERE processed_at IS NULL AND attempts<10 AND available_at<=now()
-ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
-`
-
-func (q *Queries) NextStripeEvent(ctx context.Context) (DonorStripeEvent, error) {
-	row := q.db.QueryRow(ctx, nextStripeEvent)
-	var i DonorStripeEvent
-	err := row.Scan(
-		&i.StripeEventID,
-		&i.EventType,
-		&i.OccurredAt,
-		&i.Data,
-		&i.ProcessedAt,
-		&i.Attempts,
-		&i.LastError,
-		&i.ID,
-		&i.CreatedAt,
-		&i.AvailableAt,
-	)
-	return i, err
 }
 
 const nextSubscriptionWithoutAnchor = `-- name: NextSubscriptionWithoutAnchor :one
@@ -751,6 +790,33 @@ DELETE FROM donor_recurring_reservations WHERE attempt_id=$1
 func (q *Queries) ReleaseReservation(ctx context.Context, attemptID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, releaseReservation, attemptID)
 	return err
+}
+
+const releaseStripeEvent = `-- name: ReleaseStripeEvent :execrows
+UPDATE donor_stripe_events SET attempts = attempts - 1, available_at = $4::timestamptz
+WHERE id = $1 AND attempts = $2 AND available_at = $3 AND processed_at IS NULL
+`
+
+type ReleaseStripeEventParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	Attempts    int32              `json:"attempts"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	AsOf        pgtype.Timestamptz `json:"as_of"`
+}
+
+// Gives back a claim whose attempt never reached a verdict, so the interrupted
+// attempt is not counted against the event.
+func (q *Queries) ReleaseStripeEvent(ctx context.Context, arg ReleaseStripeEventParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseStripeEvent,
+		arg.ID,
+		arg.Attempts,
+		arg.AvailableAt,
+		arg.AsOf,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const retryStripeEvent = `-- name: RetryStripeEvent :execrows

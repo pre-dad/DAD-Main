@@ -1,3 +1,6 @@
+// Command monitor prints the health of every outbox queue as JSON and exits
+// non-zero when an item is parked or a due item is older than -max-age, so an
+// alarm can watch the workers without reaching into them.
 package main
 
 import (

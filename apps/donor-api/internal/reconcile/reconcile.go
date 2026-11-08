@@ -75,6 +75,7 @@ func (w Window) StripeCreatedRange() (start, end int64) {
 	return ceil(w.Start), ceil(w.End) - 1
 }
 
+// Settled reports whether the processing delay after the window has passed.
 func (w Window) Settled(now time.Time) bool {
 	return !now.Before(w.End.Add(w.MaxLag))
 }
@@ -93,6 +94,8 @@ type InvoicePayment struct {
 	AmountMinor                          int64
 }
 
+// InvoicePaymentFacts validates a Stripe invoice payment and returns the
+// invoice and payment intent it links.
 func InvoicePaymentFacts(o payments.Object) (InvoicePayment, error) {
 	payment, err := o.Object("payment")
 	amount, amountErr := o.Int("amount_paid")
@@ -207,6 +210,8 @@ func financialObject(o payments.Object, prefix string) (string, int64, error) {
 	return id, amount, nil
 }
 
+// CollectedCharge returns the captured amount of a succeeded, paid charge, and
+// false for a failed or pending one.
 func CollectedCharge(o payments.Object) (int64, bool, error) {
 	_, amount, err := financialObject(o, "ch_")
 	captured, captureErr := o.Int("amount_captured")

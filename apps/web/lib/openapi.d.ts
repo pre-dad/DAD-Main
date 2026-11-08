@@ -1334,7 +1334,7 @@ export interface paths {
         put?: never;
         /**
          * Sign in with Apple or Google
-         * @description Verifies a provider id_token and signs in the donor it belongs to. The identity is matched by a prior link, else by the token's verified email against an existing account (which records the link). 401 covers an unverifiable token and a verified identity with no matching account alike; account creation happens in the giving flow, not here. 503 when the provider is not configured.
+         * @description Verifies a provider id_token and signs in the donor it belongs to. The identity is matched by a prior link, else by the token's verified email against an existing account (which records the link). 401 covers an unverifiable token and a verified identity with no matching account alike; account creation happens in the giving flow, not here. 503 when the provider is not configured. Replay protection: a client sends the optional `nonce` it bound to the provider request, and the id_token's `nonce` claim must equal it either raw or as the lowercase hex SHA-256 of its UTF-8 bytes (Sign in with Apple's native flow hashes the nonce it is given; Google Credential Manager and web flows use it as is). A mismatch, or a token with no `nonce` claim, answers 401 exactly like an unverifiable token. Omitting `nonce` is accepted unless the deployment requires it (`DONOR_OIDC_REQUIRE_NONCE`), in which case it answers 401 too.
          */
         post: operations["oidcSignIn"];
         delete?: never;
@@ -7058,6 +7058,8 @@ export interface operations {
                 "application/json": {
                     /** @description The provider's id_token (JWT) from the native or web sign-in SDK. */
                     id_token: string;
+                    /** @description Optional. The random value the client bound to the provider request: the raw string, which the id_token's nonce claim must equal as is or as the lowercase hex SHA-256 of it. Sent for replay protection; required once the deployment sets DONOR_OIDC_REQUIRE_NONCE. */
+                    nonce?: string;
                     /** @description Native requests only, optional. Ignored for browser requests. */
                     device_name?: string;
                     /**

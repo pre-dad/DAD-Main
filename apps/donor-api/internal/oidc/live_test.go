@@ -24,6 +24,7 @@ type provider struct {
 	kid     string
 	fetches atomic.Int32
 	down    atomic.Bool
+	weak    bool
 	server  *httptest.Server
 }
 
@@ -38,6 +39,10 @@ func newProvider(t *testing.T) *provider {
 		p.fetches.Add(1)
 		if p.down.Load() {
 			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if p.weak {
+			_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{}})
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{
@@ -109,6 +114,21 @@ func TestLiveVerifierAcceptsProviderTokens(t *testing.T) {
 	}
 	if p.fetches.Load() != 2 {
 		t.Fatalf("fetched the keys %d times; want once per provider", p.fetches.Load())
+	}
+}
+
+func TestLiveVerifierCarriesNonceClaim(t *testing.T) {
+	p := newProvider(t)
+	v := p.verifier(issued)
+	claims := googleClaims()
+	claims["nonce"] = "n-0123456789"
+	id, err := v.Verify(context.Background(), Google, p.sign(rs256("k1"), claims))
+	if err != nil || id.Nonce != "n-0123456789" {
+		t.Fatalf("nonce claim: %+v %v", id, err)
+	}
+	id, err = v.Verify(context.Background(), Google, p.sign(rs256("k1"), googleClaims()))
+	if err != nil || id.Nonce != "" {
+		t.Fatalf("no nonce claim: %+v %v", id, err)
 	}
 }
 
@@ -251,6 +271,28 @@ func TestLiveVerifierProviderOutage(t *testing.T) {
 	}
 }
 
+func TestLiveVerifierBacksOffFailedFetches(t *testing.T) {
+	p := newProvider(t)
+	p.down.Store(true)
+	now := issued
+	v := p.verifier(now)
+	v.now = func() time.Time { return now }
+	token := p.sign(rs256("k1"), googleClaims())
+	for range 3 {
+		if _, err := v.Verify(context.Background(), Google, token); !errors.Is(err, ErrKeys) {
+			t.Fatalf("an outage: %v; want ErrKeys", err)
+		}
+	}
+	if p.fetches.Load() != 1 {
+		t.Fatalf("%d fetches during one backoff window; want 1", p.fetches.Load())
+	}
+	now = now.Add(2 * keysRefetchGap)
+	p.down.Store(false)
+	if _, err := v.Verify(context.Background(), Google, token); err != nil || p.fetches.Load() != 2 {
+		t.Fatalf("after the window: %v with %d fetches; want a successful refetch", err, p.fetches.Load())
+	}
+}
+
 func TestLiveVerifierAcceptsEveryConfiguredAudience(t *testing.T) {
 	p := newProvider(t)
 	v := p.verifier(issued)
@@ -259,5 +301,82 @@ func TestLiveVerifierAcceptsEveryConfiguredAudience(t *testing.T) {
 	claims["iss"], claims["aud"] = "https://appleid.apple.com", "com.dad.web"
 	if _, err := v.Verify(context.Background(), Apple, p.sign(rs256("k1"), claims)); err != nil {
 		t.Fatalf("the website's audience: %v", err)
+	}
+}
+
+// A caller that disconnects mid-fetch must not start the failure backoff: the
+// next sign-in fetches at once instead of being refused for the window.
+func TestLiveVerifierCancelledCallerDoesNotStartBackoff(t *testing.T) {
+	p := newProvider(t)
+	v := p.verifier(issued)
+	token := p.sign(rs256("k1"), googleClaims())
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := v.Verify(cancelled, Google, token); !errors.Is(err, ErrKeys) {
+		t.Fatalf("a cancelled caller: %v; want ErrKeys", err)
+	}
+	if _, err := v.Verify(context.Background(), Google, token); err != nil {
+		t.Fatalf("the next caller was held off by the cancelled one: %v", err)
+	}
+}
+
+func TestLiveVerifierKeepsKnownKeysWhenTheProviderPublishesNoUsableOnes(t *testing.T) {
+	p := newProvider(t)
+	now := issued
+	v := p.verifier(now)
+	v.now = func() time.Time { return now }
+	token := p.sign(rs256("k1"), googleClaims())
+	if _, err := v.Verify(context.Background(), Google, token); err != nil {
+		t.Fatal(err)
+	}
+	p.kid = "k2"
+	p.weak = true
+	now = now.Add(2 * time.Minute)
+	if _, err := v.Verify(context.Background(), Google, p.sign(rs256("k2"), googleClaims())); !errors.Is(err, ErrKeys) {
+		t.Fatalf("a key set with nothing usable: %v; want ErrKeys", err)
+	}
+	if _, err := v.Verify(context.Background(), Google, token); err != nil {
+		t.Fatalf("the previously known key after an unusable refetch: %v", err)
+	}
+}
+
+// Keys that are not RS256 signing keys of at least 2048 bits are never used.
+func TestLiveVerifierIgnoresKeysItShouldNotTrust(t *testing.T) {
+	weak, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encode := func(key *rsa.PrivateKey, fields map[string]string) map[string]string {
+		entry := map[string]string{
+			"kty": "RSA", "kid": "k1", "use": "sig", "alg": "RS256",
+			"n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
+			"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
+		}
+		for name, value := range fields {
+			entry[name] = value
+		}
+		return entry
+	}
+	good, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, entry := range map[string]map[string]string{
+		"1024-bit":       encode(weak, nil),
+		"encryption key": encode(good, map[string]string{"use": "enc"}),
+		"other alg":      encode(good, map[string]string{"alg": "RS512"}),
+		"EC key type":    encode(good, map[string]string{"kty": "EC"}),
+		"no kid":         encode(good, map[string]string{"kid": ""}),
+		"huge exponent":  encode(good, map[string]string{"e": base64.RawURLEncoding.EncodeToString([]byte{1, 0, 0, 0, 1})}),
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{entry}})
+		}))
+		p := &provider{t: t, key: good, kid: "k1", server: server}
+		_, err := p.verifier(issued).Verify(context.Background(), Google, p.sign(rs256("k1"), googleClaims()))
+		server.Close()
+		if !errors.Is(err, ErrKeys) {
+			t.Errorf("%s: %v; want the key refused", name, err)
+		}
 	}
 }

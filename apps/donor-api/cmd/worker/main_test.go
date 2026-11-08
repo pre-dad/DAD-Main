@@ -26,6 +26,9 @@ func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
 		{"stray argument", []string{"--kind=stripe", "extra"}, ""},
 		{"retry for another kind", []string{"--kind=messages", "--retry-event=evt_123"}, ""},
 		{"retry without event id", []string{"--kind=stripe", "--retry-event=123"}, ""},
+		{"concurrency on a sequential kind", []string{"--kind=stripe", "--concurrency=2"}, ""},
+		{"concurrency above the limit", []string{"--kind=messages", "--concurrency=99"}, ""},
+		{"concurrency below one", []string{"--kind=messages", "--concurrency=0"}, ""},
 		{"workers disabled", []string{"--kind=stripe"}, "DONOR_GO_WORKERS_ENABLED"},
 		{"no database", []string{"--kind=stripe"}, "DONOR_WORKER_STRIPE_DATABASE_URL"},
 	} {

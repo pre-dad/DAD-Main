@@ -57,7 +57,7 @@ jobs:
             # backend: Go API, its migrations/sqlc/openapi, the web app (api runs
             # check-generated which spans web typegen; browser is full-stack E2E),
             # or the CI workflow itself.
-            if match '^apps/donor-api/|^apps/web/|^scripts/|^contracts/mobile/|^Makefile$|^\.github/workflows/ci\.yml$'; then backend=true; fi
+            if match '^apps/donor-api/|^apps/web/|^design/|^scripts/|^contracts/mobile/|^Makefile$|^\.github/workflows/ci\.yml$'; then backend=true; fi
             # deploy: compose/env/ingress/scripts/Dockerfiles, or the CI workflow.
             if match '^docker-compose|^\.env\..*\.example$|^scripts/|[Dd]ockerfile|^\.dockerignore$|^Makefile$|^deploy/nginx/|^\.github/workflows/ci\.yml$'; then deploy=true; fi
           fi
@@ -135,6 +135,7 @@ jobs:
         with: { node-version: "24" }
       - run: make check-deploy-secrets
       - run: make lint-scripts
+      - run: ./scripts/check-docker-contexts.sh
       - run: make check-ingress smoke-ingress
       - name: Validate production compose
         run: |

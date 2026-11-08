@@ -84,6 +84,22 @@ func TestEventDraftPublishAndValidation(t *testing.T) {
 	if err != nil || view.Title != "Event water-cleanup" || view.Capacity != 20 {
 		t.Fatalf("published detail: %+v %v", view, err)
 	}
+
+	var first, again time.Time
+	var audited int
+	if err = pool.QueryRow(ctx, "SELECT published_at FROM donor_events WHERE id=$1", id).Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Publish(ctx, adminToken, id); err != nil {
+		t.Fatalf("republish: %v", err)
+	}
+	if err = pool.QueryRow(ctx, "SELECT published_at FROM donor_events WHERE id=$1", id).Scan(&again); err != nil || !again.Equal(first) {
+		t.Fatalf("republishing moved published_at from %v to %v (%v)", first, again, err)
+	}
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE action='event.published' AND target=$1", id.String()).Scan(&audited); err != nil ||
+		audited != 1 {
+		t.Fatalf("event.published audited %d times (%v), want once", audited, err)
+	}
 }
 
 func TestUpcomingEventsNearDonor(t *testing.T) {
@@ -1007,6 +1023,170 @@ func TestEventTimeZone(t *testing.T) {
 		}
 		if view, err = reader.Detail(ctx, id); err != nil || view.TimeZone != "America/Chicago" {
 			t.Fatalf("%s after update: %q %v", slug, view.TimeZone, err)
+		}
+	}
+}
+
+func TestCancellingAWaitlistPlacePromotesNoOneAndFreesTheDonorToRejoin(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	res := ReservationService{DB: api}
+
+	in := eventInput("waitlist-leave", "San Francisco", "94103", "COMMUNITY", 48*time.Hour)
+	in.Capacity = 1
+	eventID, err := events.Create(ctx, adminToken, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+	holder, holderToken := signedInDonor(t, pool)
+	leaver, leaverToken := signedInDonor(t, pool)
+	next, nextToken := signedInDonor(t, pool)
+	for _, id := range []pgtype.UUID{holder, leaver, next} {
+		pushCleanupDonor(t, pool, id)
+	}
+	for _, token := range []string{holderToken, leaverToken, nextToken} {
+		if _, err := res.Reserve(ctx, token, eventID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	statusOf := func(id pgtype.UUID) string {
+		t.Helper()
+		var status string
+		if err := pool.QueryRow(ctx, "SELECT status FROM donor_event_reservations WHERE event_id=$1 AND donor_id=$2", eventID, id).
+			Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		return status
+	}
+
+	if r, err := res.Cancel(ctx, leaverToken, eventID); err != nil || r.Status != reservationCancelled {
+		t.Fatalf("waitlisted donor cancel: %+v %v", r, err)
+	}
+	if got := statusOf(holder); got != reservationReserved {
+		t.Fatalf("the seat holder is %s after a waitlisted donor left", got)
+	}
+	if got := statusOf(next); got != reservationWaitlisted {
+		t.Fatalf("a waitlisted donor was promoted into a full event: %s", got)
+	}
+	var promotions int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_push_notifications WHERE category=$1 AND donor_id=ANY($2)",
+		eventPromotedCategory, []pgtype.UUID{holder, leaver, next}).Scan(&promotions); err != nil || promotions != 0 {
+		t.Fatalf("promotion pushes after a waitlist leave = %d (%v), want 0", promotions, err)
+	}
+	if r, err := res.Cancel(ctx, leaverToken, eventID); err != nil || r.Status != reservationCancelled {
+		t.Fatalf("repeated cancel: %+v %v", r, err)
+	}
+
+	// Rejoining queues the donor behind the donor who was already waiting.
+	if r, err := res.Reserve(ctx, leaverToken, eventID); err != nil || r.Status != reservationWaitlisted {
+		t.Fatalf("rejoin: %+v %v", r, err)
+	}
+	if _, err := res.Cancel(ctx, holderToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+	if statusOf(next) != reservationReserved || statusOf(leaver) != reservationWaitlisted {
+		t.Fatalf("waitlist order not preserved: next=%s leaver=%s", statusOf(next), statusOf(leaver))
+	}
+}
+
+func TestCheckInIsRefusedOutsideTheEventWindowAndForCancelledEvents(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	const secret = "test-checkin-secret"
+	res := ReservationService{DB: api, CheckInSecret: secret}
+	donorID, donorToken := signedInDonor(t, pool)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_badges WHERE donor_id=$1", donorID) })
+
+	seat := func(slug string, startIn, endIn time.Duration) pgtype.UUID {
+		t.Helper()
+		in := eventInput(slug, "San Francisco", "94103", "VOLUNTEER", startIn)
+		in.EndsAt = time.Now().UTC().Add(endIn).Format(time.RFC3339)
+		id, err := events.Create(ctx, adminToken, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := events.Publish(ctx, adminToken, id); err != nil {
+			t.Fatal(err)
+		}
+		mustExec(
+			t,
+			pool,
+			"INSERT INTO donor_event_reservations (id, event_id, donor_id, status, reserved_at, created_at, updated_at) VALUES (gen_random_uuid(),$1,$2,'RESERVED',now(),now(),now())",
+			id,
+			donorID,
+		)
+		return id
+	}
+	ended := seat("ended", -3*time.Hour, -time.Hour)
+	if _, err := res.CheckIn(ctx, donorToken, checkInToken(ended, secret)); !errors.Is(err, ErrCheckIn) {
+		t.Fatalf("check-in after the event ended: %v", err)
+	}
+	cancelled := seat("cancelled-live", -time.Hour, time.Hour)
+	mustExec(t, pool, "UPDATE donor_events SET cancelled_at=now() WHERE id=$1", cancelled)
+	if _, err := res.CheckIn(ctx, donorToken, checkInToken(cancelled, secret)); !errors.Is(err, ErrCheckIn) {
+		t.Fatalf("check-in to a cancelled event: %v", err)
+	}
+	var checkedIn int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_event_reservations WHERE donor_id=$1 AND checked_in_at IS NOT NULL", donorID).
+		Scan(&checkedIn); err != nil || checkedIn != 0 {
+		t.Fatalf("%d refused check-ins were recorded (%v)", checkedIn, err)
+	}
+}
+
+func TestReminderSweepSkipsWaitlistedAndCancelledHolders(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	res := ReservationService{DB: api}
+
+	in := eventInput("reminder-skips", "San Francisco", "94103", "VOLUNTEER", 90*time.Minute)
+	in.Capacity = 1
+	eventID, err := events.Create(ctx, adminToken, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+	seated, seatedToken := signedInDonor(t, pool)
+	waiting, waitingToken := signedInDonor(t, pool)
+	left, leftToken := signedInDonor(t, pool)
+	for _, id := range []pgtype.UUID{seated, waiting, left} {
+		pushCleanupDonor(t, pool, id)
+	}
+	if _, err := res.Reserve(ctx, leftToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := res.Cancel(ctx, leftToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{seatedToken, waitingToken} {
+		if _, err := res.Reserve(ctx, token, eventID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := (EventReminderService{DB: pool}).QueueDueReminders(ctx, time.Now().UTC()); err != nil || n != 2 {
+		t.Fatalf("sweep queued %d (%v), want the seated donor's 24h and 2h reminders only", n, err)
+	}
+	for id, want := range map[pgtype.UUID]int{seated: 2, waiting: 0, left: 0} {
+		var got int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_push_notifications WHERE category='EVENT_REMINDER' AND donor_id=$1", id).
+			Scan(&got); err != nil || got != want {
+			t.Fatalf("reminders for %v = %d (%v), want %d", id, got, err, want)
 		}
 	}
 }

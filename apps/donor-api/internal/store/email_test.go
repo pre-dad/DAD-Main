@@ -333,7 +333,7 @@ func TestLoginLinkReturnsOnlyToAllowedPages(t *testing.T) {
 		{"", "#token="},
 	} {
 		t.Run(c.next, func(t *testing.T) {
-			w, id, transport, now := emailFixture(t)
+			w, id, transport, _ := emailFixture(t)
 			pool := database(t)
 			ctx := context.Background()
 			if _, err := pool.Exec(ctx, "DELETE FROM donor_login_emails WHERE donor_id=$1", id); err != nil {
@@ -346,7 +346,7 @@ func TestLoginLinkReturnsOnlyToAllowedPages(t *testing.T) {
 			if err := (AccountService{DB: as(t, dbroles.API)}).QueueLogin(ctx, email, c.next); err != nil {
 				t.Fatal(err)
 			}
-			if worked, err := w.DeliverNext(ctx, now.Add(time.Second)); err != nil || !worked {
+			if worked, err := w.DeliverNext(ctx, time.Now().Add(time.Second)); err != nil || !worked {
 				t.Fatal(worked, err)
 			}
 			body := transport.messages[0].Body

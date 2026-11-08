@@ -5,7 +5,8 @@ The live web palette, corner radii, spacing scale (`space`, 4–64 px), and type
 `make generate-mobile` generates `apps/web/design/tokens.ts`; the versioned
 [mobile foundation](mobile-foundation.md) also supplies Swift and Kotlin values.
 The web adapter maps those values to CSS custom properties on the
-server-rendered document; `globals.css` consumes them and holds no other colors. The SwiftUI
+server-rendered document; `globals.css` consumes them and holds no other palette colors
+(only a gradient mask and the print rules use literal black, white and grey). The SwiftUI
 and Kotlin/Compose applications adapt the generated values to native colors and sizing.
 Typography loading, responsive layout, focus treatment, and browser motion
 preferences remain web concerns in the stylesheet and root layout.

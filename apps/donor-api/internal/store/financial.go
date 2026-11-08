@@ -235,8 +235,17 @@ type projection struct {
 	zone        *time.Location
 }
 
-// Version 11 requires fresh continuity before awarding new streak badges.
+// projectionRules versions the recognition rules. Raising it queues every
+// projection computed under an earlier version for recomputation.
 const projectionRules = 12
+
+// currentRulesVersion is the version a projection computed now must carry:
+// the code's projectionRules plus the staff recognition-rules epoch. Both only
+// grow, so a rules save or a release leaves every older projection outdated.
+func currentRulesVersion(ctx context.Context, q *queries.Queries) (int32, error) {
+	epoch, err := q.RecognitionEpoch(ctx)
+	return projectionRules + epoch, err
+}
 
 // A projection waits at most refreshCap for its next time boundary. Facts that
 // change a projection refresh it when they arrive, so this is a backstop, not a
@@ -258,11 +267,17 @@ func refreshCap(donor pgtype.UUID) time.Duration {
 // projectFacts recomputes and saves the donor's recognition projection
 // under the donor lock.
 func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) (projection, error) {
+	// The version is read before the rules, so a save landing in between
+	// leaves this projection outdated and it is recomputed, never missed.
+	version, err := currentRulesVersion(ctx, q)
 	out := queries.SaveProjectionParams{
 		DonorID:       id,
 		ComputedAt:    timestamp(now),
 		NextRefreshAt: timestamp(now.Add(refreshCap(id))),
-		RulesVersion:  projectionRules,
+		RulesVersion:  version,
+	}
+	if err != nil {
+		return projection{SaveProjectionParams: out}, err
 	}
 	donor, err := q.LockDonor(ctx, id)
 	if err != nil {

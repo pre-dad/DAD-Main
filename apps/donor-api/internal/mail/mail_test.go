@@ -50,6 +50,16 @@ func TestMessageMIMEAndInjectionBoundaries(t *testing.T) {
 	if err != nil || time.Since(date) > time.Minute {
 		t.Fatal("missing or stale Date header", parsed.Header.Get("Date"), err)
 	}
+	for name, recipients := range map[string]string{
+		"two addresses":  "donor@example.org, other@example.org",
+		"address groups": "list: a@example.org, b@example.org;",
+	} {
+		bad := message
+		bad.To = recipients
+		if _, _, _, err := bad.wire(); err == nil {
+			t.Fatalf("%s accepted as one recipient", name)
+		}
+	}
 	for _, edit := range []func(*Message){func(m *Message) { m.To += "\r\nBcc: bad@example.org" }, func(m *Message) { m.From += "\nX: bad" }, func(m *Message) { m.Subject += "\r\nBcc: bad@example.org" }, func(m *Message) { m.ID += "\nX: bad" }} {
 		bad := message
 		edit(&bad)
@@ -174,7 +184,7 @@ type fixtureSession struct {
 	err      error
 }
 
-func serveSTARTTLS(listener net.Listener, config *tls.Config) fixtureSession {
+func serveSTARTTLS(listener net.Listener, config *tls.Config, rcptReply string) fixtureSession {
 	var session fixtureSession
 	conn, err := listener.Accept()
 	if err != nil {
@@ -210,8 +220,10 @@ func serveSTARTTLS(listener net.Listener, config *tls.Config) fixtureSession {
 			conn, r = secure, bufio.NewReader(secure)
 		case verb == "AUTH":
 			reply("235 accepted\r\n")
-		case verb == "MAIL", verb == "RCPT":
+		case verb == "MAIL":
 			reply("250 ok\r\n")
+		case verb == "RCPT":
+			reply(rcptReply)
 		case verb == "DATA":
 			reply("354 send\r\n")
 			for {
@@ -245,7 +257,7 @@ func TestSMTPDeliversOverVerifiedSTARTTLS(t *testing.T) {
 	host, portText, _ := net.SplitHostPort(listener.Addr().String())
 	port, _ := strconv.Atoi(portText)
 	sessions := make(chan fixtureSession, 1)
-	go func() { sessions <- serveSTARTTLS(listener, config) }()
+	go func() { sessions <- serveSTARTTLS(listener, config, "250 ok\r\n") }()
 	transport := SMTPTransport{
 		Settings: Settings{
 			Host:     host,
@@ -307,5 +319,60 @@ func TestSMTPDeliversOverVerifiedSTARTTLS(t *testing.T) {
 	// The DATA terminator requires the final line to end in CRLF.
 	if err != nil || strings.ReplaceAll(string(body), "\r\n", "\n") != message.Body+"\n" {
 		t.Fatalf("body = %q, %v", body, err)
+	}
+}
+
+func startSTARTTLS(t *testing.T, rcptReply string) (SMTPTransport, *x509.CertPool, chan fixtureSession) {
+	t.Helper()
+	config, roots := fixtureTLS(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	host, portText, _ := net.SplitHostPort(listener.Addr().String())
+	port, _ := strconv.Atoi(portText)
+	sessions := make(chan fixtureSession, 1)
+	go func() { sessions <- serveSTARTTLS(listener, config, rcptReply) }()
+	return SMTPTransport{
+		Settings: Settings{Host: host, Port: port, Username: "private-user", Password: "private-password", Sender: "sender@example.org"},
+	}, roots, sessions
+}
+
+var deliverable = Message{
+	From: "sender@example.org", To: "donor@example.org", Subject: "private subject", Body: "private body", ID: "<fixture@example.org>",
+}
+
+// A server whose certificate is not signed by a trusted root is never sent
+// credentials or content.
+func TestSMTPRefusesUntrustedCertificates(t *testing.T) {
+	transport, _, sessions := startSTARTTLS(t, "250 ok\r\n")
+	if err := transport.Send(context.Background(), deliverable); !errors.Is(err, ErrDelivery) {
+		t.Fatalf("untrusted certificate: %v; want ErrDelivery", err)
+	}
+	session := <-sessions
+	for _, command := range session.commands {
+		if verb, _, _ := strings.Cut(command, " "); slices.Contains([]string{"AUTH", "MAIL", "RCPT", "DATA"}, verb) {
+			t.Fatalf("%q was sent over an unverified connection", command)
+		}
+	}
+}
+
+// A refused recipient fails the delivery without leaking the server's reply,
+// the address or the credentials, and sends no message body.
+func TestSMTPRecipientRefusalIsASafeDeliveryFailure(t *testing.T) {
+	transport, roots, sessions := startSTARTTLS(t, "550 5.1.1 donor@example.org does not exist\r\n")
+	transport.RootCAs = roots
+	err := transport.Send(context.Background(), deliverable)
+	if !errors.Is(err, ErrDelivery) {
+		t.Fatalf("refused recipient: %v; want ErrDelivery", err)
+	}
+	for _, secret := range []string{"donor@example.org", "does not exist", "private-password", "private-user"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Fatalf("delivery error %q leaks %q", err, secret)
+		}
+	}
+	if session := <-sessions; slices.Contains(session.commands, "DATA") || len(session.data) != 0 {
+		t.Fatalf("a message was sent to a refused recipient: %q", session.commands)
 	}
 }

@@ -211,17 +211,30 @@ SELECT * FROM donor_event_alert_jobs WHERE completed_at IS NULL
 ORDER BY updated_at,event_id LIMIT 1 FOR UPDATE SKIP LOCKED;
 
 -- name: QueueEventAlertBatch :one
-WITH recipients AS MATERIALIZED (
-  SELECT d.id,e.id AS event_id,e.starts_at
-  FROM donor_events e
-  JOIN donors d ON NOT d.disabled AND (
-    (e.city<>'' AND lower(d.city)=lower(e.city))
-    OR (e.zip<>'' AND left(d.zip,3)=left(e.zip,3)))
-  JOIN donor_preferences p ON p.donor_id=d.id AND p.volunteer AND p.push_event_nearby
+-- Each audience (the event's city, its ZIP prefix) is read in donor order from
+-- its own index, so a batch costs its size however large the audience is; a
+-- donor in both is queued once.
+WITH target AS (
+  SELECT e.id,e.city,e.zip,e.starts_at FROM donor_events e
   WHERE e.id=sqlc.arg(event_id) AND e.publish_state='PUBLISHED' AND e.cancelled_at IS NULL
     AND e.type<>'INVITE_ONLY' AND e.starts_at>sqlc.arg(as_of)::timestamptz
-    AND (sqlc.narg(after_donor)::uuid IS NULL OR d.id>sqlc.narg(after_donor)::uuid)
-  ORDER BY d.id LIMIT sqlc.arg(batch_size)::int
+), recipients AS MATERIALIZED (
+  SELECT id,event_id,starts_at FROM (
+    (SELECT d.id,e.id AS event_id,e.starts_at
+     FROM target e
+     JOIN donors d ON e.city<>'' AND lower(d.city)=lower(e.city) AND NOT d.disabled
+       AND (sqlc.narg(after_donor)::uuid IS NULL OR d.id>sqlc.narg(after_donor)::uuid)
+     JOIN donor_preferences p ON p.donor_id=d.id AND p.volunteer AND p.push_event_nearby
+     ORDER BY d.id LIMIT sqlc.arg(batch_size)::int)
+    UNION
+    (SELECT d.id,e.id AS event_id,e.starts_at
+     FROM target e
+     JOIN donors d ON e.zip<>'' AND left(d.zip,3)=left(e.zip,3) AND NOT d.disabled
+       AND (sqlc.narg(after_donor)::uuid IS NULL OR d.id>sqlc.narg(after_donor)::uuid)
+     JOIN donor_preferences p ON p.donor_id=d.id AND p.volunteer AND p.push_event_nearby
+     ORDER BY d.id LIMIT sqlc.arg(batch_size)::int)
+  ) audience
+  ORDER BY id LIMIT sqlc.arg(batch_size)::int
 ), queued AS (
   INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at)
   SELECT gen_random_uuid(),id,'EVENT_NEARBY','push:event-nearby:'||event_id::text||':'||id::text,

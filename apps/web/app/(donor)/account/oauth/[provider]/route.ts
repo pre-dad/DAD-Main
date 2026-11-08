@@ -87,11 +87,12 @@ async function handle(request: NextRequest, context: Context) {
     const token = (await response.json()).id_token;
     if (typeof token !== "string" || token.length > 16000) return failed();
     const claims = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
-    if (claims.nonce !== saved.nonce) return failed();
+    if (typeof claims.nonce !== "string" || typeof saved.nonce !== "string" || !equal(claims.nonce, saved.nonce))
+      return failed();
     const accepted = await fetch(`${donorApiBase()}/donor/oidc/${provider}/sign-in`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: origin, Cookie: request.headers.get("cookie") ?? "" },
-      body: JSON.stringify({ id_token: token }),
+      body: JSON.stringify({ id_token: token, nonce: saved.nonce }),
       signal: AbortSignal.timeout(15000),
       cache: "no-store",
     });

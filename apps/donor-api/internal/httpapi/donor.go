@@ -134,7 +134,7 @@ func (a *api) deleteAccount(w http.ResponseWriter, r *http.Request, session stri
 		if err := a.Donor.DeleteAccount(ctx, session); err != nil {
 			return nil, err
 		}
-		a.setCookie(w, donorCookie, "", -1, http.SameSiteLaxMode)
+		a.setSessionCookie(w, donorCookie, "", -1)
 		return map[string]bool{"deleted": true}, nil
 	})
 }

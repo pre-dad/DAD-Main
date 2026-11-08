@@ -19,8 +19,8 @@ export default function HowItWorks() {
       <h2>Giving</h2>
       <p>
         Give monthly on the web, without creating an account first. Giving suggests about a dollar a day, billed as
-        $30/month, and $90, $150, or an amount you choose up to $900/month work too: the monthly amount is what your
-        card is charged.
+        $30/month. You can also choose $90, $150, or any amount up to $900/month. The monthly amount is what your card
+        is charged.
       </p>
       <h2>Your circle</h2>
       <p>

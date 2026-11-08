@@ -35,6 +35,10 @@ import (
 	"dad/donor-api/internal/store/queries"
 )
 
+// reconcileRowBound caps the database rows, and the pending refunds, one run
+// holds in memory.
+const reconcileRowBound = 100000
+
 // window resolves the flags into the reconciliation window. -since/-until win
 // when both are set; otherwise -date (or, empty, yesterday in New York).
 func window(date, since, until string, maxLag time.Duration, now time.Time) (reconcile.Window, error) {
@@ -235,7 +239,6 @@ func reconcileWindowPaced(
 	// sub-day; see listSplitting). A window whose DB side exceeds this bound is
 	// rejected with guidance to narrow it; streaming the DB-side diff to lift
 	// this bound entirely is a follow-up for horizon-scale daily volumes.
-	const reconcileRowBound = 100000
 	if len(giftRows) > reconcileRowBound || len(refundRows) > reconcileRowBound {
 		return reconcile.Report{}, errors.New("reconciliation window exceeds the in-memory row bound; use a smaller -since/-until range")
 	}
@@ -340,8 +343,8 @@ func reconcileWindowPaced(
 		if len(rows) == 0 {
 			return report, nil
 		}
-		if report.PendingRefundsChecked+len(rows) > 100000 {
-			return reconcile.Report{}, errors.New("pending refund backlog exceeds 100000 records")
+		if report.PendingRefundsChecked+len(rows) > reconcileRowBound {
+			return reconcile.Report{}, errors.New("pending refund backlog exceeds the in-memory row bound")
 		}
 		remote := make([]payments.Object, 0, len(rows))
 		local := make([]reconcile.Refund, 0, len(rows))

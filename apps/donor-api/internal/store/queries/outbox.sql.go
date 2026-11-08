@@ -39,7 +39,7 @@ func (q *Queries) DeferProjection(ctx context.Context, arg DeferProjectionParams
 const dueProjectionDonors = `-- name: DueProjectionDonors :many
 SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
 WHERE p.next_refresh_at<=$1 ORDER BY p.next_refresh_at
-LIMIT $2::int FOR NO KEY UPDATE OF d SKIP LOCKED
+LIMIT $2::int FOR NO KEY UPDATE OF d, p SKIP LOCKED
 `
 
 type DueProjectionDonorsParams struct {
@@ -98,7 +98,7 @@ func (q *Queries) InsertFinancialMessage(ctx context.Context, arg InsertFinancia
 const outdatedProjectionDonors = `-- name: OutdatedProjectionDonors :many
 SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
 WHERE p.rules_version<$1 AND p.computed_at<=$2
-LIMIT $3::int FOR NO KEY UPDATE OF d SKIP LOCKED
+LIMIT $3::int FOR NO KEY UPDATE OF d, p SKIP LOCKED
 `
 
 type OutdatedProjectionDonorsParams struct {
@@ -108,7 +108,9 @@ type OutdatedProjectionDonorsParams struct {
 }
 
 // Batch claim of donors computed under earlier rules; LIMIT bounds one step's
-// work so replicas claim disjoint donors and scale linearly.
+// work so replicas claim disjoint donors and scale linearly. The projection is
+// locked too, so a claim re-checks its filter against a refresh that committed
+// after the statement began instead of refreshing that donor again.
 func (q *Queries) OutdatedProjectionDonors(ctx context.Context, arg OutdatedProjectionDonorsParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, outdatedProjectionDonors, arg.RulesVersion, arg.ComputedAt, arg.Batch)
 	if err != nil {

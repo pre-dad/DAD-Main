@@ -73,7 +73,7 @@ calendar days after the first recurring gift. Each checkpoint replays verified f
 facts, refunds and cancellation boundaries at that time. A later lapse cannot erase an
 earlier survival result, and restarting does not count as surviving the original run.
 Unknown billing history stays unknown. Run the projections worker after upgrading to
-rules version 8 to backfill these checkpoints. The report discloses incomplete coverage
+rules version 8 or later to backfill these checkpoints. The report discloses incomplete coverage
 until the backfill completes. Landing-to-gift timing remains unavailable without landing
 linkage; account creation is never substituted for landing time.
 

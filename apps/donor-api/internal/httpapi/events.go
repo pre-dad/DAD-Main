@@ -322,7 +322,7 @@ func (a *api) reserveEvent(w http.ResponseWriter, r *http.Request, session strin
 	if !ok {
 		return
 	}
-	svc := service{a.Reservations != nil, donorUnavailable, writeTimeout, donorStatus}
+	svc := service{a.Reservations != nil, donorUnavailable, providerTimeout, donorStatus}
 	svc.serve(w, r, func(ctx context.Context) (any, error) {
 		return a.Reservations.Reserve(ctx, session, id)
 	})
@@ -335,7 +335,7 @@ func (a *api) cancelEvent(w http.ResponseWriter, r *http.Request, session string
 	if !ok {
 		return
 	}
-	svc := service{a.Reservations != nil, donorUnavailable, writeTimeout, donorStatus}
+	svc := service{a.Reservations != nil, donorUnavailable, providerTimeout, donorStatus}
 	svc.serve(w, r, func(ctx context.Context) (any, error) {
 		return a.Reservations.Cancel(ctx, session, id)
 	})
@@ -353,7 +353,7 @@ func (a *api) checkInEvent(w http.ResponseWriter, r *http.Request, session strin
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	svc := service{a.Reservations != nil, donorUnavailable, writeTimeout, donorStatus}
+	svc := service{a.Reservations != nil, donorUnavailable, providerTimeout, donorStatus}
 	svc.serve(w, r, func(ctx context.Context) (any, error) {
 		return a.Reservations.CheckIn(ctx, session, body.Token)
 	})

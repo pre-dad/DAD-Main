@@ -29,9 +29,10 @@ import (
 	"dad/donor-api/internal/wallet"
 )
 
-// shutdownTimeout lets in-flight processor calls finish within the server's
-// write timeout instead of being cut off and left for reconciliation.
-const shutdownTimeout = 35 * time.Second
+// shutdownTimeout lets in-flight processor calls (bounded at 25s) finish
+// instead of being cut off and left for reconciliation. It stays inside the
+// ECS stopTimeout of 30s, after which the task is killed regardless.
+const shutdownTimeout = 27 * time.Second
 
 // trustedProxies parses DONOR_TRUSTED_PROXY_CIDRS. Ranges broader than a
 // private /8 (IPv4) or /32 (IPv6) are refused because trusting them would let

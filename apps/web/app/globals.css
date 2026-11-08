@@ -274,8 +274,8 @@ textarea[readonly] {
 input[type="checkbox"],
 input[type="radio"] {
   flex: none;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   margin: 0;
   accent-color: var(--brand-ink);
 }
@@ -1387,4 +1387,32 @@ footer .tagline {
     border: 1px solid #bbb;
     break-inside: avoid;
   }
+}
+
+.interestList {
+  padding: 0;
+  list-style: none;
+}
+.interestList > li {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 44px;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.interestAdd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-3);
+}
+.interestField {
+  flex: 1 1 14rem;
+}
+.interestRemove {
+  flex: none;
+  white-space: nowrap;
 }

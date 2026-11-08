@@ -21,7 +21,7 @@ func native(r *http.Request) bool {
 // so a bearer token cannot lend a browser request its Origin exemption.
 func donorSession(r *http.Request) string {
 	if !native(r) {
-		return cookieValue(r, donorCookie)
+		return sessionCookieValue(r, donorCookie)
 	}
 	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
 	if !strings.EqualFold(scheme, "Bearer") || !validToken(token) {

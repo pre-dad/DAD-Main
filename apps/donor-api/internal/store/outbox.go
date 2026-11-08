@@ -64,6 +64,18 @@ func seedProjection(ctx context.Context, q *queries.Queries, donor pgtype.UUID, 
 // time well within the worker's StepBudget.
 const ProjectionBatch = 64
 
+const (
+	// OutdatedBatch bounds one transaction of catch-up work on projections
+	// computed under earlier rules. Its donors stay locked until it commits, so
+	// it is sized to keep that to about a second (see docs/operations.md), while
+	// still amortizing round trips: at 64 the rate is about 60% of the plateau.
+	OutdatedBatch = 256
+	// CatchUpSlice is how long one worker step keeps starting catch-up
+	// transactions. It is half of workers.StepBudget, leaving room for the
+	// transaction in flight and the sweeps that follow in the same step.
+	CatchUpSlice = time.Minute
+)
+
 // RefreshNextProjection refreshes the donor whose projection is due soonest,
 // or else one computed under earlier rules. It is a thin wrapper over
 // RefreshDueProjections for callers that advance the queue one donor at a time.
@@ -79,17 +91,44 @@ func RefreshNextProjection(ctx context.Context, pool *pgxpool.Pool, now time.Tim
 // backoff and its failure recorded for the monitor rather than aborting the
 // batch. It returns the number of donors claimed.
 func RefreshDueProjections(ctx context.Context, pool *pgxpool.Pool, now time.Time, batch int) (int, error) {
+	return refreshProjections(ctx, pool, now, batch, batch)
+}
+
+// CatchUpProjections refreshes projections for up to slice, in transactions of
+// at most ProjectionBatch due donors or OutdatedBatch outdated ones. Due
+// donors are claimed first by every transaction, so a rules change delays a
+// due projection by at most one transaction, never by the whole backlog. It
+// stops when nothing is left, the slice is spent, or ctx ends, and reports how
+// many donors it claimed even when it returns an error. Concurrent callers
+// claim disjoint donors.
+func CatchUpProjections(ctx context.Context, pool *pgxpool.Pool, clock func() time.Time, slice time.Duration) (int, error) {
+	deadline := time.Now().Add(slice)
+	total := 0
+	for {
+		n, err := refreshProjections(ctx, pool, clock(), ProjectionBatch, OutdatedBatch)
+		total += n
+		if err != nil || n == 0 || !time.Now().Before(deadline) {
+			return total, err
+		}
+	}
+}
+
+func refreshProjections(ctx context.Context, pool *pgxpool.Pool, now time.Time, dueBatch, outdatedBatch int) (int, error) {
 	processed := 0
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		ids, err := q.DueProjectionDonors(ctx, queries.DueProjectionDonorsParams{NextRefreshAt: timestamp(now), Batch: int32(batch)})
+		version, err := currentRulesVersion(ctx, q)
+		if err != nil {
+			return err
+		}
+		ids, err := q.DueProjectionDonors(ctx, queries.DueProjectionDonorsParams{NextRefreshAt: timestamp(now), Batch: int32(dueBatch)})
 		if err != nil {
 			return err
 		}
 		if len(ids) == 0 {
 			ids, err = q.OutdatedProjectionDonors(
 				ctx,
-				queries.OutdatedProjectionDonorsParams{RulesVersion: projectionRules, ComputedAt: timestamp(now), Batch: int32(batch)},
+				queries.OutdatedProjectionDonorsParams{RulesVersion: version, ComputedAt: timestamp(now), Batch: int32(outdatedBatch)},
 			)
 			if err != nil {
 				return err
@@ -105,7 +144,7 @@ func RefreshDueProjections(ctx context.Context, pool *pgxpool.Pool, now time.Tim
 				if !ok {
 					return refreshErr
 				}
-				if err := q.DeferProjection(ctx, queries.DeferProjectionParams{DonorID: id, RefreshError: text(category), AsOf: timestamp(now), RulesVersion: projectionRules}); err != nil {
+				if err := q.DeferProjection(ctx, queries.DeferProjectionParams{DonorID: id, RefreshError: text(category), AsOf: timestamp(now), RulesVersion: version}); err != nil {
 					return err
 				}
 			}

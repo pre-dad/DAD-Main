@@ -48,9 +48,9 @@ func queuePartnerMessage(
 
 // PartnerMessageWorker delivers queued partner status emails (§7.5): metrics
 // verified, initiative complete, and the monthly report. The approval email is
-// the signer's sign-in link (PartnerLoginEmailWorker). It
-// reuses the donor mail transport and the same lease + bounded-retry shape as
-// MessageWorker, fanning each intent out to the org's current recipients.
+// the signer's sign-in link (PartnerLoginEmailWorker). It reuses the donor mail
+// transport and the same lease + bounded-retry shape as MessageWorker, fanning
+// each intent out to the org's current recipients.
 type PartnerMessageWorker struct {
 	DB        *pgxpool.Pool
 	Settings  mail.Settings

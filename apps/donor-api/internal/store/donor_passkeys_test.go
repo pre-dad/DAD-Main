@@ -424,3 +424,120 @@ func TestDonorPasskeyNamesAreBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestDonorPasskeyExpiredCeremoniesAreRefusedAndSpent(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	s := donorPasskeyService(t)
+	_, session := passkeyDonor(t, pool)
+	key := newAuthenticator(t, donorPasskeyTestOrigin, donorPasskeyTestRPID)
+	if err := registerPasskey(t, s, session, key, ""); err != nil {
+		t.Fatal(err)
+	}
+	expire := func(id string) {
+		t.Helper()
+		mustExec(t, pool, "UPDATE donor_ceremonies SET expires_at=now()-interval '1 second' WHERE token_hash=$1", HashToken(id))
+	}
+	signIn, err := s.BeginSignIn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := key.assert(t, signIn.Options)
+	expire(signIn.ID)
+	if _, err = s.FinishSignIn(ctx, signIn.ID, answer, Client{}); !errors.Is(err, ErrPasskeyDenied) {
+		t.Fatal("expired sign-in ceremony answered", err)
+	}
+	register, err := s.BeginRegister(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := newAuthenticator(t, donorPasskeyTestOrigin, donorPasskeyTestRPID)
+	response := other.register(t, register.Options)
+	expire(register.ID)
+	if _, err = s.FinishRegister(ctx, session, register.ID, response, ""); !errors.Is(err, ErrPasskeyDenied) {
+		t.Fatal("expired registration ceremony answered", err)
+	}
+	// An expired ceremony is only refused when answered; the next ceremony
+	// begun reaps it.
+	if _, err = s.BeginSignIn(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_ceremonies WHERE token_hash IN ($1,$2)", HashToken(signIn.ID), HashToken(register.ID)).Scan(&left); err != nil ||
+		left != 0 {
+		t.Fatal("expired ceremonies survived the sweep", left, err)
+	}
+	if list, err := s.ListPasskeys(ctx, session); err != nil || len(list.Passkeys) != 1 {
+		t.Fatal("expired registration stored a passkey", list, err)
+	}
+}
+
+func TestDonorPasskeyClonedCounterIsDeniedAndNotRecorded(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	s := donorPasskeyService(t)
+	_, session := passkeyDonor(t, pool)
+	key := newAuthenticator(t, donorPasskeyTestOrigin, donorPasskeyTestRPID)
+	if err := registerPasskey(t, s, session, key, ""); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := donorSignIn(t, s, key, Client{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stored := func() (count int64) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, "SELECT max(sign_count) FROM donor_passkeys WHERE credential_id=$1", key.id).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+	if stored() != 2 {
+		t.Fatal("authenticator counter not stored", stored())
+	}
+	key.count = 0
+	if _, err := donorSignIn(t, s, key, Client{}); !errors.Is(err, ErrPasskeyDenied) {
+		t.Fatal("a passkey whose counter went backwards signed in", err)
+	}
+	if stored() != 2 {
+		t.Fatal("cloned assertion lowered the stored counter", stored())
+	}
+	key.count = 2
+	if _, err := donorSignIn(t, s, key, Client{}); err != nil {
+		t.Fatal("the genuine passkey, counting on from its last use, was refused", err)
+	}
+}
+
+func TestDonorPasskeyRefusedNameLeavesTheCeremonyUsable(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	s := donorPasskeyService(t)
+	_, session := passkeyDonor(t, pool)
+	ceremony, err := s.BeginRegister(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := newAuthenticator(t, donorPasskeyTestOrigin, donorPasskeyTestRPID)
+	response := key.register(t, ceremony.Options)
+	for _, name := range []string{"line\nbreak", strings.Repeat("a", MaxPasskeyNameRunes+1)} {
+		if _, err = s.FinishRegister(ctx, session, ceremony.ID, response, name); !errors.Is(err, ErrPasskeyDenied) {
+			t.Fatalf("name %q accepted: %v", name, err)
+		}
+	}
+	list, err := s.FinishRegister(ctx, session, ceremony.ID, response, strings.Repeat("é", MaxPasskeyNameRunes))
+	if err != nil || len(list.Passkeys) != 1 {
+		t.Fatal("a refused name spent the ceremony", list, err)
+	}
+}
+
+func TestDonorPasskeyDisabledDonorCannotRegister(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	s := donorPasskeyService(t)
+	id, session := passkeyDonor(t, pool)
+	mustExec(t, pool, "UPDATE donors SET disabled=true WHERE id=$1", id)
+	if _, err := s.BeginRegister(ctx, session); !errors.Is(err, ErrDenied) {
+		t.Fatal("registration offered to a disabled donor", err)
+	}
+}

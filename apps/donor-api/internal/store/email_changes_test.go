@@ -3,11 +3,13 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/mail"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -204,5 +206,95 @@ func TestEmailChangeRemovesPasskeys(t *testing.T) {
 	}
 	if _, err := donorSignIn(t, passkeys, key, Client{}); !errors.Is(err, ErrPasskeyDenied) {
 		t.Fatal("removed passkey signed in", err)
+	}
+}
+
+func TestEmailChangeRequestNormalizesAndRefusesTheCurrentAddress(t *testing.T) {
+	s, w, id, old, session, transport := changeFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+	if err := s.Request(ctx, session, "  "+strings.ToUpper(old)+" "); !errors.Is(err, ErrEmailChangeConflict) {
+		t.Fatalf("the current address in another case was accepted as new: %v", err)
+	}
+	for _, bad := range []string{"", "no-at-sign", "two@@example.org", "a b@example.org"} {
+		if err := s.Request(ctx, session, bad); !errors.Is(err, identity.ErrEmail) {
+			t.Fatalf("request for %q: %v; want identity.ErrEmail", bad, err)
+		}
+	}
+	var requests int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_email_changes WHERE donor_id=$1", id).Scan(&requests); err != nil ||
+		requests != 0 {
+		t.Fatalf("%d change requests stored for refused addresses, err %v", requests, err)
+	}
+	mixed := "New-" + id.String() + "@Example.ORG"
+	if err := s.Request(ctx, session, mixed); err != nil {
+		t.Fatal(err)
+	}
+	for stage, want := range []string{"NEW", "COMPLETED"} {
+		if worked, err := w.DeliverNext(ctx, time.Now()); err != nil || !worked {
+			t.Fatal(worked, err)
+		}
+		if got, err := s.Confirm(ctx, tokenFromMail(t, transport.messages[stage])); err != nil || got != want {
+			t.Fatal(got, err)
+		}
+	}
+	if transport.messages[1].To != strings.ToLower(mixed) {
+		t.Fatalf("new-address proof sent to %q, want the lower-cased address", transport.messages[1].To)
+	}
+	if found, err := queries.New(pool).DonorByEmail(ctx, strings.ToLower(mixed)); err != nil || found.ID != id {
+		t.Fatal("account not stored under the normalized address", err)
+	}
+}
+
+func TestEmailChangeRefusesAnAddressTakenByAnotherRoleBeforeCompletion(t *testing.T) {
+	s, w, id, old, session, transport := changeFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+	cleanPartners(t, pool)
+	partner := approvedPartner(t, pool, "Late Claimant", "LATECLAIM", 0, 0)
+	target := "late-" + id.String() + "@example.org"
+	if err := s.Request(ctx, session, target); err != nil {
+		t.Fatal(err)
+	}
+	for stage := range 2 {
+		if worked, err := w.DeliverNext(ctx, time.Now()); err != nil || !worked {
+			t.Fatal(worked, err)
+		}
+		if stage == 1 {
+			break
+		}
+		if got, err := s.Confirm(ctx, tokenFromMail(t, transport.messages[0])); err != nil || got != "NEW" {
+			t.Fatal(got, err)
+		}
+	}
+	userID := mustNewID(t)
+	mustExec(t, pool, `INSERT INTO donor_partner_users (id, partner_id, email, name, role, accepted_at, created_at)
+		VALUES ($1,$2,$3,'Late','VIEWER',now(),now())`, userID, partner, target)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_partner_users WHERE id=$1", userID) })
+	if _, err := s.Confirm(ctx, tokenFromMail(t, transport.messages[1])); !errors.Is(err, ErrEmailChangeConflict) {
+		t.Fatalf("an address claimed by a partner login meanwhile was taken: %v", err)
+	}
+	if d, err := authenticate(ctx, queries.New(s.DB), session, time.Now()); err != nil || d.Email != old {
+		t.Fatal("refused change altered the account or its session", err)
+	}
+}
+
+func TestEmailChangeIsRefusedForADisabledDonor(t *testing.T) {
+	s, w, id, old, session, transport := changeFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+	if err := s.Request(ctx, session, "disabled-"+id.String()+"@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := w.DeliverNext(ctx, time.Now()); err != nil || !worked {
+		t.Fatal(worked, err)
+	}
+	mustExec(t, pool, "UPDATE donors SET disabled=true WHERE id=$1", id)
+	if _, err := s.Confirm(ctx, tokenFromMail(t, transport.messages[0])); !errors.Is(err, ErrDenied) {
+		t.Fatalf("a disabled donor's proof was accepted: %v", err)
+	}
+	var email string
+	if err := pool.QueryRow(ctx, "SELECT email FROM donors WHERE id=$1", id).Scan(&email); err != nil || email != old {
+		t.Fatal("disabled donor's email changed", email, err)
 	}
 }

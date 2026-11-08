@@ -267,3 +267,33 @@ func TestPendingActionIsScopedAndIndependentOfHistoryPages(t *testing.T) {
 		t.Fatalf("invalid kind accepted: %v", err)
 	}
 }
+
+func TestStaffMessageToolsRequireThePermissionAndResendParkedReceipts(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	_, token := staffFixture(t, pool, "SUPER_ADMIN")
+	_, growth := staffFixture(t, pool, "OP_GROWTH")
+	id, _ := donor(t, pool)
+	accountCleanup(t, pool, id)
+	s := &StaffService{DB: as(t, dbroles.API)}
+	parked := testID(t)
+	mustExec(t, pool, `INSERT INTO donor_messages(id,donor_id,kind,dedup_key,context,available_at,attempts,created_at)
+VALUES($1,$2,'RECEIPT',$3,'{"gift_id":"g"}',now()-interval '2 minutes',5,now()-interval '2 minutes')`, parked, id, "test:"+parked.String())
+	if _, err := s.ResendMessage(ctx, growth, parked, testID(t)); !errors.Is(err, ErrStaffForbidden) {
+		t.Fatalf("operator resent a message: %v", err)
+	}
+	if err := s.RequestClaim(ctx, growth, id); !errors.Is(err, ErrStaffForbidden) {
+		t.Fatalf("operator requested a claim link: %v", err)
+	}
+	var queued int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_login_emails WHERE donor_id=$1", id).Scan(&queued); err != nil || queued != 0 {
+		t.Fatalf("denied claim request queued an email: %d %v", queued, err)
+	}
+	got, err := s.ResendMessage(ctx, token, parked, testID(t))
+	if err != nil || !got.Queued {
+		t.Fatalf("parked receipt not resendable: %+v %v", got, err)
+	}
+	if _, err = s.ResendMessage(ctx, token, testID(t), testID(t)); err == nil {
+		t.Fatal("resent a message that does not exist")
+	}
+}

@@ -83,5 +83,7 @@ SELECT days FROM donor_milestone_rules;
 INSERT INTO donor_milestone_rules(singleton,days,updated_at,actor_id) VALUES(true,$1,$2,$3)
 ON CONFLICT(singleton) DO UPDATE SET days=EXCLUDED.days,updated_at=EXCLUDED.updated_at,actor_id=EXCLUDED.actor_id;
 
--- name: RefreshRecognitionSchedule :exec
-UPDATE donor_metric_projections SET next_refresh_at=least(next_refresh_at,$1);
+-- name: RecognitionEpoch :one
+SELECT epoch FROM donor_recognition_epoch;
+-- name: BumpRecognitionEpoch :exec
+UPDATE donor_recognition_epoch SET epoch=epoch+1;

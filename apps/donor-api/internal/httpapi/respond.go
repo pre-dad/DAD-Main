@@ -33,6 +33,7 @@ const (
 	partnerCookie  = "dad_partner_session"
 	referralCookie = "dad_referral"
 	companyCookie  = "dad_company"
+	journeyCookie  = "dad_analytics_journey"
 )
 
 // classifier maps a service error to a public status and message.
@@ -195,6 +196,33 @@ func cookieValue(r *http.Request, name string) string {
 		return cookie.Value
 	}
 	return ""
+}
+
+// hostPrefix makes browsers refuse a cookie that has a Domain, a Path other
+// than "/", or no Secure flag, so a sibling subdomain cannot plant a session.
+const hostPrefix = "__Host-"
+
+// sessionCookieValue reads a donor or partner session cookie. The __Host- name
+// wins; the unprefixed name is the fallback for sessions issued before the
+// prefix, which lapse within one session lifetime (30 days for donors, 12
+// hours for partners), after which this fallback can be deleted.
+func sessionCookieValue(r *http.Request, base string) string {
+	if value := cookieValue(r, hostPrefix+base); value != "" {
+		return value
+	}
+	return cookieValue(r, base)
+}
+
+// setSessionCookie issues a donor or partner session cookie, prefixed over
+// HTTPS. It also expires the unprefixed name so a browser never holds two live
+// sessions; an empty value with maxAge -1 clears both.
+func (a *api) setSessionCookie(w http.ResponseWriter, base, value string, maxAge int) {
+	if !a.secure {
+		a.setCookie(w, base, value, maxAge, http.SameSiteLaxMode)
+		return
+	}
+	a.setCookie(w, hostPrefix+base, value, maxAge, http.SameSiteLaxMode)
+	a.setCookie(w, base, "", -1, http.SameSiteLaxMode)
 }
 
 func (a *api) setCookie(w http.ResponseWriter, name, value string, maxAge int, sameSite http.SameSite) {

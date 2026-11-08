@@ -3,9 +3,9 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -150,7 +150,7 @@ func queuePushIntents(ctx context.Context, q *queries.Queries, p projection, now
 			return err
 		}
 		if reached := ladder.LastMilestone; reached > 0 && now.Sub(run.Reaches(reached, p.zone)) < pushLifetime {
-			if err := recordServerEvent(ctx, q, p.DonorID, "milestone_reached", "milestone:"+p.DonorID.String()+":"+p.streakSince.String()+":"+fmt.Sprint(reached), run.Reaches(reached, p.zone)); err != nil {
+			if err := recordServerEvent(ctx, q, p.DonorID, "milestone_reached", "milestone:"+p.DonorID.String()+":"+p.streakSince.String()+":"+strconv.FormatInt(reached, 10), run.Reaches(reached, p.zone)); err != nil {
 				return err
 			}
 			params.Milestone = pgtype.Int4{Int32: int32(reached), Valid: true}

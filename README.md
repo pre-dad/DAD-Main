@@ -21,8 +21,9 @@ administrator records payment received out of band.
 
 ## Local setup
 
-Requires Go 1.27.3, Node 22.19+ (or Node 24), npm, and Docker Compose, which runs
-PostgreSQL 16 on 127.0.0.1.
+Requires Go 1.27.3, Node, npm, and Docker Compose, which runs PostgreSQL 16 on 127.0.0.1.
+The web app needs Node 22.13+ and the ATM ledger Worker needs Node 22.19+ (Node 24 serves
+both), so use 22.19+ or 24 if you work on both.
 Commands below run from the repository root. The local database uses port 55432.
 
 ```sh
@@ -213,6 +214,8 @@ enables workers or deletes database volumes implicitly. Test-only readiness is n
 - `apps/donor-api/testdata`: recognition scenarios and fixtures shared by tests.
 - `apps/donor-api/tools`: a module pinning the staticcheck build `make lint-go` runs.
 - `apps/web`: public website, donor account, partner portal, staff console, browser and unit tests.
+- `apps/atm-ledger`: the Cloudflare Worker that stores the ATM acceptance ledger ([atm-ledger](docs/atm-ledger.md)).
+- `design/tokens.json`: the shared design values behind the web and native clients ([design system](docs/design-system.md)).
 - `contracts/mobile`: the generated mobile-foundation bundle the native iOS and Android clients build against, checked by `make check-mobile`.
 - `deploy/nginx`: the production ingress configuration.
 - `scripts`: deployment, backup, restore verification, and ingress checks.

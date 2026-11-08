@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -48,5 +49,15 @@ func TestLegacyEmailCompatibility(t *testing.T) {
 	}
 	if got := hex.EncodeToString(digest.Sum(nil)); got != fixture.Digest {
 		t.Fatalf("Unicode scalar compatibility drift: got %s, want %s", got, fixture.Digest)
+	}
+}
+
+func TestNormalizeEmailBoundsLength(t *testing.T) {
+	long := "x@" + strings.Repeat("\u0315", maxEmailRunes) + ".org"
+	if _, err := NormalizeEmail(long); err == nil {
+		t.Fatal("an address over the length bound was normalized")
+	}
+	if _, err := NormalizeEmail(strings.Repeat("a", 64) + "@example.org"); err != nil {
+		t.Fatalf("a maximum-length local part was refused: %v", err)
 	}
 }

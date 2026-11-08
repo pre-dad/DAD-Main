@@ -8,7 +8,6 @@ import (
 
 	"dad/donor-api/internal/analytics"
 	"dad/donor-api/internal/store/queries"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -44,7 +43,7 @@ func validSource(s string) bool { return s == "WEB" || s == "IOS" || s == "ANDRO
 // events to that donor, and an empty or invalid token records them anonymously
 // (an event before sign-in is expected and must not be rejected). The batch is
 // validated in full before any insert, so an invalid event rejects the whole
-// batch, and stored in one COPY, so it is all stored or none of it is.
+// batch, and stored in one statement, so it is all stored or none of it is.
 func (s AnalyticsService) Record(ctx context.Context, source, token string, events []Event) error {
 	if !validSource(source) {
 		return ErrAnalytics
@@ -66,7 +65,15 @@ func (s AnalyticsService) Record(ctx context.Context, source, token string, even
 		}
 	}
 
-	rows := make([]queries.InsertObservedEventParams, 0, len(events))
+	batch := queries.InsertObservedEventsParams{
+		Ids:        make([]pgtype.UUID, 0, len(events)),
+		Names:      make([]string, 0, len(events)),
+		DonorID:    donor,
+		Source:     source,
+		Properties: make([][]byte, 0, len(events)),
+		OccurredAt: make([]pgtype.Timestamptz, 0, len(events)),
+		Journeys:   make([]pgtype.UUID, 0, len(events)),
+	}
 	for _, e := range events {
 		if !analytics.Known(e.Name) {
 			return ErrAnalytics
@@ -74,9 +81,9 @@ func (s AnalyticsService) Record(ctx context.Context, source, token string, even
 		if err := analytics.ValidateProperties(e.Name, e.Properties); err != nil {
 			return ErrAnalytics
 		}
+		// A missing time, or one implausibly in the future, is clock abuse;
+		// modest skew is allowed.
 		if e.OccurredAt.IsZero() || e.OccurredAt.After(now.Add(5*time.Minute)) {
-			// Reject a missing time or one implausibly in the future (clock
-			// abuse); modest skew is allowed.
 			return ErrAnalytics
 		}
 		payload := []byte("{}")
@@ -87,36 +94,25 @@ func (s AnalyticsService) Record(ctx context.Context, source, token string, even
 			}
 			payload = encoded
 		}
-		id, err := NewID()
-		if e.ID != "" {
-			err = id.Scan(e.ID)
-			if err != nil || !ValidRequestID(id) {
-				return ErrAnalytics
-			}
-		}
-		var journey pgtype.UUID
-		if e.JourneyID != "" {
-			if journey.Scan(e.JourneyID) != nil || !ValidRequestID(journey) {
-				return ErrAnalytics
-			}
-		}
-		if err != nil {
-			return err
-		}
-		rows = append(rows, queries.InsertObservedEventParams{JourneyID: journey,
-			ID: id, Name: e.Name, DonorID: donor, Source: source,
-			Properties: payload, OccurredAt: timestamp(e.OccurredAt),
-		})
-	}
-	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		q := queries.New(tx)
-		for _, row := range rows {
-			if err := q.InsertObservedEvent(ctx, row); err != nil {
+		var id, journey pgtype.UUID
+		if e.ID == "" {
+			var err error
+			if id, err = NewID(); err != nil {
 				return err
 			}
+		} else if id.Scan(e.ID) != nil || !ValidRequestID(id) {
+			return ErrAnalytics
 		}
-		return nil
-	})
+		if e.JourneyID != "" && (journey.Scan(e.JourneyID) != nil || !ValidRequestID(journey)) {
+			return ErrAnalytics
+		}
+		batch.Ids = append(batch.Ids, id)
+		batch.Names = append(batch.Names, e.Name)
+		batch.Properties = append(batch.Properties, payload)
+		batch.OccurredAt = append(batch.OccurredAt, timestamp(e.OccurredAt))
+		batch.Journeys = append(batch.Journeys, journey)
+	}
+	return queries.New(s.DB).InsertObservedEvents(ctx, batch)
 }
 
 // recordServerEvent lives in the same transaction as its authoritative fact.

@@ -37,7 +37,10 @@ func TestRunReportsEveryQueue(t *testing.T) {
 	var out bytes.Buffer
 	// Other tests' queue rows may need attention; only the report is checked.
 	env := map[string]string{dbroles.Monitor.Variable(): dsn, dbroles.AllowOwnerVariable: "true"}
-	_ = run(context.Background(), nil, func(name string) string { return env[name] }, &out)
+	if err := run(context.Background(), nil, func(name string) string { return env[name] }, &out); err != nil &&
+		err.Error() != "queue requires attention" {
+		t.Fatal(err)
+	}
 	var rows []struct{ Queue string }
 	if err := json.Unmarshal(out.Bytes(), &rows); err != nil {
 		t.Fatalf("report %q: %v", out.String(), err)

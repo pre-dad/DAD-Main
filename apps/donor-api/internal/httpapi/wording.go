@@ -49,7 +49,7 @@ func (a *api) recognitionRules(w http.ResponseWriter, r *http.Request, token str
 }
 func (a *api) setRecognitionRules(w http.ResponseWriter, r *http.Request, token string) {
 	var body store.RecognitionRules
-	if !decodeJSONLimit(w, r, &body, 8<<20) {
+	if !decodeJSON(w, r, &body) {
 		return
 	}
 	a.wording().serve(w, r, func(ctx context.Context) (any, error) {

@@ -80,7 +80,7 @@ func (d DonorDashboard) MarshalJSON() ([]byte, error) {
 }
 
 // dashboard reads the donor's projections, which must come from one snapshot:
-// a worker may update several of them while the three queries run.
+// a worker may update several of them while the queries run.
 func dashboard(ctx context.Context, q *queries.Queries, donor queries.Donor, now time.Time) (DonorDashboard, error) {
 	id := donor.ID
 	row, err := q.Projection(ctx, id)

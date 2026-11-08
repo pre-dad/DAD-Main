@@ -429,3 +429,45 @@ func TestFromEnvironmentLoadsOnlyCompleteProviders(t *testing.T) {
 		}
 	}
 }
+
+func TestAPNsKeepsHostileTokensInsideTheDevicePath(t *testing.T) {
+	server, calls := apnsServer(t, http.StatusOK, "")
+	a, _ := newTestAPNs(t, server)
+	const hostile = "../../2/x?y=1#z"
+	if err := a.Send(context.Background(), Device{Token: hostile, Environment: "PRODUCTION"}, notification); err != nil {
+		t.Fatal(err)
+	}
+	// Unescaped, the dots would be resolved and the query and fragment split off.
+	if len(*calls) != 1 || (*calls)[0].path != "/production/3/device/"+hostile {
+		t.Fatalf("device token escaped its path segment: %+v", *calls)
+	}
+}
+
+// A dead network or a cancelled send is no verdict on the device: only the
+// provider's answer may drop a token.
+func TestProviderTransportFailuresNeverUnregisterTheDevice(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	apnsServer, _ := apnsServer(t, http.StatusOK, "")
+	a, _ := newTestAPNs(t, apnsServer)
+	fcmServer := newFCMServer(t)
+	f := newTestFCM(t, fcmServer)
+	dead := httptest.NewServer(http.NotFoundHandler())
+	dead.Close()
+	a.ProductionURL, f.SendURL = dead.URL, dead.URL
+
+	for name, send := range map[string]func(context.Context) error{
+		"APNs": func(ctx context.Context) error {
+			return a.Send(ctx, Device{Token: strings.Repeat("ab", 32), Environment: "PRODUCTION"}, notification)
+		},
+		"FCM": func(ctx context.Context) error { return f.Send(ctx, Device{Token: "fcm-token"}, notification) },
+	} {
+		for label, ctx := range map[string]context.Context{"unreachable": context.Background(), "cancelled": cancelled} {
+			err := send(ctx)
+			if err == nil || errors.Is(err, ErrUnregistered) || errors.Is(err, ErrRejected) {
+				t.Errorf("%s %s: %v; want a retryable failure that keeps the device", name, label, err)
+			}
+		}
+	}
+}

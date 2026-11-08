@@ -280,10 +280,11 @@ func (q *Queries) InitiativePartners(ctx context.Context, initiativeID pgtype.UU
 	return items, nil
 }
 
-const insertPartnerApplication = `-- name: InsertPartnerApplication :exec
+const insertPartnerApplication = `-- name: InsertPartnerApplication :execrows
 INSERT INTO donor_partner_applications
   (id, organization, website, type, contact_name, title, work_email, phone, workforce_size, created_at, updated_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10)
+ON CONFLICT (id) DO NOTHING
 `
 
 type InsertPartnerApplicationParams struct {
@@ -299,10 +300,11 @@ type InsertPartnerApplicationParams struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
-// P-1: a new partner application. The partial unique index rejects a second
-// PENDING application for the same work email.
-func (q *Queries) InsertPartnerApplication(ctx context.Context, arg InsertPartnerApplicationParams) error {
-	_, err := q.db.Exec(ctx, insertPartnerApplication,
+// P-1: a new partner application. A repeated id inserts nothing, so a retry
+// that races its original reads the stored row. The partial unique index
+// rejects a second PENDING application for the same work email.
+func (q *Queries) InsertPartnerApplication(ctx context.Context, arg InsertPartnerApplicationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertPartnerApplication,
 		arg.ID,
 		arg.Organization,
 		arg.Website,
@@ -314,7 +316,10 @@ func (q *Queries) InsertPartnerApplication(ctx context.Context, arg InsertPartne
 		arg.WorkforceSize,
 		arg.CreatedAt,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const insertPartnerReport = `-- name: InsertPartnerReport :exec
@@ -1408,7 +1413,7 @@ func (q *Queries) StaffPartnerInitiatives(ctx context.Context, partnerID pgtype.
 const staffPartnersPage = `-- name: StaffPartnersPage :many
 SELECT p.id, p.organization, p.partner_type, p.company_code, p.workforce_size, p.match_rate_bp, p.match_cap_minor, p.approved_at,
   (SELECT count(*) FROM donor_partner_users u WHERE u.partner_id=p.id AND NOT u.disabled)::bigint AS user_count,
-  (SELECT count(*) FROM donor_initiatives i WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id))::bigint AS initiative_count
+  (SELECT count(*) FROM donor_initiative_partners ip WHERE ip.partner_id=p.id)::bigint AS initiative_count
 FROM donor_partner_signups p
 WHERE p.approved_at IS NOT NULL
 ORDER BY p.organization, p.id

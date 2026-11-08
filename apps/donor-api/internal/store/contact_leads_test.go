@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -16,7 +17,7 @@ func TestContactLeadsAreDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	partner := approvedPartner(t, pool, "Kept Partner", "KEPTPART", 0, 0)
+	partner := approvedPartner(t, pool, "Kept Partner", "KEPT-"+strings.ToUpper(mustNewID(t).String()[:8]), 0, 0)
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)

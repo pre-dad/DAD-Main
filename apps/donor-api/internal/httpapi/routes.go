@@ -160,7 +160,7 @@ func (a *api) routes() []route {
 		a.partnerRead("GET /donor/partner/teams", a.employeeTeams),
 		a.partnerWrite("POST /donor/partner/workforce", a.employeeWorkforce),
 		a.partnerWrite("POST /donor/partner/profile", a.partnerSaveProfile),
-		a.partnerRead("GET /donor/partner/report.pdf", a.partnerReport),
+		a.partnerReportRoute("GET /donor/partner/report.pdf", a.partnerReport),
 		a.partnerRead("GET /donor/partner/reports/{report_id}/report.pdf", a.partnerReportArtifact),
 		a.partnerRead("GET /donor/partner/logo", a.partnerLogo),
 		a.partnerWrite("POST /donor/partner/logo", a.partnerSaveLogo),
@@ -309,6 +309,13 @@ func (a *api) partnerEntry(pattern string, handler http.HandlerFunc) route {
 // one (P-5).
 func (a *api) partnerRead(pattern string, handler sessionHandler) route {
 	return route{pattern, partnerAuth, signedIn(partnerSession, handler)}
+}
+
+// partnerReportRoute serves a read that retains a report, so like a staff read
+// it refuses a request another site started: the Lax partner cookie would
+// otherwise ride along on a link or form from anywhere.
+func (a *api) partnerReportRoute(pattern string, handler sessionHandler) route {
+	return route{pattern, partnerAuth, sameOrigin(signedIn(partnerSession, handler))}
 }
 
 func (a *api) partnerWrite(pattern string, handler sessionHandler) route {

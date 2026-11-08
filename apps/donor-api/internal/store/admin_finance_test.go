@@ -209,3 +209,42 @@ func TestStaffRefundRefusesMoreThanTheGiftAndASecondWhileOneIsPending(t *testing
 		t.Fatal("second refund authorized while the first is unsettled", err, gateway.creates)
 	}
 }
+
+func TestStaffRefundRejectsInvalidRequestsBeforeTheProcessor(t *testing.T) {
+	ctx := context.Background()
+	_, finance := staffFixture(t, database(t), "SUPER_ADMIN")
+	s, gateway, f, giftID := refundFixture(t)
+	valid := StaffFinancialRequest{
+		RequestID: testID(t),
+		DonorID:   f.donorID,
+		TargetID:  giftID,
+		Amount:    1000,
+		Reason:    "Donor requested a refund",
+	}
+	badID := testID(t)
+	badID.Bytes[6] = 0x10
+	for name, mutate := range map[string]func(*StaffFinancialRequest){
+		"non-v4 request id": func(r *StaffFinancialRequest) { r.RequestID = badID },
+		"zero amount":       func(r *StaffFinancialRequest) { r.Amount = 0 },
+		"negative amount":   func(r *StaffFinancialRequest) { r.Amount = -1 },
+		"amount over cap":   func(r *StaffFinancialRequest) { r.Amount = maxRefundMinor + 1 },
+		"short reason":      func(r *StaffFinancialRequest) { r.Reason = "no" },
+		"blank reason":      func(r *StaffFinancialRequest) { r.Reason = "     " },
+		"control character": func(r *StaffFinancialRequest) { r.Reason = "bad\x00reason here" },
+	} {
+		r := valid
+		mutate(&r)
+		if _, err := s.Refund(ctx, finance, r); !errors.Is(err, ErrStaffInput) {
+			t.Errorf("%s: error = %v; want ErrStaffInput", name, err)
+		}
+	}
+	other, _ := donor(t, database(t))
+	r := valid
+	r.DonorID = other
+	if _, err := s.Refund(ctx, finance, r); err == nil {
+		t.Error("refunded a gift through another donor")
+	}
+	if gateway.creates != 0 {
+		t.Fatal("invalid request reached the processor", gateway.creates)
+	}
+}

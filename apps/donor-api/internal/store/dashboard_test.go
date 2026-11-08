@@ -48,11 +48,8 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 		owner,
 		second,
 	)
-	// The totals are read from the owner's own denormalized columns now, not
-	// recomputed from the referred rows on every view, so set them to exactly
-	// what the OLD FILTER aggregate produced for this setup: first LINK 3000 +
-	// second IRL 9000 -> Link 1, IRL 1, 12000 total. Production writes these the
-	// same way via projectFacts -> ReferralTotalsFromReferred -> SaveProjection.
+	// The dashboard reads the owner's denormalized totals, which projectFacts
+	// writes from the referred rows: here LINK 3000 and IRL 9000.
 	mustExec(
 		t,
 		tx,
@@ -85,26 +82,15 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 		}
 		mustExec(t, tx, "ROLLBACK TO SAVEPOINT invalid_projection")
 	}
-	// Overflowing minors must still never surface a total. With denormalized
-	// columns the overflow guard reads the OWNER's minor columns, so mirror the
-	// overflowing net_minor onto the owner the way a recompute would, then
-	// confirm the dashboard still refuses to invent a sum. The single-channel
-	// case (sameChannel) is the stronger one: in production its bigint sum would
-	// fail the recompute outright; here we assert the dashboard guard itself
-	// still withholds the total when the stored minors overflow int64 together.
+	// Stored minors that overflow int64 together must not surface a sum. The
+	// per-channel bigint columns cannot overflow on their own; the dashboard
+	// guard is pinned directly.
 	for _, sameChannel := range []bool{false, true} {
 		mustExec(t, tx, "SAVEPOINT overflow_projection")
 		mustExec(t, tx, "UPDATE donor_metric_projections SET net_minor=$1 WHERE donor_id=$2", int64(math.MaxInt64), first)
 		if sameChannel {
 			mustExec(t, tx, "UPDATE donor_metric_projections SET referral_kind='LINK' WHERE donor_id=$1", second)
 		}
-		// Mirror the overflowing minors onto the owner's denormalized columns so
-		// the dashboard reads them: both channels at MaxInt64 means their total
-		// overflows int64, which the guard (irlMinor <= MaxInt64-linkMinor) must
-		// catch so no sum is invented. (In production a single bigint column can
-		// never hold an overflowing per-channel sum: that case fails the recompute
-		// cast instead, keeping the owner's prior totals; here we pin the
-		// dashboard-level guard directly.)
 		mustExec(
 			t,
 			tx,
@@ -184,9 +170,7 @@ func TestDashboardWaitsForReferredGiftsToBeProjected(t *testing.T) {
 		giver,
 		now.Add(time.Hour),
 	)
-	// Projecting the giver credits the owner's denormalized columns in
-	// production; this test drives the referred rows by direct SQL, so set the
-	// owner's totals to what that projection would write (Link 1, 3000).
+	// Projecting the giver credits the owner's totals; set them directly.
 	mustExec(t, tx, "UPDATE donor_metric_projections SET referred_link_count=1,referred_link_minor=3000 WHERE donor_id=$1", owner)
 	result, err := dashboard(ctx, q, queries.Donor{ID: owner}, now)
 	if err != nil || result.Referrals == nil || result.Referrals.Link != 1 || result.Referrals.TotalMinor != 3000 {
@@ -235,5 +219,79 @@ func TestDashboardSeparatesRankingOptOutFromNoRankYet(t *testing.T) {
 				want,
 			)
 		}
+	}
+}
+
+func TestDashboardIsPreparingUntilTheDonorIsProjected(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	id := testID(t)
+	mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", id, id.String()+"@example.org")
+	result, err := dashboard(ctx, queries.New(tx), queries.Donor{ID: id}, time.Now().UTC())
+	if err != nil || result.State != "preparing" || result.Referrals != nil || result.Streak != nil {
+		t.Fatalf("unprojected donor: %+v %v", result, err)
+	}
+}
+
+func TestDashboardShowsStreakAndImpactOnlyFromFreshProjections(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	grace := now.Add(48 * time.Hour)
+	id := testID(t)
+	mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", id, id.String()+"@example.org")
+	mustExec(
+		t,
+		tx,
+		`INSERT INTO donor_metric_projections(id,donor_id,net_minor,current_streak,at_risk,grace_ends_at,streak_since,computed_at,next_refresh_at)
+		VALUES($1,$2,4200,3,true,$3,$4,$5,$6)`,
+		testID(t),
+		id,
+		grace,
+		now.Add(-10*24*time.Hour),
+		now,
+		now.Add(time.Hour),
+	)
+	q := queries.New(tx)
+	result, err := dashboard(ctx, q, queries.Donor{ID: id}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Streak == nil || result.Streak.Current != 3 || !result.Streak.AtRisk || result.Streak.GraceEndsAt == nil ||
+		!result.Streak.GraceEndsAt.Equal(grace) || result.Streak.Ladder == nil || result.Streak.Ladder.Days < 10 {
+		t.Fatalf("fresh streak: %+v", result.Streak)
+	}
+	if result.Impact.GivenMinor == nil || *result.Impact.GivenMinor != 4200 || result.Impact.Currency != "USD" ||
+		result.Impact.InitiativesFunded != 0 || result.Impact.EventsVolunteered != 0 || result.Network != nil || result.FoundingDonor {
+		t.Fatalf("impact for a donor with no activity: %+v network=%+v founding=%v", result.Impact, result.Network, result.FoundingDonor)
+	}
+
+	// A projection no longer fresh must not claim the streak is alive, but the
+	// donor's own net giving remains true and stays visible.
+	mustExec(t, tx, "UPDATE donor_metric_projections SET next_refresh_at=$2 WHERE donor_id=$1", id, now)
+	if result, err = dashboard(ctx, q, queries.Donor{ID: id}, now); err != nil || result.Streak != nil || result.Impact.GivenMinor == nil {
+		t.Fatalf("stale projection: streak=%+v given=%v err=%v", result.Streak, result.Impact.GivenMinor, err)
+	}
+
+	// No streak at all, and net giving not yet computed: neither is invented.
+	mustExec(
+		t,
+		tx,
+		"UPDATE donor_metric_projections SET next_refresh_at=$2,current_streak=NULL,net_minor=NULL WHERE donor_id=$1",
+		id,
+		now.Add(time.Hour),
+	)
+	if result, err = dashboard(ctx, q, queries.Donor{ID: id}, now); err != nil || result.Streak != nil || result.Impact.GivenMinor != nil {
+		t.Fatalf("incomplete projection: streak=%+v given=%v err=%v", result.Streak, result.Impact.GivenMinor, err)
 	}
 }

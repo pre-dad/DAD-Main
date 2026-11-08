@@ -6,7 +6,15 @@ or Apple or Google sign-in, and hold hashed,
 revocable sessions: a 30-day cookie in browsers, a rotating token pair in the app. Staff sign in with individual passkeys (WebAuthn, verified by
 go-webauthn) and receive eight-hour hashed sessions. Donor and staff cookies are
 separate, HttpOnly, and Secure on HTTPS. Staff cookies use SameSite=Strict; donor cookies
-use Lax. Anonymous login responses do not reveal whether an address exists, and a donor receives at
+use Lax. Over HTTPS the donor and partner session cookies carry the `__Host-` prefix
+(`__Host-dad_donor_session`, `__Host-dad_partner_session`), so browsers refuse one with a
+Domain or a Path other than `/`, and a sibling subdomain cannot plant one. Every sign-in
+and sign-out expires the unprefixed name as well, so a browser never holds two live
+sessions. Sessions issued before the prefix are still read from the unprefixed name, below
+the prefixed one, until they lapse (30 days for donors, 12 hours for partners); that
+fallback in `sessionCookieValue` can be deleted once the longer window has passed. Over
+plain HTTP, in development, the names are unprefixed. Native clients use bearer tokens and
+are unaffected. Anonymous login responses do not reveal whether an address exists, and a donor receives at
 most one sign-in link a minute and five an hour however many addresses ask.
 
 The back office runs on its own host, `DONOR_STAFF_ORIGIN`, which the API requires to
@@ -79,7 +87,7 @@ Partner portal users are separate from donors and staff and cannot give. They si
 through emailed single-use links: 15 minutes for a link they request, seven days for an
 approval or invitation. A user holds one live link at a time, and a link replaced before
 delivery is never sent. Requesting a link never reveals whether the address belongs to a
-partner. Sessions last 12 hours, in the `dad_partner_session` cookie or as a bearer token
+partner. Sessions last 12 hours, in the `__Host-dad_partner_session` cookie (`dad_partner_session` over HTTP) or as a bearer token
 in the app, and removing a user revokes their sessions. Administrators alone invite and
 remove users, edit the organization profile, and export reports.
 Redemption locks the invitation so concurrent exchanges create one session. Removing a
@@ -169,8 +177,8 @@ Staff recovery/role changes revoke sessions and preserve the last active adminis
 Browser mutations require the exact Origin of their surface: the public origin for donor
 and public routes, the staff origin for staff routes. Requests, pages, uploads, passkey
 responses, exports, and provider calls have bounded sizes or timeouts. The Next proxy
-exposes `/donor/*` and the exact public event-detail, calendar, and initiative-spend
-GET/HEAD paths. Other paths and public mutations are refused before contacting the API.
+exposes `/donor/*`, `POST /analytics/events`, and the exact public event-detail, calendar,
+and initiative-spend GET/HEAD paths. Everything else is refused before contacting the API.
 
 Browsers reach the web service only through nginx ([edge](edge.md)). It accepts TLS 1.2
 and 1.3 for the configured public and staff hosts only, serves back-office paths only on
@@ -192,8 +200,10 @@ calls, and no donor lock is held during the call. Current remote state is reconc
 Reads never call Stripe, so page views cannot multiply provider requests.
 Logs must exclude donor payloads, credentials, tokens, and remote response bodies; API
 failures are logged with route, status, and error type only. Every API response carries
-`no-store`, `nosniff`, `no-referrer`, and a `default-src 'none'; frame-ancestors 'none'`
-content security policy.
+`nosniff`, `no-referrer`, and a `default-src 'none'; frame-ancestors 'none'` content
+security policy (file downloads use `default-src 'none'; sandbox` instead), and is
+`no-store` except successful answers from the public event
+detail, event calendar and initiative detail routes, which allow 60 seconds of caching.
 
 Public content never includes donor data or private source files. Source documents use a
 dedicated encryption key and SHA-256 verification. CSV exports use field allowlists,
@@ -228,14 +238,13 @@ alone does not consume it or replace the browser's account.
 
 ## Dependency advisory boundary
 
-`GO-2026-5932` concerns the unmaintained `golang.org/x/crypto/openpgp` packages;
-the application and its tests do not import them. Other packages from `x/crypto`,
-including OCSP used by WebAuthn's certificate checks, remain required. The
-[advisory](https://pkg.go.dev/vuln/GO-2026-5932) lists all OpenPGP versions as
-affected, with no known fix, so changing the module version cannot resolve it.
-`make lint-go` rejects legacy OpenPGP anywhere in the application/test dependency
-graph and continues to run the unmodified vulnerability scanner. A module-only
-notice is distinct from an affected imported package or reachable function.
+`GO-2026-5932` concerns the unmaintained `golang.org/x/crypto/openpgp` packages. The
+module is pinned to a pseudo-version, after those packages were removed, that no tagged
+release carries yet; move to the first tagged release that does when one exists. The
+application and its tests do not import OpenPGP, and `make lint-go` fails if any package
+in the application or test dependency graph does, then runs the unmodified vulnerability
+scanner. Other `x/crypto` packages, including OCSP used by WebAuthn's certificate checks
+and bcrypt, remain required, which is why `x/crypto` is a direct requirement.
 
 Release still needs verified legal/entity details, approved retention and incident
 procedures, managed secret storage, backup/restore evidence, the Cloudflare edge

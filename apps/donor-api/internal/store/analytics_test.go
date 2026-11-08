@@ -7,51 +7,50 @@ import (
 	"time"
 
 	"dad/donor-api/internal/dbroles"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func TestAnalyticsRecord(t *testing.T) {
-	s, token, id := donorServiceFixture(t)
-	api := as(t, dbroles.API)
-	svc := AnalyticsService{DB: api}
+	_, token, donor := donorServiceFixture(t)
+	svc := AnalyticsService{DB: as(t, dbroles.API)}
+	pool := database(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
+	anonymous, attributed, invalidToken, rejected := testID(t), testID(t), testID(t), testID(t)
 	t.Cleanup(func() {
-		database(t).Exec(ctx, "DELETE FROM analytics_events WHERE donor_id=$1 OR donor_id IS NULL", id)
+		cleanExec(t, "DELETE FROM analytics_events WHERE id = ANY($1)", []pgtype.UUID{anonymous, attributed, invalidToken, rejected})
 	})
-	_ = s // the donor service established the account the token authenticates
-
-	// Anonymous batch (no token): events are stored with a null donor.
-	anon := []Event{
-		{Name: "app_opened", OccurredAt: now},
-		{Name: "attribution_captured", OccurredAt: now, Properties: map[string]string{"source": "company"}},
+	owner := func(id pgtype.UUID) (pgtype.UUID, bool) {
+		var got pgtype.UUID
+		err := pool.QueryRow(ctx, "SELECT donor_id FROM analytics_events WHERE id=$1", id).Scan(&got)
+		return got, err == nil
 	}
-	if err := svc.Record(ctx, "WEB", "", anon); err != nil {
+
+	if err := svc.Record(ctx, "WEB", "", []Event{
+		{ID: anonymous.String(), Name: "attribution_captured", OccurredAt: now, Properties: map[string]string{"source": "company"}},
+	}); err != nil {
 		t.Fatalf("anonymous record: %v", err)
 	}
+	if got, ok := owner(anonymous); !ok || got.Valid {
+		t.Fatalf("anonymous event stored with donor %v (stored %v)", got, ok)
+	}
 
-	// Authenticated batch: events attribute to the donor.
-	if err := svc.Record(ctx, "IOS", token, []Event{{Name: "gift_completed", OccurredAt: now}}); err != nil {
+	if err := svc.Record(ctx, "IOS", token, []Event{{ID: attributed.String(), Name: "gift_completed", OccurredAt: now}}); err != nil {
 		t.Fatalf("authenticated record: %v", err)
 	}
-	pool := database(t)
-	var attributed int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM analytics_events WHERE donor_id=$1 AND name='gift_completed'", id).Scan(&attributed); err != nil ||
-		attributed != 1 {
-		t.Fatalf("attributed events = %d, err %v; want 1", attributed, err)
-	}
-	var anonCount int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM analytics_events WHERE donor_id IS NULL").Scan(&anonCount); err != nil ||
-		anonCount < 2 {
-		t.Fatalf("anonymous events = %d, err %v; want >= 2", anonCount, err)
+	if got, ok := owner(attributed); !ok || got != donor {
+		t.Fatalf("attributed event stored with donor %v (stored %v), want %v", got, ok, donor)
 	}
 
-	// An invalid token records anonymously rather than failing (pre-sign-in).
-	if err := svc.Record(ctx, "WEB", "not-a-valid-session", []Event{{Name: "app_opened", OccurredAt: now}}); err != nil {
-		t.Fatalf("invalid-token record should succeed anonymously: %v", err)
+	if err := svc.Record(ctx, "WEB", "not-a-valid-session", []Event{{ID: invalidToken.String(), Name: "app_opened", OccurredAt: now}}); err != nil {
+		t.Fatalf("an invalid session must record anonymously: %v", err)
+	}
+	if got, ok := owner(invalidToken); !ok || got.Valid {
+		t.Fatalf("invalid-session event stored with donor %v (stored %v)", got, ok)
 	}
 
-	// Rejections: unknown name, bad property, bad source, empty/oversize batch,
-	// missing time, future time — each rejects the WHOLE batch.
+	good := Event{ID: rejected.String(), Name: "app_opened", OccurredAt: now}
 	for _, tc := range []struct {
 		name   string
 		source string
@@ -59,26 +58,70 @@ func TestAnalyticsRecord(t *testing.T) {
 	}{
 		{"unknown name", "WEB", []Event{{Name: "nope", OccurredAt: now}}},
 		{"bad property", "WEB", []Event{{Name: "attribution_captured", OccurredAt: now, Properties: map[string]string{"source": "bogus"}}}},
-		{"bad source", "DESKTOP", []Event{{Name: "app_opened", OccurredAt: now}}},
+		{"bad source", "DESKTOP", []Event{good}},
 		{"empty batch", "WEB", []Event{}},
+		{"oversize batch", "WEB", make([]Event, MaxAnalyticsBatch+1)},
 		{"missing time", "WEB", []Event{{Name: "app_opened"}}},
 		{"future time", "WEB", []Event{{Name: "app_opened", OccurredAt: now.Add(time.Hour)}}},
-		{"one bad in batch", "WEB", []Event{{Name: "app_opened", OccurredAt: now}, {Name: "nope", OccurredAt: now}}},
+		{"bad event id", "WEB", []Event{{ID: "nope", Name: "app_opened", OccurredAt: now}}},
+		{"bad journey id", "WEB", []Event{{JourneyID: "nope", Name: "app_opened", OccurredAt: now}}},
+		{"one bad in batch", "WEB", []Event{good, {Name: "nope", OccurredAt: now}}},
 	} {
 		if err := svc.Record(ctx, tc.source, "", tc.events); !errors.Is(err, ErrAnalytics) {
 			t.Errorf("%s: error = %v; want ErrAnalytics", tc.name, err)
 		}
 	}
+	if _, ok := owner(rejected); ok {
+		t.Error("a rejected batch stored its valid event")
+	}
+}
 
-	// The "one bad in batch" case must not have stored the good event either.
-	var leaked int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM analytics_events WHERE name='app_opened' AND source='WEB' AND donor_id IS NULL").Scan(&leaked); err != nil {
+func TestAnalyticsBatchStoresEveryEventAndIgnoresDuplicates(t *testing.T) {
+	svc := AnalyticsService{DB: as(t, dbroles.API)}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	first, second, journey := testID(t), testID(t), testID(t)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM analytics_events WHERE id = ANY($1)", []pgtype.UUID{first, second}) })
+	events := []Event{
+		{ID: first.String(), JourneyID: journey.String(), Name: "app_opened", OccurredAt: now},
+		{ID: second.String(), Name: "attribution_captured", OccurredAt: now, Properties: map[string]string{"source": "company"}},
+		{ID: first.String(), JourneyID: journey.String(), Name: "app_opened", OccurredAt: now},
+	}
+	if err := svc.Record(ctx, "ANDROID", "", events); err != nil {
 		t.Fatal(err)
 	}
-	// Two valid anonymous WEB app_opened were stored earlier (the anon batch's
-	// app_opened and the invalid-token one); the rejected batch added none.
-	if leaked != 2 {
-		t.Errorf("anonymous WEB app_opened count = %d; want 2 (rejected batch stored nothing)", leaked)
+	rows, err := database(
+		t,
+	).Query(ctx, "SELECT id, source, journey_id, properties->>'source' FROM analytics_events WHERE id = ANY($1)", []pgtype.UUID{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	type stored struct {
+		source, property string
+		journey          pgtype.UUID
+	}
+	got := map[pgtype.UUID]stored{}
+	for rows.Next() {
+		var id pgtype.UUID
+		var row stored
+		var property *string
+		if err = rows.Scan(&id, &row.source, &row.journey, &property); err != nil {
+			t.Fatal(err)
+		}
+		if property != nil {
+			row.property = *property
+		}
+		got[id] = row
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := map[pgtype.UUID]stored{
+		first:  {source: "ANDROID", journey: journey},
+		second: {source: "ANDROID", property: "company"},
+	}
+	if len(got) != len(want) || got[first] != want[first] || got[second] != want[second] {
+		t.Fatalf("stored %+v, want %+v", got, want)
 	}
 }
 

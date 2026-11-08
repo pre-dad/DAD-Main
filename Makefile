@@ -47,7 +47,7 @@ dev:
 	@echo "Run 'make api' and 'make web' in separate terminals after loading your environment."
 
 worker:
-	cd apps/donor-api && go run ./cmd/worker --kind "$(KIND)"
+	cd apps/donor-api && go run ./cmd/worker --kind "$(KIND)" $(WORKER_ARGS)
 
 reconcile:
 	cd apps/donor-api && go run ./cmd/reconcile $(RECONCILE_ARGS)

@@ -19,35 +19,145 @@ type EventWorker struct {
 	Gateway payments.FinancialGateway
 }
 
-// ProcessNext applies the next due Stripe event. A failure is recorded on
-// the event, which is retried with backoff, rather than returned: only a
-// failure to record the outcome stops the worker. It reports whether it found
-// an event.
+// eventLease keeps a claimed event from other workers while its attempt runs.
+// It outlasts workers.ProcessorStepBudget, so a live attempt never loses its
+// claim, while a crashed one is retried when the lease runs out.
+const eventLease = 6 * time.Minute
+
+// maxRefetch bounds how often one attempt re-reads the processor because its
+// state moved while the donor was locked.
+const maxRefetch = 2
+
+// errRefetch reports that applying an event needs processor state newer than
+// what was fetched. The apply rolls back and the attempt fetches again, since
+// no processor call is made while a transaction is open.
+var errRefetch = errors.New("processor state changed while applying the event")
+
+// eventApply is an event's effects, prepared from processor state fetched with
+// no transaction open. It runs under the donor lock and returns the donor whose
+// projection to refresh.
+type eventApply func(ctx context.Context, q *queries.Queries) (pgtype.UUID, error)
+
+// ProcessNext applies the next due Stripe event. It claims the event with a
+// lease, fetches processor state with no transaction open, then applies the
+// event and marks it processed in one transaction that first confirms the
+// attempt still holds the lease. A failure is recorded on the event, which is
+// retried with backoff, rather than returned: only a failure to record the
+// outcome stops the worker. It reports whether it found an event.
 func (w EventWorker) ProcessNext(ctx context.Context) (bool, error) {
-	worked := false
-	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
+	event, found, err := w.claim(ctx, time.Now().UTC())
+	if err != nil || !found {
+		return false, err
+	}
+	if err = w.resolve(ctx, event); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (w EventWorker) claim(ctx context.Context, now time.Time) (queries.DonorStripeEvent, bool, error) {
+	event, err := queries.New(w.DB).ClaimStripeEvent(ctx, queries.ClaimStripeEventParams{
+		LeaseUntil: timestamp(now.Add(eventLease)), AsOf: timestamp(now),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return event, false, nil
+	}
+	return event, err == nil, err
+}
+
+// resolve settles a claimed event. A failure of the processor or of the event's
+// facts is recorded on the event; an error is returned only when the outcome
+// could not be recorded, which leaves the lease to expire.
+func (w EventWorker) resolve(ctx context.Context, event queries.DonorStripeEvent) error {
+	failure := errRefetch
+	for range 1 + maxRefetch {
+		now := time.Now().UTC()
+		apply, err := w.fetch(ctx, event, now)
+		if err != nil {
+			failure = err
+			break
+		}
+		if err = w.applyClaimed(ctx, event, apply, now); err == nil {
+			return nil
+		} else if !errors.Is(err, errRefetch) {
+			return w.abandon(ctx, event, err)
+		}
+	}
+	done, cancel := detach(ctx)
+	defer cancel()
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return w.release(done, event, ctx.Err())
+	}
+	_, err := queries.New(w.DB).FailStripeEvent(done, failParams(event, failure))
+	return err
+}
+
+// abandon handles an error that left the event unrecorded. A cancelled step
+// gives its claim back; otherwise the lease expires and the event is retried.
+func (w EventWorker) abandon(ctx context.Context, event queries.DonorStripeEvent, err error) error {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		done, cancel := detach(ctx)
+		defer cancel()
+		return w.release(done, event, err)
+	}
+	return err
+}
+
+// release returns an interrupted attempt's claim without counting the attempt,
+// and reports cause.
+func (w EventWorker) release(ctx context.Context, event queries.DonorStripeEvent, cause error) error {
+	_, err := queries.New(w.DB).ReleaseStripeEvent(ctx, queries.ReleaseStripeEventParams{
+		ID: event.ID, Attempts: event.Attempts, AvailableAt: event.AvailableAt, AsOf: timestamp(time.Now().UTC()),
+	})
+	return errors.Join(cause, err)
+}
+
+// detach returns a short context that outlives ctx's cancellation, so a step
+// that ran out of time can still record why.
+func detach(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+}
+
+func failParams(event queries.DonorStripeEvent, err error) queries.FailStripeEventParams {
+	return queries.FailStripeEventParams{
+		ID: event.ID, LastError: text(eventFailure(err)), Attempts: event.Attempts, AvailableAt: event.AvailableAt,
+	}
+}
+
+// applyClaimed applies a fetched event in one transaction, provided the attempt
+// still holds the claim: if another worker reclaimed the event after the lease
+// expired, or it was reset or completed, nothing is changed. The event's
+// effects commit in a savepoint, so a failed event keeps its attempt count and
+// error while its partial effects roll back.
+func (w EventWorker) applyClaimed(ctx context.Context, event queries.DonorStripeEvent, apply eventApply, now time.Time) error {
+	return pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		event, err := q.NextStripeEvent(ctx)
+		_, err := q.LockClaimedStripeEvent(ctx, queries.LockClaimedStripeEventParams{
+			ID: event.ID, Attempts: event.Attempts, AvailableAt: event.AvailableAt,
+		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		worked = true
-		if err = q.IncrementEventAttempt(ctx, event.ID); err != nil {
+		applyErr := pgx.BeginFunc(ctx, tx, func(work pgx.Tx) error {
+			donor, err := apply(ctx, queries.New(work))
+			if err != nil {
+				return err
+			}
+			_, err = refreshProjection(ctx, work, donor, now)
 			return err
-		}
-		now := time.Now().UTC()
-		// The event's effects commit in a savepoint, so a failed event keeps its
-		// attempt count and error while its partial effects roll back.
-		applyErr := pgx.BeginFunc(ctx, tx, func(work pgx.Tx) error { return w.applyEvent(ctx, work, event, now) })
-		if applyErr != nil {
-			return q.FailStripeEvent(ctx, queries.FailStripeEventParams{ID: event.ID, LastError: text(eventFailure(applyErr))})
+		})
+		switch {
+		case errors.Is(applyErr, errRefetch):
+			return applyErr
+		case applyErr != nil:
+			_, err = q.FailStripeEvent(ctx, failParams(event, applyErr))
+			return err
 		}
 		return q.CompleteStripeEvent(ctx, queries.CompleteStripeEventParams{ID: event.ID, ProcessedAt: timestamp(now)})
 	})
-	return worked && err == nil, err
 }
 
 // eventFailure classifies a failed event for operators without recording
@@ -72,152 +182,151 @@ func parseID(value string) (pgtype.UUID, error) {
 	return id, nil
 }
 
-// applyEvent applies a verified event and refreshes the affected donor's
-// projection. Each kind fetches the processor state it needs before taking
-// the donor lock, so a slow processor cannot block that donor's other work.
-func (w EventWorker) applyEvent(ctx context.Context, tx pgx.Tx, event queries.DonorStripeEvent, now time.Time) error {
+// fetch reads the processor state an event needs, with no transaction open, and
+// returns the event's effects ready to apply under the donor lock. A slow
+// processor therefore holds neither a connection nor a lock.
+func (w EventWorker) fetch(ctx context.Context, event queries.DonorStripeEvent, now time.Time) (eventApply, error) {
 	data, err := payments.DecodeObject(event.Data)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	q := queries.New(tx)
-	// fetcher coalesces subscription reads for the span of this one step, so a
-	// subscription resolved once is not fetched again within the step.
+	q := queries.New(w.DB)
+	// fetcher coalesces subscription reads for the span of this one attempt, so
+	// a subscription resolved once is not fetched again within it. It refuses
+	// further reads once the attempt holds the donor lock.
 	fetcher := newSubFetcher(w.Gateway)
-	var donor pgtype.UUID
+	defer fetcher.freeze()
 	switch {
 	case data.Text("payment_update_id") != "":
-		donor, err = w.applyPaymentUpdateEvent(ctx, q, data, now)
+		return w.preparePaymentUpdateEvent(ctx, q, data, now)
 	case strings.HasPrefix(event.EventType, "refund."):
-		donor, err = w.applyRefundEvent(ctx, q, event, data, now)
-	default:
-		donor, err = w.applyCheckoutEvent(ctx, q, event, data, fetcher, now)
+		return w.prepareRefundEvent(ctx, q, event, data, now)
 	}
-	if err != nil {
-		return err
-	}
-	_, err = refreshProjection(ctx, tx, donor, now)
-	return err
+	return w.prepareCheckoutEvent(ctx, q, event, data, fetcher, now)
 }
 
-// applyPaymentUpdateEvent settles a hosted card setup whose session ended.
-func (w EventWorker) applyPaymentUpdateEvent(
+// preparePaymentUpdateEvent settles a hosted card setup whose session ended.
+func (w EventWorker) preparePaymentUpdateEvent(
 	ctx context.Context,
 	q *queries.Queries,
 	data payments.Object,
 	now time.Time,
-) (pgtype.UUID, error) {
+) (eventApply, error) {
 	id, err := parseID(data.Text("payment_update_id"))
 	if err != nil {
-		return pgtype.UUID{}, err
+		return nil, err
 	}
 	snapshot, err := q.PaymentUpdateSnapshot(ctx, id)
 	if err != nil {
-		return pgtype.UUID{}, err
+		return nil, err
 	}
 	gateway, ok := w.Gateway.(payments.PaymentMethodGateway)
 	if !ok {
-		return pgtype.UUID{}, payments.ErrUnconfigured
+		return nil, payments.ErrUnconfigured
 	}
 	facts, err := fetchPaymentUpdate(ctx, q, gateway, snapshot, data.Text("id"), now)
 	if err != nil {
-		return pgtype.UUID{}, err
+		return nil, err
 	}
-	if _, err = q.LockDonor(ctx, snapshot.DonorID); err != nil {
-		return pgtype.UUID{}, err
-	}
-	row, err := q.PaymentUpdateByID(ctx, id)
-	if err != nil {
-		return pgtype.UUID{}, err
-	}
-	status, err := applyPaymentUpdate(ctx, q, row, facts, now)
-	if err != nil {
-		return pgtype.UUID{}, err
-	}
-	if !terminalPaymentUpdate(status) {
-		return pgtype.UUID{}, payments.ErrFacts
-	}
-	return snapshot.DonorID, nil
+	return func(ctx context.Context, q *queries.Queries) (pgtype.UUID, error) {
+		if _, err := q.LockDonor(ctx, snapshot.DonorID); err != nil {
+			return pgtype.UUID{}, err
+		}
+		row, err := q.PaymentUpdateByID(ctx, id)
+		if err != nil {
+			return pgtype.UUID{}, err
+		}
+		status, err := applyPaymentUpdate(ctx, q, row, facts, now)
+		if err != nil {
+			return pgtype.UUID{}, err
+		}
+		if !terminalPaymentUpdate(status) {
+			return pgtype.UUID{}, payments.ErrFacts
+		}
+		return snapshot.DonorID, nil
+	}, nil
 }
 
-// applyRefundEvent records a refund's current processor state. It is read
-// again under the lock if another refund state was recorded meanwhile, since
+// prepareRefundEvent records a refund's current processor state. If another
+// refund state was recorded meanwhile, the apply asks for a fresh read, since
 // webhook timestamps cannot order competing refund states.
-func (w EventWorker) applyRefundEvent(
+func (w EventWorker) prepareRefundEvent(
 	ctx context.Context,
 	q *queries.Queries,
 	event queries.DonorStripeEvent,
 	data payments.Object,
 	now time.Time,
-) (pgtype.UUID, error) {
+) (eventApply, error) {
 	payment := text(data.Text("payment_intent"))
 	snapshot, err := q.GiftSnapshotByPayment(ctx, payment)
 	if err != nil {
-		return pgtype.UUID{}, err
+		return nil, err
 	}
 	observations, err := q.GiftRefundObservations(ctx, snapshot.ID)
 	if err != nil {
-		return pgtype.UUID{}, err
+		return nil, err
 	}
 	current, err := w.retrieveRefund(ctx, data.Text("id"))
 	if err != nil {
-		return pgtype.UUID{}, err
+		return nil, err
 	}
-	if _, err = q.LockDonor(ctx, snapshot.DonorID); err != nil {
-		return pgtype.UUID{}, err
-	}
-	gift, err := q.GiftByPayment(ctx, payment)
-	if err != nil {
-		return pgtype.UUID{}, err
-	}
-	recorded, err := q.GiftRefundObservations(ctx, gift.ID)
-	if err != nil {
-		return pgtype.UUID{}, err
-	}
-	if recorded != observations || gift.ID != snapshot.ID {
-		if current, err = w.retrieveRefund(ctx, data.Text("id")); err != nil {
+	return func(ctx context.Context, q *queries.Queries) (pgtype.UUID, error) {
+		if _, err := q.LockDonor(ctx, snapshot.DonorID); err != nil {
 			return pgtype.UUID{}, err
 		}
-	}
-	return snapshot.DonorID, recordRefund(ctx, q, gift, current, event.ID, pgtype.UUID{}, now)
+		gift, err := q.GiftByPayment(ctx, payment)
+		if err != nil {
+			return pgtype.UUID{}, err
+		}
+		recorded, err := q.GiftRefundObservations(ctx, gift.ID)
+		if err != nil {
+			return pgtype.UUID{}, err
+		}
+		if recorded != observations || gift.ID != snapshot.ID {
+			return pgtype.UUID{}, errRefetch
+		}
+		return snapshot.DonorID, recordRefund(ctx, q, gift, current, event.ID, pgtype.UUID{}, now)
+	}, nil
 }
 
-// applyCheckoutEvent applies an event about a DAD checkout: its session, its
+// prepareCheckoutEvent applies an event about a DAD checkout: its session, its
 // subscription, or a payment it collected.
-func (w EventWorker) applyCheckoutEvent(
+func (w EventWorker) prepareCheckoutEvent(
 	ctx context.Context,
 	q *queries.Queries,
 	event queries.DonorStripeEvent,
 	data payments.Object,
 	fetcher *subFetcher,
 	now time.Time,
-) (pgtype.UUID, error) {
+) (eventApply, error) {
 	checkoutID, err := parseID(data.Text("checkout_id"))
 	if err != nil {
-		return pgtype.UUID{}, err
+		return nil, err
 	}
 	draft, err := q.CheckoutDraft(ctx, checkoutID)
 	if err != nil {
-		return pgtype.UUID{}, err
+		return nil, err
 	}
 	facts, err := w.prefetch(ctx, q, event, data, draft, fetcher)
 	if err != nil {
-		return pgtype.UUID{}, err
+		return nil, err
 	}
-	if _, err = q.LockDonor(ctx, draft.DonorID); err != nil {
-		return pgtype.UUID{}, err
-	}
-	attempt, err := q.AttemptForCheckout(ctx, checkoutID)
-	if err != nil {
-		return pgtype.UUID{}, err
-	}
-	if err = recordCard(ctx, q, draft.DonorID, facts.card, now); err != nil {
-		return pgtype.UUID{}, err
-	}
-	if err = w.applyLockedCheckoutEvent(ctx, q, event, data, draft, attempt, facts, fetcher, now); err != nil {
-		return pgtype.UUID{}, err
-	}
-	return draft.DonorID, queueDeletedAccountReversals(ctx, q, checkoutID, now)
+	return func(ctx context.Context, q *queries.Queries) (pgtype.UUID, error) {
+		if _, err := q.LockDonor(ctx, draft.DonorID); err != nil {
+			return pgtype.UUID{}, err
+		}
+		attempt, err := q.AttemptForCheckout(ctx, checkoutID)
+		if err != nil {
+			return pgtype.UUID{}, err
+		}
+		if err = recordCard(ctx, q, draft.DonorID, facts.card, now); err != nil {
+			return pgtype.UUID{}, err
+		}
+		if err = w.applyLockedCheckoutEvent(ctx, q, event, data, draft, attempt, facts, fetcher, now); err != nil {
+			return pgtype.UUID{}, err
+		}
+		return draft.DonorID, queueDeletedAccountReversals(ctx, q, checkoutID, now)
+	}, nil
 }
 
 func (w EventWorker) retrieveRefund(ctx context.Context, id string) (payments.Object, error) {

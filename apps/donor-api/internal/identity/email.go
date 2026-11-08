@@ -15,6 +15,8 @@ import (
 
 // Frozen from the former backend's stringprep and Unicode 3.2 normalization data.
 // Changes require identity compatibility review, not dependency regeneration.
+// The exporter is apps/api/tests/export_donor_identity.py at commit c0b2bbb; the
+// scalar digest in testdata/identity.json pins the result for every code point.
 //
 //go:embed tables.json
 var encodedTables []byte
@@ -54,8 +56,12 @@ func ascii(value string) bool {
 	return true
 }
 
+// maxEmailRunes bounds an address before normalization, whose canonical
+// reordering is quadratic in the length of a label.
+const maxEmailRunes = 320
+
 func NormalizeEmail(value string) (string, error) {
-	if !utf8.ValidString(value) {
+	if !utf8.ValidString(value) || utf8.RuneCountInString(value) > maxEmailRunes {
 		return "", ErrEmail
 	}
 	value = TrimSpace(value)

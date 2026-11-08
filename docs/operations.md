@@ -8,9 +8,13 @@ these with a later production database or describe sandbox awards as real recogn
 Use a distinct PostgreSQL database and cluster for each environment. Every process
 connects with its own login, which holds only what that process needs
 ([database roles](#database-roles)). Each process's database pool is sized for its role:
-the API opens up to 40 connections, and each worker, the monitor, migrations, the staff
-command, and `rekey` up to 2. A full deployment therefore needs up to 58 of PostgreSQL's
-default 100 `max_connections`, or 60 while a migration runs. When adding API replicas, raise `max_connections` (or put a
+the API opens up to 40 connections, and each worker, the monitor, the reconcile job,
+migrations, the staff command, and `rekey` up to 2 (`Pool` in `internal/dbroles/roles.go`;
+each login's `CONNECTION LIMIT` is set to the same number when you provision it). One
+replica of every process therefore needs up to 60 connections: the API's 40, six workers
+at 2, and the monitor, reconcile job, staff command and `rekey` at 2 each. A migration
+adds 2 while it runs. PostgreSQL's default `max_connections` is 100, of which 3 are
+reserved for superusers. When adding API replicas, raise `max_connections` (or put a
 [transaction-mode pooler](#connection-pooling) in front) so the total stays below it; `pool_max_conns=N` in a
 process's database URL overrides its size.
 
@@ -152,6 +156,10 @@ Some migrations and releases need more:
   from `/staff`.
 - `0008_referral_touch_retention` builds its indexes without `CONCURRENTLY`, blocking
   checkout writes while it runs; on a large database, migrate at a quiet time.
+- `0083_scan_free_lookups_and_credential_retention` builds its indexes without
+  `CONCURRENTLY` (migrations run in one transaction), blocking writes to each table while its
+  index builds. It is quick on a launch-sized database; on a large one, migrate at a quiet
+  time. It also lets a session be deleted while the audit rows that named it stay.
 - `0009_subscription_sync` adds the billing anchor that dates renewals. A
   subscription synced before it shows no anchor until the Stripe worker next syncs it, so
   start the workers promptly after `up`.
@@ -362,8 +370,23 @@ cancellation are recorded from their own events. A failed call is retried every 
 minutes; after ten attempts it parks and the monitor's `reversals` queue counts it.
 Check the error class and the payment in Stripe, then refund or cancel it there.
 
+Each event is processed in three steps, so a slow Stripe call never holds a database
+connection, a row lock, or a donor lock. A short statement claims the next due event: it
+counts the attempt and pushes `available_at` six minutes ahead, which is the lease and
+outlasts the worker's five-minute step budget. The worker then reads the refund,
+subscription, and card state it needs from Stripe with no transaction open. Finally one
+transaction confirms the attempt still holds the lease, takes the donor lock, applies the
+event, and marks it processed. If the worker crashes after the claim, nothing was
+applied, and the event becomes due again when the lease expires, counted as one attempt.
+A worker whose lease was taken over, or whose event an operator reset, applies nothing.
+If another gift or refund state is recorded while the donor lock is being taken, the
+attempt rolls back and reads Stripe again rather than calling it under the lock. A
+worker stopped by shutdown gives its claim back uncounted. The claim is safe for
+several workers, since each takes a different event and the donor lock serialises events for
+one donor, but the worker command still runs one Stripe loop.
+
 Monitor the oldest unprocessed `donor_stripe_events`, attempt counts, and worker health.
-A failed event waits before its next attempt, doubling from one minute up to an hour,
+A failed event waits before its next attempt, doubling from one minute up to an hour (an event whose worker crashed instead waits out the six-minute lease),
 so a provider outage or an event that arrives before its gift is retried later rather
 than immediately. Events park after ten failed attempts. Investigate the error class
 (`PaymentUnavailable`, `MissingRecord`, `InvalidFacts`, or `ProcessingError`) and current
@@ -457,6 +480,10 @@ confirmation, reasons, and audit records. Never edit processor identifiers by ha
 Run projection, login-email, email-changes, and message workers separately. Email changes
 use the same mail configuration, require current-address proof before new-address proof,
 and park delivery after five failures. Requesting a replacement invalidates prior proofs.
+The queue workers (`login-email`, `email-changes`, `messages`, `push`) accept
+`--concurrency N` (up to 8) to run N claim loops in one process. Each loop claims a row with
+`FOR UPDATE SKIP LOCKED`, so none is delivered twice; N may not exceed the login's pool size,
+so raise `pool_max_conns` in the worker's database URL and re-run `make provision` first.
 Projection refresh handles grace expiry, recurring boundaries, permanent recognition,
 and prior-year summaries. A projection is recomputed when facts that change it arrive and
 at its next time boundary: a due date, period end, grace deadline, cancellation,
@@ -464,20 +491,49 @@ refund, or New Year in New York, and at least every 25 to 35 days, a span fixed 
 donor so that projections computed together fall due over ten days. A release that changes
 recognition, or the messages and push intents queued with it, raises `projectionRules` in
 `internal/store/financial.go`; the projection worker then recomputes every older
-projection whenever no projection is due. A donor whose facts cannot be projected is deferred with
+projection whenever no projection is due. Saving badge or milestone rules in the staff
+console does the same without rewriting any projection: it adds one to the single-row
+`donor_recognition_epoch`, and a projection is current only when its `rules_version` is at
+least `projectionRules` plus that epoch. The projections worker then recomputes the
+outdated donors in transactions of `OutdatedBatch` (256), resuming across steps because each
+transaction claims whatever is still outdated. A step keeps starting transactions for
+`CatchUpSlice` (60 s of the 120 s step budget) before the other sweeps run, and every
+transaction claims due projections (at most `ProjectionBatch`, 64) before any outdated one,
+so a rules change delays a due projection by one transaction (about a second), not the
+backlog. Replicas claim disjoint donors with `SKIP LOCKED`, so convergence scales with the
+number of projections workers. Measured on a local PostgreSQL 14 with 200,000 seeded donors
+(about 7 gifts each): one worker refreshes about 250 donors a second at 256 to 5,000 per
+transaction and 140 to 200 at 64, so 1,000,000 donors converge in about 65 minutes with one
+worker and about 35 with two. A transaction locks its donors until it commits, so a donor
+write waits at most as long as one transaction: under a second at 256, 8 s at 2,000, 20 s at
+5,000. That is why the batch is not larger; raise `OutdatedBatch` only if a rules change must
+converge faster than adding a replica allows. Watch convergence by counting projections whose
+`rules_version` is below `projectionRules` plus the epoch. Until a donor is refreshed the dashboard already shows
+the saved ladder, thresholds and wording, since those are read live; earned badges and the
+next milestone date follow at the donor's refresh, as before. Convergence is complete when no projection has a `rules_version` below
+`projectionRules` plus the epoch. Apply migration `0087_recognition_rules_epoch.sql` before these binaries. A donor whose facts cannot be projected is deferred with
 backoff, records an error class, and counts as parked in the monitor; other donors keep
 refreshing. Unknown streak state displays Updating; it must not silently become zero.
 
 Global rankings use `donor_projection_schedules` to claim one refresh every 15 minutes
-across projection replicas, even when no donors qualify. The schedule and ranking changes
-commit together, so a failed refresh remains due. Publishing an event records a durable
+across projection replicas, even when no donors qualify. One refresh ranks the whole
+population in a single repeatable-read snapshot and writes it in id-ordered chunks of
+5,000 donors, each its own short transaction that inserts, updates only the rows whose
+percentile, city or city rank changed, deletes donors who left the population, and awards
+the ranking badges. A transaction-scoped advisory lock on the snapshot connection keeps
+one instance refreshing at a time; it needs both connections of the projection worker's
+pool. Population sizes live in `donor_ranking_populations`, written after the last chunk.
+A refresh that fails part-way leaves each chunk old or new and stays due, so the next worker
+step recomputes from a fresh snapshot and converges. Apply migration
+`0086_ranking_populations.sql` before binaries that read it. Publishing an event records a durable
 alert job in the same transaction; projection workers resume it in batches of at most 256
 eligible volunteers. Republishing does not restart the job. Each batch rechecks publication,
 cancellation, start time, and notification choices; delivery rechecks the recipient again.
 Apply migration `0054_projection_schedules_and_event_fanout.sql` before these binaries.
 
-Deploy migration `0017_referral_corrections.sql` before binaries using projection rules
-version 6. Older projections then converge on the earliest verified successful payment
+History: migration `0017_referral_corrections.sql` had to be applied before binaries
+using projection rules version 6 (the current version is 12, `projectionRules` in
+`internal/store/financial.go`). Older projections then converge on the earliest verified successful payment
 through the normal refresh worker. Corrections, transferred referral totals, and new
 notification intents commit together. Monitor projection errors during convergence and
 use the staff `referral-corrections` export to inspect changed attribution. The migration
@@ -490,6 +546,11 @@ refreshes, until none remain. Concurrent projection workers share the work. A fa
 is logged as a worker step failure and retried an hour later without holding up
 projections. Retention is not a monitored queue, since a touch past retention waits up
 to an hour by design.
+
+The same pass deletes company-code touches once they expire, analytics events after 13
+months, and credentials once they have lapsed: sessions 90 days after their last credential expired, sign-in links and completed
+sign-in emails after 30 days, and a phone code a day after it expired. Session audit rows
+(`donor_session_events`) are kept with no session.
 Mail workers claim a job, then send outside the donor lock, and Stripe calls for commands,
 refunds, card setup, and webhooks likewise run without it, so a slow provider cannot block
 payments or staff actions for the same donor.
@@ -627,6 +688,14 @@ start with an invalid configuration and names the variables to fix.
   API fetches signing keys from `appleid.apple.com` and `www.googleapis.com`, so it needs
   outbound HTTPS to both; keys are cached for an hour and a known key keeps working
   through a provider outage.
+- Replay protection: a client may send a `nonce` with `oidcSignIn`. The ID token's
+  `nonce` claim must then equal it raw or as its lowercase hex SHA-256 (Apple's native
+  flow hashes the nonce it is given; Google Credential Manager and the web flows do not),
+  and a mismatch or a token without the claim fails like any unverifiable token. By
+  default a sign-in without a nonce is still accepted, so the published mobile contract
+  keeps working. Set `DONOR_OIDC_REQUIRE_NONCE=true` to refuse it (`true` or `false`,
+  default `false`), only after the iOS and Android releases that send a nonce are the
+  oldest in use; until then those older apps could not sign in with Apple or Google.
 
 `DONOR_SMS_PROVIDER=stub` (with `DONOR_SMS_FROM`) records codes instead of sending them,
 and `DONOR_OIDC_MODE=stub` (with `DONOR_OIDC_STUB_KEY`) accepts HMAC-signed test tokens.
@@ -777,7 +846,7 @@ not yet granted no longer match under a new key, so re-import the file after cha
 Re-importing is safe and keeps each address's earliest sign-up. Qualifying claims have
 no redemption expiry; a later account claim still earns the badge.
 
-The enrolment CSV has headers only until R2. Keep exports private and apply an approved
+There is no enrolment export before R2. Keep exports private and apply an approved
 retention policy. Sensitive source documents have separate authenticated downloads.
 
 ## Partner report artifacts
@@ -854,7 +923,7 @@ Run the API as for production, and run the projection worker alone, with
 dashboards then wait for it. Never run the message worker against
 a seeded database; with Compose, start only
 `docker compose --env-file .env.production --env-file .env.database -f docker-compose.prod.yml --profile workers up -d projection-worker`.
-Every scenario but referral capture only reads, including recurring, so Stripe
+Every scenario but referral capture and `event-reserve` only reads, including recurring, so Stripe
 configuration does not change the result; captures insert referral touches, so the
 database grows with each run. Checkout is not in the mix because it calls Stripe.
 
@@ -879,14 +948,20 @@ make loadtest-seeded LOAD_API=http://api.staging.internal:8002 LOAD_ORIGIN=https
   LOAD_FIXTURE=/secure/dad-load.json
 ```
 
-This runs a 60-second burst at 256 users with a 250 ms p99 budget for every scenario,
-then a five-minute soak at 32 users with 100 ms, and exits nonzero on any failed request
-or exceeded budget; an interrupted run writes the result so far and exits nonzero. For
+This target runs four loads in turn: a 60-second burst at 256 users with a 250 ms p99
+budget for every scenario, a five-minute soak at 32 users with 100 ms, a 60-second event
+spike at 256 users (`events` 55 and `event-detail` 45, 400 ms), and a five-minute
+engagement soak at 32 users (`dashboard` 40, `today-initiative` 30, `team` 30, 150 ms).
+Each exits nonzero on any failed request or exceeded budget; an interrupted run writes the result so far and exits nonzero. For
 other shapes run `go run ./cmd/loadtest` with `-duration`, `-concurrency` (up to 2,048),
 `-mix name=weight,...` and `-max-p99 250ms,dashboard=400ms`.
 The default weights are referral-lookup 30, referral-capture 12, referral-missing 3 (an
-unknown code, expecting 404), content 15, dashboard 18, gifts 7, sharing 5, profile 4,
-recurring 4 and annual-summary 2. Each signed-in read uses a donor drawn from the fixture;
+unknown code, expecting 404), spend 15, dashboard 18, gifts 7, sharing 5, profile 4,
+recurring 4 and annual-summary 2. The scenarios `events`, `event-detail`, `event-reserve`,
+`today-initiative` and `team` default to 0 and are enabled through `-mix`; the event
+scenarios use the event IDs the seeder writes to the fixture. `event-reserve` is a write
+that takes the event row lock and fills seats, so use it only on a disposable database.
+Each signed-in read uses a donor drawn from the fixture;
 `-native` (default 0.25) of users present it as the donor app's bearer token, the rest as
 the browser cookie.
 
@@ -919,8 +994,9 @@ acceptance also require explicit evidence.
 
 Run `./scripts/deploy.sh monitor [--max-age 10m]` (or `go run ./cmd/monitor` from
 `apps/donor-api` with the database environment loaded). It emits only aggregate JSON counts,
-parked counts, and oldest due age for Stripe, projections, financial mail, login mail,
-email changes, push notifications, and subscriptions. It exits nonzero if any job is parked or a due item is
+parked counts, and oldest due age for Stripe, projections, financial mail (including
+partner messages), login mail, email changes, push notifications, deleted-account
+reversals, and subscriptions. It exits nonzero if any job is parked or a due item is
 older than five minutes; `--max-age 10m` changes the age threshold. Future scheduled sends
 are excluded. An ongoing subscription last synced before its billing period ended is due
 a sync one day after that end, when Stripe has renewed or ended it: one still due after
@@ -1059,14 +1135,17 @@ and production image, Compose and ingress checks. Changes to shared scripts,
 contracts, Makefile and Docker inputs trigger their dependent jobs. Pushes to
 `dev` and `main` run the full suite.
 
+`deploy.yml` rolls the application to ECS: staging on a merge to `dev`, production on a
+merge to `main` behind the `production` environment's reviewer. `cloudflare-ranges.yml`
+checks weekly that the committed Cloudflare address ranges are current.
+
 The mobile workflow validates and bundles the contract, then compiles and tests
 it with the pinned Swift package dependencies. Only matching mobile version tags
 publish a release; pull requests cannot publish artifacts as releases.
 
 Branch protection should require the CI and mobile checks and ATM acceptance.
-A green application test suite alone does not authorize deployment. Retire
-previous persistent self-hosted runners from this repository and revoke any
-credentials stored on those machines through the operator's runner controls.
+A green application test suite alone does not authorize deployment. All
+workflows run on GitHub-hosted runners.
 
 
 ## One email, one role
@@ -1151,11 +1230,15 @@ The web Apple and Google authorization-code flows use these server-only variable
   client-secret JWT, renewed before its expiry).
 - `DONOR_OAUTH_GOOGLE_CLIENT_ID` and `DONOR_OAUTH_GOOGLE_CLIENT_SECRET`.
 
-Register the exact redirect URLs `${DONOR_PUBLIC_ORIGIN}/account/oauth/apple` and
+`DONOR_PUBLIC_ORIGIN` is compiled into the web image. The shipped `docker-compose.prod.yml`
+does not yet pass these four variables to the `web` container's runtime environment, and the
+callback route answers 503 without them, so add them to the `web` service's `environment`
+before enabling these flows with Compose. Register the exact redirect URLs `${DONOR_PUBLIC_ORIGIN}/account/oauth/apple` and
 `${DONOR_PUBLIC_ORIGIN}/account/oauth/google` with the providers. Include the web
 client IDs in the corresponding `DONOR_OIDC_*_CLIENT_ID` audience allowlists and use
 `DONOR_OIDC_MODE=live`. Apple requires HTTPS for its cross-site form-post callback.
-Each attempt has a short-lived HttpOnly state/nonce cookie; Google also uses PKCE.
+Each attempt has a short-lived, single-use HttpOnly state/nonce cookie; Google also uses PKCE. The
+callback checks the token's nonce claim against it and sends the nonce to the API, which checks it again.
 The Go verifier validates the resulting token's signature, issuer, audience, and
 expiry before issuing the normal HttpOnly donor session. Provider errors return a
 sign-in failure without logging codes, tokens, or response bodies. These flows need

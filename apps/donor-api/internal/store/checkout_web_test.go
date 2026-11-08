@@ -3,10 +3,12 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
 	"dad/donor-api/internal/payments"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // abandon ages the donor's checkouts past the grace in which a website request
@@ -221,5 +223,38 @@ func TestWebCheckoutLeavesAJustBegunSessionAlone(t *testing.T) {
 	}
 	if holder, n := reservationHolder(t, f); n != 1 || holder != f.request.RequestID.String() || len(gateway.expired) != 0 {
 		t.Fatalf("reservation %q x%d, %d expiries", holder, n, len(gateway.expired))
+	}
+}
+
+func TestWebCheckoutRefusesInvalidInputBeforeTheProcessor(t *testing.T) {
+	service, request, id, gateway := checkoutFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+	cases := map[string]func(*payments.CheckoutRequest){
+		"amount zero":          func(r *payments.CheckoutRequest) { r.Amount = 0 },
+		"below the minimum":    func(r *payments.CheckoutRequest) { r.Amount = 2999 },
+		"not a daily multiple": func(r *payments.CheckoutRequest) { r.Amount = 4500 },
+		"above the maximum":    func(r *payments.CheckoutRequest) { r.Amount = 93000 },
+		"one-time frequency":   func(r *payments.CheckoutRequest) { r.Frequency = "ONCE" },
+		"malformed email":      func(r *payments.CheckoutRequest) { r.Email = "not-an-email" },
+		"oversized email":      func(r *payments.CheckoutRequest) { r.Email = strings.Repeat("a", 320) + "@example.org" },
+		"zero request id":      func(r *payments.CheckoutRequest) { r.RequestID = pgtype.UUID{} },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			bad := request
+			mutate(&bad)
+			if _, err := service.BeginCheckout(ctx, bad); !errors.Is(err, payments.ErrCheckoutInput) {
+				t.Fatalf("got %v, want an input error", err)
+			}
+		})
+	}
+	var checkouts int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_checkouts WHERE donor_id=$1", id).Scan(&checkouts); err != nil ||
+		checkouts != 0 {
+		t.Fatalf("refused requests left %d checkouts (%v)", checkouts, err)
+	}
+	if len(gateway.calls) != 0 {
+		t.Fatalf("refused requests reached the processor %d times", len(gateway.calls))
 	}
 }

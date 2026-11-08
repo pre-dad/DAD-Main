@@ -134,7 +134,7 @@ it("saves the event pushes and offers nearby events only to volunteers", async (
   });
 });
 
-it("opts in to volunteering with interests and keeps one it doesn't offer", async () => {
+it("opts in to volunteering and saves free-form interests, keeping ones saved elsewhere", async () => {
   const fetch = stubFetch({
     "GET /api/donor/me/profile": () => json({ ...profile, volunteer_interests: ["from-the-app"] }),
     "POST /api/donor/me/preferences": (init) => json({ ...profile, ...JSON.parse(String(init?.body)), version: 4 }),
@@ -144,14 +144,20 @@ it("opts in to volunteering with interests and keeps one it doesn't offer", asyn
   expect(screen.queryByRole("group", { name: "What interests you?" })).toBeNull();
   fireEvent.click(volunteering.getByRole("checkbox", { name: "I volunteer" }));
   const interests = within(screen.getByRole("group", { name: "What interests you?" }));
-  fireEvent.click(interests.getByRole("checkbox", { name: "Mentoring and tutoring" }));
-  fireEvent.click(interests.getByRole("checkbox", { name: "Housing and shelter" }));
-  fireEvent.click(interests.getByRole("checkbox", { name: "Housing and shelter" }));
+  expect(interests.getByRole("button", { name: "Remove from-the-app" })).toBeVisible();
+  const box = interests.getByRole("textbox", { name: "Add an interest" });
+  fireEvent.change(box, { target: { value: "  Dog walking  " } });
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(box).toHaveValue("");
+  expect(box).toHaveFocus();
+  fireEvent.change(box, { target: { value: "Gardening" } });
+  fireEvent.click(interests.getByRole("button", { name: "Add interest" }));
+  fireEvent.click(interests.getByRole("button", { name: "Remove Gardening" }));
   fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
   expect(await screen.findByText("Preferences saved.")).toBeVisible();
   expect(sent(fetch, "/api/donor/me/preferences")).toMatchObject({
     volunteer: true,
-    volunteer_interests: ["from-the-app", "mentoring"],
+    volunteer_interests: ["from-the-app", "Dog walking"],
   });
 });
 
