@@ -176,6 +176,10 @@ earned badge, a waitlist promotion, event reminders and nearby events, and an ev
 cancellation. Each except the cancellation is optional and starts on once the app is
 allowed to notify, since the device's permission prompt is the opt-in; preferences are
 rechecked before sending. [Messaging](messaging.md) lists every message and notification.
+A donor who volunteers (E-1) may also list event interests. They are free-form text, not a
+fixed list: up to 20 entries of at most 60 characters, trimmed, non-empty and unique, which
+the donor adds and removes in the profile. The API enforces the same bounds, and the profile
+returns them as `volunteer_interests`.
 Marketing consent is separate. Receipts/security/essential payment notices are distinct
 from optional messages, subject to approved legal classification. Prepare the enrolment
 template at R1 and activate it with R2 enrolment. Finance approves summary treatment;

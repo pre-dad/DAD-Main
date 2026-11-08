@@ -69,8 +69,10 @@ Fargate service (TLS termination, host split, per-client limits) → web → api
   `scripts/refresh-cloudflare-ips.sh` keeps only nginx's real-IP list
   (`deploy/nginx/conf/cloudflare/edge-ranges.conf`) current, so when the weekly
   `Cloudflare ranges` workflow fails, update the DAD-infra list too. With the toggle off both
-  groups admit the open internet. The target groups health-check HTTP `/health` on 8081
-  (see [open items](#9-open-items)). This implements the "allow 443 only from Cloudflare
+  groups admit the open internet. The target groups use a TCP health check on the traffic port
+  (8080 and 8443) with a 30 s deregistration delay, because nginx's `/health` listener is
+  loopback-only and unreachable from the NLB; the task's own container health check still
+  probes `/health` on 8081 (see [open items](#9-open-items)). This implements the "allow 443 only from Cloudflare
   ranges" intent of `docs/edge.md`.
 - **nginx config on Fargate.** Compose bind-mounts `deploy/nginx` (`nginx.conf`,
   `templates/`, `conf/`, `05-ingress.envsh`, the origin-pull CA, `staff-access.conf`) and
@@ -106,7 +108,7 @@ Reconciled exactly against `docker-compose.prod.yml`. Nine services:
 | --- | --- | --- | --- | --- |
 | `api` | `dad/api` | `api` (image default CMD) | `DONOR_GO_LISTEN=0.0.0.0:8002`, `DONOR_PUBLIC_ORIGIN`, `DONOR_STAFF_ORIGIN`, `DONOR_API_DATABASE_URL`, `DONOR_TRUSTED_PROXY_CIDRS` (compute subnet CIDRs), plus the Stripe, encryption and mail-queue secrets | 8002 |
 | `web` | `dad/web` | `node server.js` (image default) | `DONOR_API_BASE_URL=http://api:8002`, `DONOR_CLIENT_IP_HEADER=X-Real-IP` | 3000 |
-| `nginx` | `dad/nginx` | image default | `INGRESS_MODE=cloudflare`, `DONOR_PUBLIC_ORIGIN`, `DONOR_STAFF_ORIGIN`, `NGINX_ENVSUBST_FILTER=^INGRESS_` | 8080/8443 (health 8081) |
+| `nginx` | `dad/nginx` | image default | `INGRESS_MODE=cloudflare`, `DONOR_PUBLIC_ORIGIN`, `DONOR_STAFF_ORIGIN`, `NGINX_ENVSUBST_FILTER=^INGRESS_` | 8080/8443 (task-local health 8081) |
 | `stripe-worker` | `dad/api` | `worker --kind stripe` | `DONOR_GO_WORKERS_ENABLED`, `STRIPE_SECRET_KEY`, `DONOR_STRIPE_REQUESTS_PER_SECOND`, `DONOR_WORKER_STRIPE_DATABASE_URL` | none |
 | `projection-worker` | `dad/api` | `worker --kind projections` | `DONOR_GO_WORKERS_ENABLED`, `DONOR_WORKER_PROJECTIONS_DATABASE_URL` | none |
 | `login-email-worker` | `dad/api` | `worker --kind login-email` | `DONOR_GO_WORKERS_ENABLED`, `DONOR_PUBLIC_ORIGIN`, mail transport (`DONOR_SMTP_*`, `DONOR_EMAIL_FROM`, `DONOR_EMAIL_ENCRYPTION_KEY`), `DONOR_WORKER_LOGIN_EMAIL_DATABASE_URL` | none |
@@ -137,9 +139,11 @@ so the task definitions always set it; it is not the switch.
   `X-Real-IP` only from web. In Compose this is the `app` network `172.30.43.0/24`; on AWS
   it becomes the web tier's private-subnet CIDR(s). The API refuses a trusted-proxy range
   broader than IPv4 /8 or IPv6 /32, so per-subnet CIDRs are used, not a supernet.
-- web→api discovery uses **ECS Service Connect** (Cloud Map namespace per cluster) so that
-  `DONOR_API_BASE_URL=http://api:8002` resolves to the api service by name, matching the
-  Compose value verbatim. Decision: ECS Service Connect over an internal ALB because the
+- web→api and nginx→web discovery use **ECS Service Connect** (Cloud Map namespace per
+  cluster). `api` publishes itself as `api:8002`, so `DONOR_API_BASE_URL=http://api:8002`
+  resolves by name, matching the Compose value verbatim; `web` publishes itself as `web:3000`
+  and nginx joins the namespace as a client, because nginx's `server web:3000;` has no other
+  resolver on Fargate and the nginx service waits for the web service. Decision: ECS Service Connect over an internal ALB because the
   Compose value is a bare `http://api:8002` service name and no L7 features are needed
   between web and api.
 
@@ -314,7 +318,11 @@ Two pipelines:
    - the deploy jobs are skipped (green) until the `INFRA_DEPLOY_ROLE_ARN` variable exists.
 
 2. **App pipeline — `.github/workflows/deploy.yml`** (direct ECS, CDK reserved for infra):
-   - build `dad/api` + `dad/web` (+ `dad/nginx`), push to ECR tagged with the git SHA.
+   - build `dad/api` + `dad/web` (+ `dad/nginx`) from the repository root, as
+     `docker-compose.prod.yml` does (the Dockerfiles copy `apps/...` paths, and
+     `scripts/check-docker-contexts.sh` enforces this in CI), and push to ECR tagged with the
+     git SHA. ECR tags are immutable, so an image already present for the commit is not
+     rebuilt on a re-run.
    - **pin task definitions to that tag** (`scripts/ecs-pin-image.sh`): register a new
      revision of every task-definition family (the nine services and the six maintenance
      tasks) with only the image tag changed, and save the resulting `family=ARN` lines for
@@ -328,9 +336,10 @@ Two pipelines:
      the gate polls the `ci.yml` run for the same commit (up to 45 minutes) and fails unless
      it succeeded. `deploy` needs it, so a red or cancelled commit never deploys.
    - `APP_DEPLOY_ROLE_ARN` must exist at **repository** level (any non-empty value) for
-     anything to run. Both jobs test it in a job-level `if:`, which GitHub evaluates before
-     the job's environment is chosen, so an environment-only variable reads as empty and
-     the jobs are skipped green. Set the real role ARN per environment (`staging`,
+     anything to run. A job-level `if:` is evaluated before the job's environment is chosen,
+     so `ci-gate` reads the variable once in a step and exposes it as an `enabled` output
+     that `deploy` tests; an environment-only variable reads as empty and the pipeline is
+     skipped green with a notice. Set the real role ARN per environment (`staging`,
      `production`) as well: inside the steps the environment value overrides the
      repository one, which keeps each environment on its own account's role.
    - staging auto on merge to `dev`; production **only** on merge to `main`, gated by
@@ -374,11 +383,11 @@ stacks, and the released image tag is recorded in the SSM parameter `/dad/<env>/
 
 - Production desired counts, task sizes and autoscaling ceilings are set in DAD-infra's
   config but untuned; revisit them against measured load.
-- Two points between `deploy/nginx` and DAD-infra that no environment has exercised
-  (DAD-infra `docs/bootstrap.md`, "Not verified") need reconciling before the first deploy:
-  the NLB target groups health-check `/health` on port 8081, but nginx binds that listener
-  to `127.0.0.1`; and nginx resolves `web` at start through Service Connect, while DAD-infra
-  registers only `api` as a Service Connect service (`web` is a client).
+- Two points between `deploy/nginx` and DAD-infra were reconciled in code (DAD-infra PR
+  #35) but are still unproven until the first deploy, since no environment exists
+  (DAD-infra `docs/bootstrap.md`, "Verified against code, not against AWS"): the NLB
+  targets must turn healthy under the TCP check on 8080/8443, and the Service Connect
+  proxy in the nginx task must resolve `web:3000` at nginx start.
 - The optional API settings and EFS in §6 are not yet wired.
 - Whether the staff host sits behind Cloudflare Access (per-hostname Authenticated Origin
   Pulls CA then required — `docs/edge.md#origin-lock`).
