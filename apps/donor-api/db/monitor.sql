@@ -6,6 +6,8 @@ WITH queues AS (
  UNION ALL
  SELECT 'messages',available_at,attempts>=5 FROM donor_partner_messages WHERE completed_at IS NULL
  UNION ALL
+ SELECT 'messages',available_at,attempts>=5 FROM donor_partner_message_deliveries WHERE completed_at IS NULL
+ UNION ALL
  SELECT 'push',available_at,attempts>=5 FROM donor_partner_push_notifications WHERE completed_at IS NULL AND expires_at>sqlc.arg(as_of)::timestamptz
  UNION ALL
  SELECT 'login-email',available_at,attempts>=5 FROM donor_login_emails WHERE completed_at IS NULL
