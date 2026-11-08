@@ -250,6 +250,11 @@ var grants = map[string]map[Role]string{
 		ProjectionWorker: "SELECT",
 		PushWorker:       "SELECT",
 	},
+	"donor_recognition_epoch": {
+		API:              "SELECT, UPDATE",
+		StripeWorker:     "SELECT",
+		ProjectionWorker: "SELECT",
+	},
 	"donor_initiatives":          {API: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT"},
 	"donor_initiative_metrics":   {API: "SELECT, INSERT, UPDATE, DELETE", ProjectionWorker: "SELECT"},
 	"donor_initiative_spend":     {API: "SELECT, INSERT, UPDATE, DELETE", ProjectionWorker: "SELECT"},

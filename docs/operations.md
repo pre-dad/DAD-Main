@@ -476,7 +476,15 @@ refund, or New Year in New York, and at least every 25 to 35 days, a span fixed 
 donor so that projections computed together fall due over ten days. A release that changes
 recognition, or the messages and push intents queued with it, raises `projectionRules` in
 `internal/store/financial.go`; the projection worker then recomputes every older
-projection whenever no projection is due. A donor whose facts cannot be projected is deferred with
+projection whenever no projection is due. Saving badge or milestone rules in the staff
+console does the same without rewriting any projection: it adds one to the single-row
+`donor_recognition_epoch`, and a projection is current only when its `rules_version` is at
+least `projectionRules` plus that epoch. The projections worker then recomputes the
+outdated donors in batches of `ProjectionBatch`, resuming across steps because each batch
+claims whatever is still outdated. Until a donor is refreshed the dashboard already shows
+the saved ladder, thresholds and wording, since those are read live; earned badges and the
+next milestone date follow at the donor's refresh, as before. Convergence is complete when no projection has a `rules_version` below
+`projectionRules` plus the epoch. A donor whose facts cannot be projected is deferred with
 backoff, records an error class, and counts as parked in the monitor; other donors keep
 refreshing. Unknown streak state displays Updating; it must not silently become zero.
 
