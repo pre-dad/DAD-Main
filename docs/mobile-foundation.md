@@ -28,7 +28,7 @@ call the API host directly with `X-DAD-Client: native`, no cookies or Origin, an
 access token when authenticated. Browser-only giving and staff operations stay on the web.
 
 After checks pass on the release commit, tag it `mobile-foundation-v<version>` (using the
-version in the file, for example `mobile-foundation-v2.11.0`) and push that tag. The
+version in the file, for example `mobile-foundation-v2.12.0`) and push that tag. The
 mobile-foundation workflow verifies the tag matches the declared version and publishes the
 individual files as GitHub Release assets.
 Existing release assets are never overwritten. The workflow also retains a candidate
@@ -42,7 +42,7 @@ the vendored contract without network access to this repository. A maintainer
 can obtain a release with:
 
 ```sh
-gh release download mobile-foundation-v2.11.0 --repo pre-dad/DAD-Main --dir /tmp/dad-foundation
+gh release download mobile-foundation-v2.12.0 --repo pre-dad/DAD-Main --dir /tmp/dad-foundation
 ```
 
 Use patch versions for equivalent packaging corrections, minor versions for compatible
@@ -51,21 +51,29 @@ pins its dependency; changing the backend must preserve supported installed clie
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
 
-## Pending for the next release: OIDC nonce
+## Compatible additions in version 2.12
 
-`oidcSignIn` gains an optional `nonce` (1 to 256 characters). It is not in a cut bundle
-yet; 2.11.0 clients keep working because the field is optional. A native client should
-generate a random value per attempt and send it:
+Version 2.12 adds one optional request field and republishes the bundle from `pre-dad/DAD-Main`
+(`manifest.json` `source_repository`), so both apps can pin the same source. 2.11.0 clients
+keep working because the field is optional. Everything else is description text.
 
-- Sign in with Apple: give `ASAuthorizationAppleIDRequest.nonce` the lowercase hex
-  SHA-256 of the value and send the raw value as `nonce`. Apple puts the hash in the
-  ID token, and the server accepts it.
-- Google (Credential Manager): pass the raw value as the request nonce and send the same
-  value as `nonce`.
+- `oidcSignIn` (`POST /donor/oidc/{provider}/sign-in`) takes an optional `nonce`, a string
+  of 1 to 256 characters. A native client should generate a random value per attempt and
+  send it:
+  - Sign in with Apple: give `ASAuthorizationAppleIDRequest.nonce` the lowercase hex
+    SHA-256 of the value and send the raw value as `nonce`. Apple puts the hash in the
+    ID token, and the server accepts it.
+  - Google (Credential Manager): pass the raw value as the request nonce and send the same
+    value as `nonce`.
 
-A mismatch, or a token without a `nonce` claim, fails like any unverifiable token (401).
-The server makes the field mandatory only when `DONOR_OIDC_REQUIRE_NONCE=true`, which is
-for after the apps that send it are the oldest in use.
+  The ID token's `nonce` claim must equal the sent value, either raw or as the lowercase
+  hex SHA-256 of its UTF-8 bytes. A mismatch, or a token without a `nonce` claim, answers
+  401 exactly like any unverifiable token. Omitting `nonce` is accepted until the
+  deployment sets `DONOR_OIDC_REQUIRE_NONCE=true` (phase 2), after which it answers 401
+  too; that is for after the apps that send it are the oldest in use.
+- Browser session cookies are named `__Host-dad_donor_session` and
+  `__Host-dad_partner_session` over HTTPS. This is documentation only: native requests
+  use bearer tokens and no cookies.
 
 ## Compatible additions in version 2.11
 
