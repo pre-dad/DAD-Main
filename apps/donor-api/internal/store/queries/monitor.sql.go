@@ -19,6 +19,8 @@ WITH queues AS (
  UNION ALL
  SELECT 'messages',available_at,attempts>=5 FROM donor_partner_messages WHERE completed_at IS NULL
  UNION ALL
+ SELECT 'messages',available_at,attempts>=5 FROM donor_partner_message_deliveries WHERE completed_at IS NULL
+ UNION ALL
  SELECT 'push',available_at,attempts>=5 FROM donor_partner_push_notifications WHERE completed_at IS NULL AND expires_at>$1::timestamptz
  UNION ALL
  SELECT 'login-email',available_at,attempts>=5 FROM donor_login_emails WHERE completed_at IS NULL
@@ -40,8 +42,12 @@ WITH queues AS (
  -- before then and still ongoing a day later has missed its sync.
  SELECT 'subscriptions',period_end+interval '1 day',false FROM donor_subscriptions
  WHERE status NOT IN ('canceled','incomplete_expired') AND observed_at<period_end
+UNION ALL
+ -- A staff export still being built; one that keeps failing is about to fail outright.
+ SELECT 'exports',requested_at,attempts>=3 FROM donor_export_jobs
+ WHERE state IN ('queued','running') AND expires_at>$1::timestamptz
 ), names AS (
- SELECT unnest(ARRAY['stripe','messages','login-email','push','reversals','email-changes','projections','subscriptions']) AS queue
+ SELECT unnest(ARRAY['stripe','messages','login-email','push','reversals','email-changes','projections','subscriptions','exports']) AS queue
 )
 SELECT n.queue,count(q.queue)::bigint AS due,
  count(q.queue) FILTER(WHERE q.parked)::bigint AS parked,

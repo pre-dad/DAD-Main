@@ -78,7 +78,7 @@ server {
         include /etc/nginx/ingress/not-found.conf;
     }
 
-    # CSV exports stream row by row and abort mid-body on failure.
+    # Finished CSV exports stream from storage and abort mid-body on failure.
     location ^~ /api/donor/staff/exports/ {
         proxy_buffering off;
         proxy_pass http://web;

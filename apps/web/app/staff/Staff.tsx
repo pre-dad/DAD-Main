@@ -296,10 +296,12 @@ export default function Staff({ q }: { q: string | null }) {
 }
 
 function DonorSearch({ q }: { q: string }) {
-  const [offset, setOffset] = useState(0);
-  const { resource, data, reload } = useApiResource<Schema<"DonorSearch">>(
-    `/donor/staff/donors?q=${encodeURIComponent(q)}&offset=${offset}`,
-  );
+  // Keyset paging: each entry is the cursor that opened a page, the first being none.
+  const [cursors, setCursors] = useState<string[]>([]);
+  const cursor = cursors.at(-1);
+  const query = new URLSearchParams({ q });
+  if (cursor) query.set("cursor", cursor);
+  const { resource, data, reload } = useApiResource<Schema<"DonorSearch">>(`/donor/staff/donors?${query}`);
   const messages = resourceMessages(resource, {
     loading: "Searching donors…",
     failure: "Donor search could not be completed right now. Please retry in a moment.",
@@ -330,8 +332,17 @@ function DonorSearch({ q }: { q: string }) {
           ) : (
             <p>No matching donors.</p>
           )}
-          {data.next_offset !== null && (
-            <button type="button" className="secondary" onClick={() => setOffset(data.next_offset ?? 0)}>
+          {cursors.length > 0 && (
+            <button type="button" className="secondary" onClick={() => setCursors(cursors.slice(0, -1))}>
+              Previous donor page
+            </button>
+          )}
+          {data.next_cursor !== null && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setCursors([...cursors, data.next_cursor ?? ""])}
+            >
               Next donor page
             </button>
           )}

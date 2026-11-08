@@ -1,7 +1,7 @@
 version: "2"
 sql:
   - engine: "postgresql"
-    queries: ["db/monitor.sql", "db/reconcile.sql", "db/queries.sql", "db/financial.sql", "db/checkout.sql", "db/outbox.sql", "db/worker.sql", "db/email.sql", "db/email_changes.sql", "db/donor.sql", "db/sessions.sql", "db/recurring.sql", "db/staff.sql", "db/admin.sql", "db/admin_finance.sql", "db/content.sql", "db/push.sql", "db/donor_passkeys.sql", "db/stripe_budget.sql", "db/analytics.sql", "db/initiatives.sql", "db/badges.sql", "db/rankings.sql", "db/network.sql", "db/events.sql", "db/partner.sql", "db/partner_push.sql", "db/employee.sql", "db/reporting.sql", "db/referral_signals.sql", "db/retention.sql"]
+    queries: ["db/monitor.sql", "db/reconcile.sql", "db/queries.sql", "db/financial.sql", "db/checkout.sql", "db/outbox.sql", "db/worker.sql", "db/email.sql", "db/email_changes.sql", "db/donor.sql", "db/sessions.sql", "db/recurring.sql", "db/staff.sql", "db/admin.sql", "db/admin_finance.sql", "db/content.sql", "db/push.sql", "db/donor_passkeys.sql", "db/stripe_budget.sql", "db/analytics.sql", "db/initiatives.sql", "db/badges.sql", "db/rankings.sql", "db/network.sql", "db/events.sql", "db/partner.sql", "db/partner_push.sql", "db/employee.sql", "db/reporting.sql", "db/referral_signals.sql", "db/retention.sql", "db/exports.sql"]
     schema: "db/migrations"
     gen:
       go:

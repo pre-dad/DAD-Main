@@ -10,13 +10,34 @@ connects with its own login, which holds only what that process needs
 ([database roles](#database-roles)). Each process's database pool is sized for its role:
 the API opens up to 40 connections, and each worker, the monitor, the reconcile job,
 migrations, the staff command, and `rekey` up to 2 (`Pool` in `internal/dbroles/roles.go`;
-each login's `CONNECTION LIMIT` is set to the same number when you provision it). One
-replica of every process therefore needs up to 60 connections: the API's 40, six workers
-at 2, and the monitor, reconcile job, staff command and `rekey` at 2 each. A migration
-adds 2 while it runs. PostgreSQL's default `max_connections` is 100, of which 3 are
-reserved for superusers. When adding API replicas, raise `max_connections` (or put a
-[transaction-mode pooler](#connection-pooling) in front) so the total stays below it; `pool_max_conns=N` in a
-process's database URL overrides its size.
+`pool_max_conns=N` in a process's database URL overrides its size). One instance of every
+process therefore needs up to 60 connections: the API's 40, six workers at 2, and the monitor,
+reconcile job, staff command and `rekey` at 2 each. A migration adds 2 while it runs.
+
+Each login's `CONNECTION LIMIT` is its pool size times the instances of that process that may
+run at once, since a pooler such as RDS Proxy opens every instance's server connections as that
+one login ([provisioning](#provisioning-logins)). Provisioning fails when the limits together
+exceed the connection budget below.
+
+| Login | Pool | Instances | Connection limit |
+| --- | --- | --- | --- |
+| `dad_api` | 40 | 16 | 640 |
+| each of the six workers | 2 | 2 | 4 (24) |
+| monitor, reconcile, staff, `rekey` | 2 | 2 | 4 (16) |
+| Total | | | 680 of 850 |
+
+The API's 16 is the production autoscaling ceiling of 12 tasks plus 4 for the extra tasks a
+rolling deployment starts before it stops the old ones; every other process runs one instance,
+and 2 covers a deployment or a one-off run.
+
+The budget leaves room for `max_connections`. RDS sets it to `DBInstanceClassMemory / 9531392`:
+about 900 on a `db.t3.large` (8 GiB) and 1,800 on a `db.m6g.xlarge` (16 GiB). Take off the 3
+connections reserved for superusers and about 45 for a migration, the owner's own sessions,
+RDS's monitoring, and an operator at `psql`, which leaves 850 and 1,750. The default is 850;
+set `DONOR_ROLE_CONNECTION_BUDGET` when the instance class changes, and check the real value
+with `SHOW max_connections`. The limits are ceilings, not reservations: they bound what a
+faulty or runaway process may take, while the connections actually open stay at the pool sizes
+times the running tasks.
 
 Back up the database together with its separately stored encryption keys, then verify a
 restore. Losing the email or content encryption key makes its encrypted records
@@ -186,7 +207,7 @@ schema.
 |---|---|---|---|
 | `dad_api` | API | `DONOR_API_DATABASE_URL` | Reads every table for views and exports; writes donor, session, checkout, recurring-command, projection, staff, content, and webhook-inbox records; cannot change gifts or billing periods, and deletes only reservations, subscription leases, passkey ceremonies, and passkeys |
 | `dad_worker_stripe` | Stripe worker | `DONOR_WORKER_STRIPE_DATABASE_URL` | Processes the webhook inbox and writes gifts, billing periods and observations, refunds, subscriptions, card fingerprints, projections, and the mail and push queues; reads sessions only to find app devices; no staff or content records |
-| `dad_worker_projections` | Projection worker | `DONOR_WORKER_PROJECTIONS_DATABASE_URL` | Reads financial facts; writes projections and queues mail and push; deletes expired referral touches |
+| `dad_worker_projections` | Projection worker | `DONOR_WORKER_PROJECTIONS_DATABASE_URL` | Reads financial facts; writes projections and queues mail and push; deletes expired referral touches; builds staff CSV exports (reads only the exported columns of the export tables, appends audit rows, writes and purges export jobs and files) |
 | `dad_worker_login_email` | Login-email worker | `DONOR_WORKER_LOGIN_EMAIL_DATABASE_URL` | Sign-in email queue and the links it issues |
 | `dad_worker_email_changes` | Email-change worker | `DONOR_WORKER_EMAIL_CHANGES_DATABASE_URL` | Email-change proofs |
 | `dad_worker_messages` | Message worker | `DONOR_WORKER_MESSAGES_DATABASE_URL` | Financial mail queue; reads the facts a message renders |
@@ -245,16 +266,20 @@ fails until the declaration matches.
 `./scripts/deploy.sh provision-roles` (or `make provision` with the variables loaded) runs
 as the schema owner after migrations. For each process it reads the user and password from
 the process's URL, creates or updates that login, makes it a member of the process's role,
-and sets its connection limit to the process's pool size, or to `pool_max_conns` in its
-URL. Only a SCRAM verifier computed locally reaches the server, never the password. It
+and sets its connection limit to the process's pool size (or `pool_max_conns` in its URL)
+times its replicas: `DONOR_ROLE_REPLICAS`, such as `api=12,push=3`, names the most instances of
+each role (keys: `api`, `stripe`, `projections`, `login-email`, `email-changes`, `messages`,
+`push`, `monitor`, `staff-cli`, `rekey`, `reconcile`), and a role it omits allows 16 API tasks
+or 2 of any other process. Provisioning fails, changing nothing, when the limits together exceed
+`DONOR_ROLE_CONNECTION_BUDGET` (default 850; see [database and containers](#database-and-containers)). Only a SCRAM verifier computed locally reaches the server, never the password. It
 refuses a URL naming the owner, a group role, a superuser or other privileged role, the
 same user for two processes, a password shorter than 16 printable ASCII characters, or a
 database other than the owner's, and it refuses while a role's privileges reach any user
 besides its configured login, such as a login left from a rename: revoke the role from it
 or drop it, then run provisioning again. It can be run at any time and changes nothing
-else. Connection limits assume one instance of each process, as Compose runs them; a
-one-off run of a process, such as the Stripe worker's `--retry-event`, shares its login's
-limit, and more replicas of a process need a higher limit than provisioning sets.
+else. A one-off run of a process, such as the Stripe worker's `--retry-event`, shares its login's
+limit; raise a role's replicas, and run provisioning again, before running more instances of
+it than the limit admits.
 
 Under Compose, `./scripts/deploy.sh monitor`, `reconcile`, `rekey`, and `staff` run those
 commands as their own services with their own logins, and the Stripe worker's retry runs as
@@ -317,7 +342,12 @@ pooler must track protocol-level prepared statements (PgBouncer 1.21 or later wi
 neither fails most requests with SQLSTATE 42P05 or 26000. The `role` URL parameter that
 local development uses is a startup parameter poolers do not forward; deployed processes
 use their own logins instead. Size the pooler's server connections to the database's
-`max_connections`, and leave each process's own pool size unchanged.
+`max_connections`, and leave each process's own pool size unchanged. For RDS Proxy, set
+`MaxConnectionsPercent` to 80 so the proxy holds at most about 720 of a `db.t3.large`'s 900
+connections, inside the 850 budget and leaving the rest to migrations and operators, and
+`MaxIdleConnectionsPercent` to 20 or less; each login's limit above then caps what any one
+process family may take of that, so no single role can starve the others. Raise the budget and
+`MaxConnectionsPercent` together with the instance class.
 
 ## Stripe
 
@@ -483,7 +513,7 @@ and park delivery after five failures. Requesting a replacement invalidates prio
 The queue workers (`login-email`, `email-changes`, `messages`, `push`) accept
 `--concurrency N` (up to 8) to run N claim loops in one process. Each loop claims a row with
 `FOR UPDATE SKIP LOCKED`, so none is delivered twice; N may not exceed the login's pool size,
-so raise `pool_max_conns` in the worker's database URL and re-run `make provision` first.
+so raise `pool_max_conns` in the worker's database URL and re-run `make provision` first (its connection limit is the pool size times its replicas).
 Projection refresh handles grace expiry, recurring boundaries, permanent recognition,
 and prior-year summaries. A projection is recomputed when facts that change it arrive and
 at its next time boundary: a due date, period end, grace deadline, cancellation,
@@ -824,6 +854,52 @@ The `billing-history` CSV contains verified failed and successful invoice observ
 See [analytics](analytics.md) for its coverage boundary and for timestamp, replay, and
 renewal-cohort rules.
 
+### Staff exports
+
+A staff export is built in the background, not inside the HTTP request, so a large dataset
+finishes instead of being cut off by the 30 s server write timeout. At `/staff/exports` a
+member with `data.export` (and, per dataset, `staff.manage`, `audit.read`, `partner.manage`
+or `content.publish`) requests a dataset, watches its progress, and downloads it.
+
+- `POST /donor/staff/exports/jobs` queues a job (migration 0089, `donor_export_jobs`) and
+  audits `data.export_started`. Asking again for a dataset still being built returns that job;
+  at most three jobs per member may be open. `GET /donor/staff/exports/jobs` lists the
+  member's unexpired jobs, `GET .../jobs/{job_id}` reports one, and
+  `GET .../jobs/{job_id}/file` downloads a finished one.
+- The projections worker builds jobs; no new service is needed. Each worker step claims the
+  oldest unfinished job (`FOR UPDATE SKIP LOCKED`), reads 5,000 rows by keyset (`id > cursor`),
+  gzips them as one member of `donor_export_chunks`, and moves the cursor in the same
+  transaction. A step that dies leaves nothing behind and the next one resumes at the same row,
+  so a restart repeats and loses no row. No export holds a snapshot or connection for longer
+  than one batch, and a step takes at most one batch of the worker's time per loop, so
+  projections are not starved. The worker rechecks that the requester is enabled and still
+  holds the dataset's permission on every step; otherwise the job fails `forbidden`.
+- Consistency: a dataset with an insert-time timestamp (`exportAsOf` in
+  `internal/store/exports.go`) excludes rows stamped after the request, so the file is as of
+  the request. Datasets whose rows change in place (refunds, billing periods, subscriptions,
+  preferences, referrals, streaks, referral touches) read each row as it stands when the cursor
+  reaches it, which can mix moments but never repeats or drops a row id. This replaces the old
+  single REPEATABLE READ snapshot, which pinned a connection and held back vacuum for the whole
+  download.
+- Storage: finished files are gzip chunks in Postgres, capped at 50 MB stored (a larger job
+  fails `too_large` and discards its chunks) and kept 24 hours after completion. The
+  projections worker purges expired jobs and chunks every ten minutes. Download streams the
+  chunks one at a time, uncompressed, with `Content-Disposition: attachment`, `nosniff`,
+  `no-store` and a `sandbox` content security policy; a failure after the first byte aborts the
+  connection. Only the requesting member can read a job, and only while their role still
+  permits the dataset. Each download is audited (`data.export_downloaded`, then
+  `data.export_download_finished` with `completed` true or false). Completion or failure of the
+  build is audited as `data.export_finished`.
+- A step that errors is retried; after five failures the job fails `error`. The monitor's
+  `exports` queue counts unfinished jobs and their oldest age, and parks a job after three
+  failed steps.
+- Recommended later upgrade: store files in S3 instead of Postgres. In DAD-infra
+  (`apps/dad-main/lib/services-stack.ts`) add a private, SSE-encrypted bucket with a one-day
+  lifecycle expiration, grant the projection worker's task role `grantReadWrite` and the API's
+  `grantRead`, and pass its name as an environment variable. The code change is local to
+  `exports_worker.go` (write chunks as multipart parts) and `ExportDownload.WriteTo`; the job
+  table, API and web are unchanged. Until then no AWS change is needed.
+
 At `/staff/content/wording`, content staff change badge titles, how-to-earn text, and
 streak-milestone notifications; an empty entry restores the default.
 
@@ -990,13 +1066,27 @@ month-end boundaries, and ambiguous responses. Local test doubles do not prove t
 provider behaviors. Physical QR scanning, assistive-technology checks, and viral-load
 acceptance also require explicit evidence.
 
+## Partner mail delivery
+
+A partner status message is queued once per event as an organisation-level intent. The
+messages worker first expands the oldest due intent into one delivery per accepted,
+enabled partner user in a single set-based statement, then sends one delivery per step.
+Each delivery has its own attempt count, lease and backoff: claiming it counts the
+attempt and holds a five-minute lease, a failed send retries on the donor-mail backoff,
+and after five attempts it is parked for the queue monitor. A crash mid-send therefore
+retries after the lease and still reaches the cap, one recipient's failure never
+resends to the others, and the Message-ID is stable per recipient (message id and
+recipient ordinal, never the address). A user disabled or not yet accepted by send time
+is skipped and recorded as `recipient_inactive`. Intents queued before deliveries existed
+are expanded the same way. Delivery rows are removed with their message or user.
+
 ## Queue alerts and incident response
 
 Run `./scripts/deploy.sh monitor [--max-age 10m]` (or `go run ./cmd/monitor` from
 `apps/donor-api` with the database environment loaded). It emits only aggregate JSON counts,
 parked counts, and oldest due age for Stripe, projections, financial mail (including
-partner messages), login mail, email changes, push notifications, deleted-account
-reversals, and subscriptions. It exits nonzero if any job is parked or a due item is
+partner messages and their per-recipient deliveries), login mail, email changes, push notifications, deleted-account
+reversals, staff exports, and subscriptions. It exits nonzero if any job is parked or a due item is
 older than five minutes; `--max-age 10m` changes the age threshold. Future scheduled sends
 are excluded. An ongoing subscription last synced before its billing period ended is due
 a sync one day after that end, when Stripe has renewed or ended it: one still due after

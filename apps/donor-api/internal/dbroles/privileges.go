@@ -53,14 +53,21 @@ var grants = map[string]map[Role]string{
 		ProjectionWorker: "SELECT, DELETE",
 		PushWorker:       "SELECT, UPDATE",
 	},
-	"donor_session_events": {API: "SELECT, INSERT"},
-	"donor_login_links":    {API: "SELECT, UPDATE", LoginEmailWorker: "INSERT", ProjectionWorker: "SELECT (id, expires_at), DELETE"},
+	"donor_session_events": {
+		API:              "SELECT, INSERT",
+		ProjectionWorker: "SELECT (id, donor_id, session_id, action, created_at)",
+	},
+	"donor_login_links": {API: "SELECT, UPDATE", LoginEmailWorker: "INSERT", ProjectionWorker: "SELECT (id, expires_at), DELETE"},
 	"donor_login_emails": {API: "SELECT, INSERT", StripeWorker: "SELECT, INSERT", LoginEmailWorker: "SELECT, UPDATE",
 		ProjectionWorker: "SELECT (id, completed_at), DELETE",
 		Monitor:          "SELECT (attempts, available_at, completed_at)", Rekey: "SELECT (id, encrypted_token), UPDATE (encrypted_token)"},
 	"donor_email_changes": {API: "SELECT, INSERT, UPDATE", EmailChangeWorker: "SELECT, UPDATE",
-		Monitor: "SELECT (attempts, available_at, sent_at, stage)", Rekey: "SELECT (id, encrypted_token), UPDATE (encrypted_token)"},
-	"donor_identity_events": {API: "SELECT, INSERT"},
+		ProjectionWorker: "SELECT (id, donor_id, old_email, new_email, stage, expires_at, created_at, completed_at)",
+		Monitor:          "SELECT (attempts, available_at, sent_at, stage)", Rekey: "SELECT (id, encrypted_token), UPDATE (encrypted_token)"},
+	"donor_identity_events": {
+		API:              "SELECT, INSERT",
+		ProjectionWorker: "SELECT (id, donor_id, email_change_id, action, created_at)",
+	},
 	"donor_preferences": {
 		API:              "SELECT, INSERT, UPDATE, DELETE",
 		StripeWorker:     "SELECT",
@@ -68,7 +75,12 @@ var grants = map[string]map[Role]string{
 		PushWorker:       "SELECT",
 		ProjectionWorker: "SELECT",
 	},
-	"donor_preference_events": {API: "SELECT, INSERT"},
+	"donor_preference_events": {
+		API: "SELECT, INSERT",
+		ProjectionWorker: "SELECT (id, donor_id, version, referral_emails, marketing_emails, push_referral_converted, push_streak_at_risk, " +
+			"push_streak_milestone, push_streak_lapsed, push_badge_earned, push_event_nearby, push_event_reminder, push_event_promoted, " +
+			"rankings_opted_out, network_visible, volunteer, consent_version, source, created_at)",
+	},
 
 	"donor_checkouts": {
 		API:              "SELECT, INSERT, UPDATE (journey_id)",
@@ -104,7 +116,13 @@ var grants = map[string]map[Role]string{
 		PushWorker:       "SELECT",
 		ReconcileJob:     "SELECT",
 	},
-	"donor_billing_observations": {API: "SELECT", StripeWorker: "SELECT, INSERT", ReconcileJob: "SELECT"},
+	"donor_billing_observations": {
+		API:          "SELECT",
+		StripeWorker: "SELECT, INSERT",
+		ReconcileJob: "SELECT",
+		ProjectionWorker: "SELECT (id, period_id, source_event_id, status, amount_minor, currency, billing_reason, occurred_at, " +
+			"event_created_at, recorded_at)",
+	},
 	"donor_retention_milestones": {
 		API:              "SELECT, INSERT, UPDATE",
 		StripeWorker:     "SELECT, INSERT, UPDATE",
@@ -137,9 +155,12 @@ var grants = map[string]map[Role]string{
 	"donor_subscription_leases":    {API: "SELECT, INSERT, UPDATE, DELETE"},
 	"donor_recurring_reservations": {API: "SELECT, INSERT, DELETE", StripeWorker: "SELECT, DELETE"},
 	"donor_amount_changes":         {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE", ProjectionWorker: "SELECT"},
-	"donor_cancellations":          {API: "SELECT, INSERT, UPDATE"},
-	"donor_payment_updates":        {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE"},
-	"donor_stripe_budgets":         {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, INSERT, UPDATE"},
+	"donor_cancellations": {
+		API:              "SELECT, INSERT, UPDATE",
+		ProjectionWorker: "SELECT (id, donor_id, attempt_id, confirmed_period_end, completed_at, created_at)",
+	},
+	"donor_payment_updates": {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE"},
+	"donor_stripe_budgets":  {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, INSERT, UPDATE"},
 
 	"donor_metric_projections": {
 		API:              "SELECT, INSERT, UPDATE",
@@ -190,13 +211,21 @@ var grants = map[string]map[Role]string{
 		ProjectionWorker: "SELECT, INSERT, DELETE",
 	},
 
-	"donor_staff":            {API: "SELECT, INSERT, UPDATE", StaffCLI: "SELECT, INSERT, UPDATE"},
+	"donor_staff": {
+		API:              "SELECT, INSERT, UPDATE",
+		StaffCLI:         "SELECT, INSERT, UPDATE",
+		ProjectionWorker: "SELECT (id, name, email, role, disabled, created_at)",
+	},
 	"donor_staff_passkeys":   {API: "SELECT, INSERT, UPDATE, DELETE", StaffCLI: "SELECT, DELETE"},
 	"donor_staff_ceremonies": {API: "SELECT, INSERT, DELETE"},
 	"donor_staff_invites":    {API: "SELECT, INSERT, UPDATE", StaffCLI: "SELECT, INSERT, UPDATE"},
 	"donor_staff_sessions":   {API: "SELECT, INSERT, UPDATE", StaffCLI: "SELECT, UPDATE"},
-	"donor_staff_audit":      {API: "SELECT, INSERT", StaffCLI: "INSERT"},
-	"donor_staff_actions":    {API: "SELECT, INSERT, UPDATE"},
+	"donor_staff_audit":      {API: "SELECT, INSERT", StaffCLI: "INSERT", ProjectionWorker: "SELECT, INSERT"},
+	"donor_staff_actions": {
+		API: "SELECT, INSERT, UPDATE",
+		ProjectionWorker: "SELECT (id, actor_id, donor_id, kind, target_id, amount_minor, period_end, reason, status, stripe_refund_id, " +
+			"completed_at, created_at)",
+	},
 	"donor_partner_signups": {
 		PushWorker:       "SELECT",
 		API:              "SELECT, INSERT, UPDATE",
@@ -229,12 +258,26 @@ var grants = map[string]map[Role]string{
 		MessageWorker:    "SELECT, INSERT, UPDATE",
 		Monitor:          "SELECT (attempts, available_at, completed_at)",
 	},
-	"donor_partner_employees":       {API: "SELECT, INSERT, UPDATE, DELETE", StripeWorker: "SELECT", ProjectionWorker: "SELECT"},
-	"donor_partner_teams":           {API: "SELECT, INSERT", ProjectionWorker: "SELECT"},
-	"donor_team_months":             {API: "SELECT", ProjectionWorker: "SELECT, INSERT, UPDATE"},
-	"donor_team_month_standings":    {API: "SELECT", ProjectionWorker: "SELECT, INSERT"},
-	"donor_partner_match_payments":  {API: "SELECT, INSERT"},
-	"donor_content_sources":         {API: "SELECT, INSERT", Rekey: "SELECT (id, encrypted_data), UPDATE (encrypted_data)"},
+	"donor_partner_message_deliveries": {
+		MessageWorker: "SELECT, INSERT, UPDATE",
+		Monitor:       "SELECT (attempts, available_at, completed_at)",
+	},
+	"donor_partner_employees":      {API: "SELECT, INSERT, UPDATE, DELETE", StripeWorker: "SELECT", ProjectionWorker: "SELECT"},
+	"donor_partner_teams":          {API: "SELECT, INSERT", ProjectionWorker: "SELECT"},
+	"donor_team_months":            {API: "SELECT", ProjectionWorker: "SELECT, INSERT, UPDATE"},
+	"donor_team_month_standings":   {API: "SELECT", ProjectionWorker: "SELECT, INSERT"},
+	"donor_partner_match_payments": {API: "SELECT, INSERT"},
+	"donor_content_sources": {
+		API:              "SELECT, INSERT",
+		ProjectionWorker: "SELECT (id, actor_id, name, sha256, created_at)",
+		Rekey:            "SELECT (id, encrypted_data), UPDATE (encrypted_data)",
+	},
+	"donor_export_jobs": {
+		API:              "SELECT, INSERT",
+		ProjectionWorker: "SELECT, UPDATE, DELETE",
+		Monitor:          "SELECT (state, requested_at, attempts, expires_at)",
+	},
+	"donor_export_chunks":           {API: "SELECT", ProjectionWorker: "SELECT, INSERT, DELETE"},
 	"donor_initiative_partners":     {API: "SELECT, INSERT, UPDATE, DELETE", ProjectionWorker: "SELECT"},
 	"donor_initiative_spend_drafts": {API: "SELECT, INSERT, UPDATE, DELETE"},
 	"donor_streak_resets":           {API: "SELECT, INSERT", StripeWorker: "SELECT", ProjectionWorker: "SELECT"},

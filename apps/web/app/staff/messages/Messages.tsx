@@ -7,9 +7,13 @@ import { api, type Schema, unconfirmedMessage } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
 export default function DeliveryHistory({ donor }: { donor: string }) {
-  const [offset, setOffset] = useState(0);
+  // Keyset paging: each entry is the cursor that opened a page, the first being none.
+  const [cursors, setCursors] = useState<string[]>([]);
+  const cursor = cursors.at(-1);
   const { resource, data, reload } = useApiResource<Schema<"MessagePage">>(
-    donor ? `/donor/staff/donors/${encodeURIComponent(donor)}/messages?offset=${offset}` : null,
+    donor
+      ? `/donor/staff/donors/${encodeURIComponent(donor)}/messages${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
+      : null,
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -102,13 +106,17 @@ export default function DeliveryHistory({ donor }: { donor: string }) {
           ) : (
             <p>No transactional messages recorded.</p>
           )}
-          {offset > 0 && (
-            <button type="button" className="secondary" onClick={() => setOffset(Math.max(0, offset - 50))}>
+          {cursors.length > 0 && (
+            <button type="button" className="secondary" onClick={() => setCursors(cursors.slice(0, -1))}>
               Newer messages
             </button>
           )}
-          {data.next_offset !== null && (
-            <button type="button" className="secondary" onClick={() => setOffset(data.next_offset ?? 0)}>
+          {data.next_cursor !== null && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setCursors([...cursors, data.next_cursor ?? ""])}
+            >
               Older messages
             </button>
           )}

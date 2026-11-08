@@ -7,7 +7,7 @@
    "name": "MIT",
    "identifier": "MIT"
   },
-  "description": "The DAD (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <access token>`. A request with Origin or cookies is a browser request whatever else it carries. Sign in by calling POST /donor/login, opening the emailed `/account/claim#token=\u2026` link in the app, and sending the fragment's token to POST /donor/claim as a native request, which returns a 15-minute access token and a rotating refresh token. Exchange the refresh token at POST /donor/refresh when the access token expires or a request answers 401; send one refresh at a time and keep only the newest tokens. Routes that admit the app list `native` in `x-clients`, and POST /donor/refresh, the push-device routes, POST /donor/me/company-touch, and POST /donor/me/recurring/checkout admit nothing else. The app may record referral and company-code link visits, keeping the returned token in place of the browser's cookie. Guest giving, partner applications, and every staff route are web-only.\n- **Partner portal** users are separate from donors (P-5). They sign in by calling POST /donor/partner/sign-in and opening the emailed `/partner/accept#token=\u2026` link, whose token POST /donor/partner/accept-invite exchanges for a 12-hour session: an HttpOnly cookie for a browser (`__Host-dad_partner_session` over HTTPS, otherwise `dad_partner_session`), or a bearer token for a native request, sent like the donor app's.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"\u2026\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `\u2026+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
+  "description": "The DAD (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <access token>`. A request with Origin or cookies is a browser request whatever else it carries. Sign in by calling POST /donor/login, opening the emailed `/account/claim#token=…` link in the app, and sending the fragment's token to POST /donor/claim as a native request, which returns a 15-minute access token and a rotating refresh token. Exchange the refresh token at POST /donor/refresh when the access token expires or a request answers 401; send one refresh at a time and keep only the newest tokens. Routes that admit the app list `native` in `x-clients`, and POST /donor/refresh, the push-device routes, POST /donor/me/company-touch, and POST /donor/me/recurring/checkout admit nothing else. The app may record referral and company-code link visits, keeping the returned token in place of the browser's cookie. Guest giving, partner applications, and every staff route are web-only.\n- **Partner portal** users are separate from donors (P-5). They sign in by calling POST /donor/partner/sign-in and opening the emailed `/partner/accept#token=…` link, whose token POST /donor/partner/accept-invite exchanges for a 12-hour session: an HttpOnly cookie for a browser (`__Host-dad_partner_session` over HTTPS, otherwise `dad_partner_session`), or a bearer token for a native request, sent like the donor app's.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"…\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `…+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
  },
  "servers": [
   {
@@ -598,7 +598,7 @@
    "post": {
     "operationId": "ingestAnalytics",
     "summary": "Record analytics events",
-    "description": "Ingests a batch of \u00a79 analytics events from any platform into the shared append-only stream. Authenticated-or-anonymous: a valid donor session attributes the events, otherwise they are recorded anonymously (events before sign-in are expected). The platform source is the native client's `X-DAD-Platform` header, or WEB for a browser. The whole batch is rejected (422) if any event has an unknown name or an invalid property payload. Batch size is capped at 100.",
+    "description": "Ingests a batch of §9 analytics events from any platform into the shared append-only stream. Authenticated-or-anonymous: a valid donor session attributes the events, otherwise they are recorded anonymously (events before sign-in are expected). The platform source is the native client's `X-DAD-Platform` header, or WEB for a browser. The whole batch is rejected (422) if any event has an unknown name or an invalid property payload. Batch size is capped at 100.",
     "tags": [
      "Public"
     ],
@@ -624,7 +624,7 @@
            "properties": {
             "name": {
              "type": "string",
-             "description": "A \u00a79 taxonomy event name.",
+             "description": "A §9 taxonomy event name.",
              "enum": [
               "app_opened",
               "role_selected",
@@ -741,7 +741,7 @@
    "post": {
     "operationId": "login",
     "summary": "Email a sign-in link",
-    "description": "503 `EMAIL_UNCONFIGURED` when the deployment has no email. Never reveals whether the address exists. The link (`/account/claim#token=\u2026`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim.",
+    "description": "503 `EMAIL_UNCONFIGURED` when the deployment has no email. Never reveals whether the address exists. The link (`/account/claim#token=…`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim.",
     "tags": [
      "Account"
     ],
@@ -3786,7 +3786,7 @@
       }
      },
      {
-      "$ref": "#/components/parameters/Offset"
+      "$ref": "#/components/parameters/Cursor"
      }
     ],
     "responses": {
@@ -3914,7 +3914,7 @@
       "description": "A malformed ID is 404, like an unknown one."
      },
      {
-      "$ref": "#/components/parameters/Offset"
+      "$ref": "#/components/parameters/Cursor"
      }
     ],
     "responses": {
@@ -3970,7 +3970,7 @@
       "description": "A malformed ID is 404, like an unknown one."
      },
      {
-      "$ref": "#/components/parameters/Offset"
+      "$ref": "#/components/parameters/Cursor"
      }
     ],
     "responses": {
@@ -4090,7 +4090,7 @@
     ],
     "parameters": [
      {
-      "$ref": "#/components/parameters/Offset"
+      "$ref": "#/components/parameters/Cursor"
      }
     ],
     "responses": {
@@ -4625,10 +4625,103 @@
     }
    }
   },
-  "/donor/staff/exports/{file}": {
+  "/donor/staff/exports/jobs": {
    "get": {
-    "operationId": "export",
-    "summary": "Download a dataset as CSV",
+    "operationId": "exportJobs",
+    "summary": "The staff member's recent exports",
+    "description": "Exports not yet expired, newest first.",
+    "tags": [
+     "Exports"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ExportJobs"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   },
+   "post": {
+    "operationId": "requestExport",
+    "summary": "Queue an export",
+    "description": "Builds the dataset in the background, so large datasets finish instead of aborting mid-download. Asking again for a dataset still being built answers with that job. At most three exports can be in progress per staff member.",
+    "tags": [
+     "Exports"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ExportRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ExportJob"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/staff/exports/jobs/{job_id}": {
+   "get": {
+    "operationId": "exportJob",
+    "summary": "An export's progress",
     "tags": [
      "Exports"
     ],
@@ -4639,19 +4732,70 @@
     ],
     "parameters": [
      {
-      "name": "file",
+      "name": "job_id",
       "in": "path",
       "required": true,
       "schema": {
        "type": "string",
-       "pattern": "^[a-z-]+\\.csv$"
+       "format": "uuid"
       },
-      "description": "A dataset name from GET /donor/staff/exports, plus `.csv`."
+      "description": "A malformed ID is 404, like an unknown one or one that belongs to another staff member."
      }
     ],
     "responses": {
      "200": {
-      "description": "Streamed CSV attachment. A failure after the first row aborts the connection rather than returning a truncated file.",
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ExportJob"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/staff/exports/jobs/{job_id}/file": {
+   "get": {
+    "operationId": "downloadExport",
+    "summary": "Download a finished export as CSV",
+    "description": "Only the staff member who requested the export may download it, and only while their role permits the dataset and before it expires (24 hours after it finishes). Each download is audited.",
+    "tags": [
+     "Exports"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "job_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "A malformed ID is 404, like an unknown one or one that belongs to another staff member."
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "CSV attachment, streamed from the stored file. A failure after the first byte aborts the connection rather than returning a truncated file.",
       "content": {
        "text/csv": {
         "schema": {
@@ -4668,6 +4812,9 @@
      },
      "404": {
       "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -7597,7 +7744,7 @@
       "$ref": "#/components/responses/Unavailable"
      }
     },
-    "description": "The link (`/partner/accept#token=\u2026`) comes from an approval, an invitation, or POST /donor/partner/sign-in. It is single-use: approval and invitation links expire after 7 days, requested links after 15 minutes. A browser receives an HttpOnly session cookie and `signed_in`; the app, sending a native request, receives the bearer `session` instead."
+    "description": "The link (`/partner/accept#token=…`) comes from an approval, an invitation, or POST /donor/partner/sign-in. It is single-use: approval and invitation links expire after 7 days, requested links after 15 minutes. A browser receives an HttpOnly session cookie and `signed_in`; the app, sending a native request, receives the bearer `session` instead."
    }
   },
   "/donor/partner/overview": {
@@ -7632,7 +7779,7 @@
           },
           "description": {
            "type": "string",
-           "description": "The organization's description, as its administrators wrote it (\u00a77.2)."
+           "description": "The organization's description, as its administrators wrote it (§7.2)."
           },
           "role": {
            "type": "string",
@@ -8539,10 +8686,18 @@
             ],
             "additionalProperties": false
            }
+          },
+          "next_cursor": {
+           "type": [
+            "string",
+            "null"
+           ],
+           "description": "Cursor of the next page, or null on the last page."
           }
          },
          "required": [
-          "applications"
+          "applications",
+          "next_cursor"
          ],
          "additionalProperties": false
         }
@@ -8555,10 +8710,18 @@
      "403": {
       "$ref": "#/components/responses/Forbidden"
      },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
-    }
+    },
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/Cursor"
+     }
+    ]
    }
   },
   "/donor/staff/partners/{appID}/approve": {
@@ -9443,7 +9606,7 @@
       "$ref": "#/components/responses/Unavailable"
      }
     },
-    "description": "Replaces the organization's name and description (\u00a77.2). Partner administrators only; viewers get 403. Both are trimmed; the name must be 1 to 200 characters and the description at most 4000."
+    "description": "Replaces the organization's name and description (§7.2). Partner administrators only; viewers get 403. Both are trimmed; the name must be 1 to 200 characters and the description at most 4000."
    }
   },
   "/donor/staff/partners/{partnerID}/match-status": {
@@ -11531,7 +11694,7 @@
    "post": {
     "operationId": "postDonorSignup",
     "summary": "/donor/signup",
-    "description": "Starts account creation by emailing a verification link; no session is issued here. Answers 200 `{\"sent\":true}` whether or not the address already has an account, so it never reveals which. 503 `EMAIL_UNCONFIGURED` when the deployment has no email. The link (`/account/claim#token=\u2026`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim, which takes the optional `device_name` and `platform` that label the resulting session.",
+    "description": "Starts account creation by emailing a verification link; no session is issued here. Answers 200 `{\"sent\":true}` whether or not the address already has an account, so it never reveals which. 503 `EMAIL_UNCONFIGURED` when the deployment has no email. The link (`/account/claim#token=…`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim, which takes the optional `device_name` and `platform` that label the resulting session.",
     "tags": [
      "Account"
     ],
@@ -11785,7 +11948,7 @@
   "/donor/staff/failed-payments": {
    "get": {
     "operationId": "failedPayments",
-    "summary": "Failed payments and accounts in grace (PRD \u00a78)",
+    "summary": "Failed payments and accounts in grace (PRD §8)",
     "tags": [
      "Staff donors"
     ],
@@ -11831,7 +11994,7 @@
   "/donor/staff/deletions": {
    "get": {
     "operationId": "accountDeletions",
-    "summary": "Completed account deletions (PRD \u00a78)",
+    "summary": "Completed account deletions (PRD §8)",
     "tags": [
      "Staff donors"
     ],
@@ -11950,7 +12113,7 @@
     "description": "Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows.",
     "schema": {
      "type": "string",
-     "maxLength": 200
+     "maxLength": 600
     }
    },
    "FailedPaymentState": {
@@ -12494,7 +12657,7 @@
      },
      "network_visible": {
       "type": "boolean",
-      "description": "When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). On by default: visibility is opt-out (\u00a710)."
+      "description": "When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). On by default: visibility is opt-out (§10)."
      },
      "volunteer": {
       "type": "boolean",
@@ -12658,7 +12821,7 @@
      },
      "label": {
       "type": "string",
-      "description": "A name the donor can recognize, safe to display as plain text: the device name the app reported, otherwise \u201ciOS device\u201d, \u201cAndroid device\u201d, or \u201cMobile device\u201d; every browser is \u201cWeb browser\u201d."
+      "description": "A name the donor can recognize, safe to display as plain text: the device name the app reported, otherwise “iOS device”, “Android device”, or “Mobile device”; every browser is “Web browser”."
      },
      "created_at": {
       "type": "string",
@@ -13476,19 +13639,17 @@
        "$ref": "#/components/schemas/DonorSummary"
       }
      },
-     "next_offset": {
+     "next_cursor": {
       "type": [
-       "integer",
+       "string",
        "null"
       ],
-      "format": "int64",
-      "description": "Offset of the next page, or null on the last page.",
-      "minimum": 0
+      "description": "Cursor of the next page, or null on the last page."
      }
     },
     "required": [
      "donors",
-     "next_offset"
+     "next_cursor"
     ],
     "additionalProperties": false
    },
@@ -13780,19 +13941,17 @@
        "$ref": "#/components/schemas/AuditEvent"
       }
      },
-     "next_offset": {
+     "next_cursor": {
       "type": [
-       "integer",
+       "string",
        "null"
       ],
-      "format": "int64",
-      "description": "Offset of the next page, or null on the last page.",
-      "minimum": 0
+      "description": "Cursor of the next page, or null on the last page."
      }
     },
     "required": [
      "events",
-     "next_offset"
+     "next_cursor"
     ],
     "additionalProperties": false
    },
@@ -13832,6 +13991,10 @@
      "available_at": {
       "type": "string",
       "format": "date-time"
+     },
+     "created_at": {
+      "type": "string",
+      "format": "date-time"
      }
     },
     "required": [
@@ -13841,7 +14004,8 @@
      "completed_at",
      "last_error",
      "suppressed_reason",
-     "available_at"
+     "available_at",
+     "created_at"
     ],
     "additionalProperties": false
    },
@@ -13854,19 +14018,17 @@
        "$ref": "#/components/schemas/StaffMessage"
       }
      },
-     "next_offset": {
+     "next_cursor": {
       "type": [
-       "integer",
+       "string",
        "null"
       ],
-      "format": "int64",
-      "description": "Offset of the next page, or null on the last page.",
-      "minimum": 0
+      "description": "Cursor of the next page, or null on the last page."
      }
     },
     "required": [
      "messages",
-     "next_offset"
+     "next_cursor"
     ],
     "additionalProperties": false
    },
@@ -13919,6 +14081,10 @@
        "null"
       ],
       "format": "date-time"
+     },
+     "created_at": {
+      "type": "string",
+      "format": "date-time"
      }
     },
     "required": [
@@ -13930,7 +14096,8 @@
      "period_end",
      "reason",
      "status",
-     "completed_at"
+     "completed_at",
+     "created_at"
     ],
     "additionalProperties": false
    },
@@ -13943,19 +14110,17 @@
        "$ref": "#/components/schemas/StaffAction"
       }
      },
-     "next_offset": {
+     "next_cursor": {
       "type": [
-       "integer",
+       "string",
        "null"
       ],
-      "format": "int64",
-      "description": "Offset of the next page, or null on the last page.",
-      "minimum": 0
+      "description": "Cursor of the next page, or null on the last page."
      }
     },
     "required": [
      "actions",
-     "next_offset"
+     "next_cursor"
     ],
     "additionalProperties": false
    },
@@ -14134,6 +14299,94 @@
     },
     "required": [
      "datasets"
+    ],
+    "additionalProperties": false
+   },
+   "ExportRequest": {
+    "type": "object",
+    "properties": {
+     "dataset": {
+      "type": "string",
+      "pattern": "^[a-z-]+$",
+      "description": "A name from GET /donor/staff/exports."
+     }
+    },
+    "required": [
+     "dataset"
+    ],
+    "additionalProperties": false
+   },
+   "ExportJob": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "dataset": {
+      "type": "string",
+      "pattern": "^[a-z-]+$"
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "queued",
+       "running",
+       "complete",
+       "failed"
+      ]
+     },
+     "failure": {
+      "type": "string",
+      "enum": [
+       "too_large",
+       "forbidden",
+       "error"
+      ],
+      "description": "Present when the export failed: it exceeded the 50 MB stored-size cap, its requester lost access, or it kept erroring."
+     },
+     "requested_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "completed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Present once the export finished or failed."
+     },
+     "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the file is purged."
+     },
+     "row_count": {
+      "type": "integer",
+      "format": "int64",
+      "description": "Rows written so far."
+     }
+    },
+    "required": [
+     "id",
+     "dataset",
+     "state",
+     "requested_at",
+     "expires_at",
+     "row_count"
+    ],
+    "additionalProperties": false
+   },
+   "ExportJobs": {
+    "type": "object",
+    "properties": {
+     "jobs": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/ExportJob"
+      }
+     }
+    },
+    "required": [
+     "jobs"
     ],
     "additionalProperties": false
    },
@@ -15695,7 +15948,7 @@
      },
      "in_rotation": {
       "type": "boolean",
-      "description": "Whether the daily rotation may show it once published and active (\u00a78 Content)."
+      "description": "Whether the daily rotation may show it once published and active (§8 Content)."
      },
      "updated_at": {
       "type": "string",
@@ -15874,7 +16127,7 @@
      },
      "in_rotation": {
       "type": "boolean",
-      "description": "Whether the daily rotation may show it once published and active (\u00a78 Content)."
+      "description": "Whether the daily rotation may show it once published and active (§8 Content)."
      },
      "updated_at": {
       "type": "string",

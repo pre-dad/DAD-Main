@@ -208,6 +208,10 @@ detail, event calendar and initiative detail routes, which allow 60 seconds of c
 Public content never includes donor data or private source files. Source documents use a
 dedicated encryption key and SHA-256 verification. CSV exports use field allowlists,
 permission checks, private cache headers, formula neutralization, and audit trails.
+Staff exports are built in the background and stored as 24-hour gzip files in Postgres; only
+the requesting staff member can download one, and only while their role permits the dataset.
+A download is a sandboxed, `no-store`, `nosniff` attachment and is audited, as are the request
+and the build's end.
 Do not publish exports or treat a source document's existence as proof of its accuracy.
 Referral touches store only a hash of the visitor token; touches that led to no
 attributed gift are deleted 13 months after capture.

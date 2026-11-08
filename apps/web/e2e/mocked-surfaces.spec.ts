@@ -158,14 +158,14 @@ async function mockStaffDonor(page: Page) {
           donors: [
             { id: "donor-1", email: "pat.donor@example.org", public_name: null, claimed: true, disabled: false },
           ],
-          next_offset: null,
+          next_cursor: null,
         },
       });
     if (path === "/donor/staff/donors/donor-1") return route.fulfill({ json: staffDetail });
     if (path === "/donor/staff/donors/donor-1/actions")
       return route.fulfill({
         json:
-          url.searchParams.get("offset") === "0"
+          url.searchParams.get("cursor") === null
             ? {
                 actions: [
                   {
@@ -180,9 +180,9 @@ async function mockStaffDonor(page: Page) {
                     completed_at: "2027-01-02T00:00:00Z",
                   },
                 ],
-                next_offset: 50,
+                next_cursor: "cursor-2",
               }
-            : { actions: [], next_offset: null },
+            : { actions: [], next_cursor: null },
       });
     return route.fulfill({ status: 404, json: { detail: "Not found" } });
   });
@@ -384,5 +384,102 @@ test("staff see the account-deletion record, empty and with a missing permission
   await page.reload();
   await expect(page.getByRole("main").getByRole("alert")).toContainText("require donors and money access");
   await expect(page.getByRole("link", { name: "Staff sign-in" })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+const staffActor = {
+  id: "staff-1",
+  email: "admin@example.org",
+  name: "Ada Admin",
+  role: "SUPER_ADMIN",
+  active: true,
+  disabled: false,
+  permissions: ["donor.read", "audit.read", "partner.manage"],
+};
+
+test("staff page the audit history by keyboard with a cursor and stay accessible", async ({ page }) => {
+  const errors = collectErrors(page);
+  const requests: string[] = [];
+  const event = (id: string) => ({
+    id,
+    actor_id: "staff-1",
+    action: `audit.${id}`,
+    target: "donors",
+    at: "2027-01-02T00:00:00Z",
+    details: {},
+  });
+  await page.route("**/api/donor/staff/me", (route) => route.fulfill({ json: staffActor }));
+  await page.route("**/api/donor/staff/audit*", (route) => {
+    const cursor = new URL(route.request().url()).searchParams.get("cursor");
+    requests.push(cursor ?? "");
+    return route.fulfill({
+      json: cursor
+        ? { events: [event("older")], next_cursor: null }
+        : { events: [event("newer")], next_cursor: "page-2" },
+    });
+  });
+  await page.goto(staffURL("/staff/audit"));
+  await expect(page.getByText("audit.newer")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Newer events" })).toHaveCount(0);
+  await expectAccessible(page);
+  await page.getByRole("button", { name: "Older events" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("audit.older")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Older events" })).toHaveCount(0);
+  await expectAccessible(page);
+  await page.getByRole("button", { name: "Newer events" }).click();
+  await expect(page.getByText("audit.newer")).toBeVisible();
+  expect(requests.filter((cursor, index) => cursor !== requests[index - 1])).toEqual(["", "page-2", ""]);
+  expect(errors).toEqual([]);
+});
+
+test("staff page donor search results and the pending partner applications by cursor", async ({ page }) => {
+  const errors = collectErrors(page);
+  const application = (id: string, organization: string) => ({
+    id,
+    organization,
+    website: "https://example.org",
+    type: "Corporate",
+    contact_name: "Dana",
+    title: "Head of Giving",
+    work_email: `${id}@example.org`,
+    phone: "+14155550123",
+    workforce_size: 500,
+    status: "PENDING",
+    decision_reason: "",
+    approved_partner_id: null,
+  });
+  await page.route("**/api/donor/staff/me", (route) => route.fulfill({ json: staffActor }));
+  await page.route("**/api/donor/staff/donors?*", (route) => {
+    const url = new URL(route.request().url());
+    const donor = (email: string) => ({ id: email, email, public_name: null, claimed: true, disabled: false });
+    return route.fulfill({
+      json: url.searchParams.get("cursor")
+        ? { donors: [donor("zed@example.org")], next_cursor: null }
+        : { donors: [donor("amy@example.org")], next_cursor: "after-amy" },
+    });
+  });
+  await page.route("**/api/donor/staff/partners/pending*", (route) =>
+    route.fulfill({
+      json: new URL(route.request().url()).searchParams.get("cursor")
+        ? { applications: [application("late", "Late Co")], next_cursor: null }
+        : { applications: [application("early", "Early Co")], next_cursor: "after-early" },
+    }),
+  );
+  await page.goto(staffURL("/staff?q=e"));
+  await expect(page.getByRole("link", { name: "amy@example.org" })).toBeVisible();
+  await page.getByRole("button", { name: "Next donor page" }).click();
+  await expect(page.getByRole("link", { name: "zed@example.org" })).toBeVisible();
+  await page.getByRole("button", { name: "Previous donor page" }).click();
+  await expect(page.getByRole("link", { name: "amy@example.org" })).toBeVisible();
+  await expectAccessible(page);
+
+  await page.goto(staffURL("/staff/partners/pending"));
+  await expect(page.getByRole("heading", { name: "Early Co" })).toBeVisible();
+  await page.getByRole("button", { name: "Later applications" }).click();
+  await expect(page.getByRole("heading", { name: "Late Co" })).toBeVisible();
+  await expectAccessible(page);
+  await page.getByRole("button", { name: "Earlier applications" }).click();
+  await expect(page.getByRole("heading", { name: "Early Co" })).toBeVisible();
   expect(errors).toEqual([]);
 });

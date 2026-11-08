@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
-import { addPasskeyDevice, administratorInvitation, staffURL } from "./staff";
+import { addPasskeyDevice, administratorInvitation, buildExports, staffURL } from "./staff";
 
 async function expectAccessible(page: Page) {
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
@@ -49,13 +49,22 @@ test("an invited administrator creates a passkey, then signs out and back in wit
   await expectAccessible(page);
   await page.getByRole("link", { name: "Staff back office" }).click();
 
-  // An audited download starts from the back office itself, never from another host.
+  // An export builds in the background; the audited download starts from the back office itself,
+  // never from another host.
   await page.getByRole("link", { name: "Exports and enrolment queue" }).click();
+  await page.getByRole("button", { name: "Request gifts CSV" }).click();
+  // Earlier runs leave their own exports listed; the newest is the first row after the header.
+  const newest = page.getByRole("row").nth(1);
+  await expect(newest.getByRole("cell", { name: "Waiting to start" })).toBeVisible();
+  await buildExports();
+  const fileLink = newest.getByRole("link", { name: "Download gifts CSV" });
+  await expect(fileLink).toBeVisible();
+  await expectAccessible(page);
+  const exportURL = staffURL((await fileLink.getAttribute("href")) ?? "");
   const download = page.waitForEvent("download");
-  await page.getByRole("link", { name: "Download gifts CSV" }).click();
+  await fileLink.click();
   expect((await download).suggestedFilename()).toBe("dad-gifts.csv");
   await page.goto("/");
-  const exportURL = staffURL("/api/donor/staff/exports/gifts.csv");
   const crossHost = page.waitForResponse(exportURL);
   await page.evaluate((url) => {
     window.location.href = url;

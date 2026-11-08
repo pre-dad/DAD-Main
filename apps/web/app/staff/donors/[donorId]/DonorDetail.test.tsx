@@ -71,7 +71,7 @@ it("shows the donor record with links scoped to the staff member's permissions",
   serve({
     "/donor/staff/donors/donor-1": reply(200, detail),
     "/donor/staff/me": reply(200, actor),
-    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [action("a1")], next_offset: null }),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [action("a1")], next_cursor: null }),
   });
   render(<DonorDetail donor="donor-1" />);
   expect(await screen.findByRole("heading", { level: 1, name: "donor@example.org" })).toBeVisible();
@@ -112,7 +112,7 @@ it("hides financial links from a role without those permissions", async () => {
   serve({
     "/donor/staff/donors/donor-1": reply(200, detail),
     "/donor/staff/me": reply(200, { ...actor, permissions: ["donor.read"] }),
-    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
   });
   render(<DonorDetail donor="donor-1" />);
   expect(await screen.findByText("No refunds or cancellations recorded.")).toBeVisible();
@@ -120,19 +120,19 @@ it("hides financial links from a role without those permissions", async () => {
   expect(screen.queryByRole("link", { name: "Cancel monthly giving" })).not.toBeInTheDocument();
 });
 
-it("pages through the action history by the offset the API returns", async () => {
+it("pages through the action history by the cursor the API returns", async () => {
   const fetch = serve({
     "/donor/staff/donors/donor-1": reply(200, detail),
     "/donor/staff/me": reply(200, actor),
-    "/donor/staff/donors/donor-1/actions?offset=0": reply(200, { actions: [action("a1")], next_offset: 50 }),
-    "/donor/staff/donors/donor-1/actions?offset=50": reply(200, { actions: [action("a51")], next_offset: null }),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [action("a1")], next_cursor: "cursor-2" }),
+    "/donor/staff/donors/donor-1/actions?cursor=cursor-2": reply(200, { actions: [action("a51")], next_cursor: null }),
   });
   render(<DonorDetail donor="donor-1" />);
   fireEvent.click(await screen.findByRole("button", { name: "Older actions" }));
-  expect(await screen.findByRole("button", { name: "Newest actions" })).toBeVisible();
+  expect(await screen.findByRole("button", { name: "Newer actions" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "Older actions" })).not.toBeInTheDocument();
-  expect(fetch).toHaveBeenCalledWith("/api/donor/staff/donors/donor-1/actions?offset=50", expect.anything());
-  fireEvent.click(screen.getByRole("button", { name: "Newest actions" }));
+  expect(fetch).toHaveBeenCalledWith("/api/donor/staff/donors/donor-1/actions?cursor=cursor-2", expect.anything());
+  fireEvent.click(screen.getByRole("button", { name: "Newer actions" }));
   expect(await screen.findByRole("button", { name: "Older actions" })).toBeVisible();
 });
 
@@ -141,7 +141,7 @@ it("requests the next page of gifts from the detail endpoint", async () => {
     "/donor/staff/donors/donor-1?gifts_offset=0&referrals_offset=0": reply(200, { ...detail, next_gifts_offset: 50 }),
     "/donor/staff/donors/donor-1?gifts_offset=50&referrals_offset=0": reply(200, detail),
     "/donor/staff/me": reply(200, actor),
-    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
   });
   render(<DonorDetail donor="donor-1" />);
   fireEvent.click(await screen.findByRole("button", { name: "Older gifts" }));
@@ -156,7 +156,7 @@ it("announces loading until the record arrives", async () => {
   serve({
     "/donor/staff/donors/donor-1": reply(200, detail),
     "/donor/staff/me": reply(200, actor),
-    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
   });
   render(<DonorDetail donor="donor-1" />);
   expect(screen.getAllByRole("status")[0]).toHaveTextContent("Loading donor record…");
@@ -204,7 +204,7 @@ it("shows refund adjustments and offers no refund for a fully refunded gift when
   serve({
     "/donor/staff/donors/donor-1": reply(200, { ...detail, gifts, claimed: false }),
     "/donor/staff/me": reply(200, actor),
-    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
   });
   render(<DonorDetail donor="donor-1" />);
   expect(await screen.findByText(/Guest \(unclaimed\)/)).toBeVisible();
@@ -223,7 +223,7 @@ it("offers cancellation only for a monthly gift that is still renewing", async (
       subscription: { ...detail.subscription, stops_at: "2027-02-01T00:00:00Z" },
     }),
     "/donor/staff/me": reply(200, actor),
-    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
   });
   const { unmount } = render(<DonorDetail donor="donor-1" />);
   expect(
@@ -234,7 +234,7 @@ it("offers cancellation only for a monthly gift that is still renewing", async (
   serve({
     "/donor/staff/donors/donor-1": reply(200, { ...detail, subscription: null }),
     "/donor/staff/me": reply(200, actor),
-    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
   });
   render(<DonorDetail donor="donor-1" />);
   expect(await screen.findByText("No active monthly gift.")).toBeVisible();
@@ -251,7 +251,7 @@ it("names Stripe statuses in words", async () => {
     serve({
       "/donor/staff/donors/donor-1": reply(200, { ...detail, subscription: { ...detail.subscription, status } }),
       "/donor/staff/me": reply(200, actor),
-      "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+      "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
     });
     const { unmount } = render(<DonorDetail donor="donor-1" />);
     expect(await screen.findByText(new RegExp(`/month · ${words} · Next renewal`))).toBeVisible();
@@ -263,7 +263,7 @@ it("keeps the repair confirmation visible after reloading the donor record", asy
   const fetch = serve({
     "/donor/staff/donors/donor-1": reply(200, detail),
     "/donor/staff/me": reply(200, { ...actor, permissions: [...actor.permissions, "donor.recompute"] }),
-    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
     "/donor/staff/donors/donor-1/recognition/recompute": reply(200, { recomputed: true }),
   });
   render(<DonorDetail donor="donor-1" />);

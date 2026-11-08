@@ -62,8 +62,8 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 		transport := &recordingMail{}
 		w := partnerMessageWorker(t, transport)
 		now := time.Now().UTC().Add(time.Second)
-		if worked, err := w.DeliverNext(ctx, now); err != nil || !worked {
-			t.Fatalf("%s: deliver: worked=%v err=%v", kind, worked, err)
+		if steps := drainPartnerMessages(t, w, now); steps != 3 {
+			t.Fatalf("%s: expected one fan-out and two sends, got %d steps", kind, steps)
 		}
 		// Fan-out: exactly the two accepted admins, never the pending or disabled.
 		if got := len(transport.messages); got != 2 {
@@ -79,8 +79,8 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 		}
 		// Idempotent: the intent is completed, so a second drain finds nothing
 		// and re-queuing the same key is a no-op.
-		if worked, err := w.DeliverNext(ctx, now.Add(time.Minute)); err != nil || worked {
-			t.Fatalf("%s: redelivered a completed intent worked=%v err=%v", kind, worked, err)
+		if steps := drainPartnerMessages(t, w, now.Add(time.Minute)); steps != 0 {
+			t.Fatalf("%s: redelivered a completed intent in %d steps", kind, steps)
 		}
 		queuePartnerIntent(t, partnerID, kind, key)
 		var pending int
@@ -99,7 +99,6 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 // Message-ID is stable, so a lost acknowledgement cannot send two different
 // emails.
 func TestPartnerMessageRetriesWithBackoffAfterDeliveryFailure(t *testing.T) {
-	ctx := context.Background()
 	pool := as(t, dbroles.API)
 	mustExec(t, database(t), "DELETE FROM donor_partner_messages")
 	partnerID := approvedPartner(t, pool, "Retry Org", "RETRY-"+mustNewID(t).String()[:8], 0, 0)
@@ -109,31 +108,22 @@ func TestPartnerMessageRetriesWithBackoffAfterDeliveryFailure(t *testing.T) {
 	transport := &recordingMail{failure: errors.New("connection reset")}
 	w := partnerMessageWorker(t, transport)
 	now := time.Now().UTC().Add(time.Second)
-	if worked, err := w.DeliverNext(ctx, now); err != nil || !worked {
-		t.Fatalf("first attempt: worked=%v err=%v", worked, err)
+	if steps := drainPartnerMessages(t, w, now); steps != 2 {
+		t.Fatalf("first attempt took %d steps, want a fan-out and a send", steps)
 	}
-	var attempts int32
-	var lastError string
-	var completed bool
-	state := func() {
-		t.Helper()
-		if err := pool.QueryRow(ctx, "SELECT attempts,coalesce(last_error,''),completed_at IS NOT NULL FROM donor_partner_messages WHERE dedup_key=$1",
-			key).Scan(&attempts, &lastError, &completed); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if state(); attempts != 1 || lastError != "DeliveryError" || completed {
+	attempts, lastError, completed := partnerDeliveryState(t, key)
+	if attempts != 1 || lastError != "DeliveryError" || completed {
 		t.Fatalf("after a failed send: attempts=%d error=%q completed=%v", attempts, lastError, completed)
 	}
 	transport.failure = nil
-	if worked, err := w.DeliverNext(ctx, now.Add(time.Minute)); err != nil || worked {
-		t.Fatalf("retried before its backoff: worked=%v err=%v", worked, err)
+	if steps := drainPartnerMessages(t, w, now.Add(time.Minute)); steps != 0 {
+		t.Fatalf("retried before its backoff in %d steps", steps)
 	}
-	if worked, err := w.DeliverNext(ctx, now.Add(3*time.Minute)); err != nil || !worked {
-		t.Fatalf("retry: worked=%v err=%v", worked, err)
+	if steps := drainPartnerMessages(t, w, now.Add(3*time.Minute)); steps != 1 {
+		t.Fatalf("retry took %d steps", steps)
 	}
-	if state(); !completed {
-		t.Fatal("a successful retry did not complete the intent")
+	if _, _, completed = partnerDeliveryState(t, key); !completed {
+		t.Fatal("a successful retry did not complete the delivery")
 	}
 	if len(transport.messages) != 2 || transport.messages[0] != transport.messages[1] {
 		t.Fatalf("retry changed the message: %+v", transport.messages)
@@ -151,8 +141,8 @@ func TestPartnerMessageSuppressedWithoutRecipients(t *testing.T) {
 	queuePartnerIntent(t, partnerID, "MONTHLY_REPORT", key)
 	transport := &recordingMail{}
 	w := partnerMessageWorker(t, transport)
-	if worked, err := w.DeliverNext(ctx, time.Now().UTC()); err != nil || !worked {
-		t.Fatalf("deliver: worked=%v err=%v", worked, err)
+	if steps := drainPartnerMessages(t, w, time.Now().UTC()); steps != 1 {
+		t.Fatalf("expected one fan-out step, got %d", steps)
 	}
 	if len(transport.messages) != 0 {
 		t.Fatalf("sent %d messages with no recipients", len(transport.messages))

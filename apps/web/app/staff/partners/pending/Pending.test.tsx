@@ -23,7 +23,7 @@ it("lists a pending application and approves it", async () => {
   const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith("/pending") && init?.method !== "POST") {
-      return Promise.resolve(Response.json({ applications: [application] }));
+      return Promise.resolve(Response.json({ applications: [application], next_cursor: null }));
     }
     return Promise.resolve(Response.json({ partner_id: "p1" }));
   });
@@ -33,4 +33,24 @@ it("lists a pending application and approves it", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Approve" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Approved Delta Inc"));
   expect(fetch.mock.calls.some(([u, i]) => String(u).includes("/app-1/approve") && i?.method === "POST")).toBe(true);
+});
+
+it("pages the approval queue past the first fifty by cursor", async () => {
+  const fetch = vi.fn((input: RequestInfo | URL) =>
+    Promise.resolve(
+      Response.json(
+        String(input).includes("cursor=c2")
+          ? { applications: [{ ...application, id: "app-51", organization: "Late Co" }], next_cursor: null }
+          : { applications: [application], next_cursor: "c2" },
+      ),
+    ),
+  );
+  vi.stubGlobal("fetch", fetch);
+  render(<Pending />);
+  fireEvent.click(await screen.findByRole("button", { name: "Later applications" }));
+  expect(await screen.findByRole("heading", { name: "Late Co" })).toBeVisible();
+  expect(fetch).toHaveBeenLastCalledWith("/api/donor/staff/partners/pending?cursor=c2", expect.anything());
+  expect(screen.queryByRole("button", { name: "Later applications" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Earlier applications" }));
+  expect(await screen.findByRole("heading", { name: "Delta Inc" })).toBeVisible();
 });

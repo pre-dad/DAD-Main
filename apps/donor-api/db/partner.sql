@@ -13,9 +13,9 @@ SELECT * FROM donor_partner_applications WHERE id=$1 FOR UPDATE;
 -- name: PendingPartnerApplications :many
 -- §8 Partnerships approval queue, oldest first.
 SELECT * FROM donor_partner_applications
-WHERE status='PENDING'
+WHERE status='PENDING' AND (created_at, id) > (sqlc.arg(cursor_at)::timestamptz, sqlc.arg(cursor_id)::uuid)
 ORDER BY created_at ASC, id
-LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
+LIMIT 51;
 
 -- name: DecidePartnerApplication :exec
 -- Records an approve/reject decision (status + decider + time + reason) and, on
@@ -232,22 +232,55 @@ ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
 -- name: RenderPartnerMessage :exec
 UPDATE donor_partner_messages SET subject=$2,body=$3 WHERE id=$1;
 
--- name: ClaimPartnerMessage :exec
-UPDATE donor_partner_messages SET available_at=$2 WHERE id=$1;
-
 -- name: CompletePartnerMessage :exec
 UPDATE donor_partner_messages SET completed_at=$2,suppressed_reason=$3 WHERE id=$1;
 
 -- name: FailPartnerMessage :exec
 UPDATE donor_partner_messages SET attempts=attempts+1,last_error=$2,available_at=$3 WHERE id=$1;
 
--- name: PartnerMessageRecipients :many
--- The org's users who can receive mail: accepted (completed first sign-in) and
--- not disabled. A pending invitee has their own invite email and is not yet a
--- recipient of status notices.
-SELECT email,name FROM donor_partner_users
-WHERE partner_id=$1 AND disabled=false AND accepted_at IS NOT NULL
-ORDER BY email;
+-- name: FanOutPartnerMessage :execrows
+-- Expands an intent into one delivery per recipient: the org's users who can
+-- receive mail, accepted (completed first sign-in) and not disabled. A pending
+-- invitee has their own invite email and is not yet a recipient of status
+-- notices. The ordinal numbers recipients for a stable Message-ID, and the
+-- unique recipient makes a repeat expansion add nothing.
+INSERT INTO donor_partner_message_deliveries (id,message_id,partner_user_id,ordinal,available_at)
+SELECT gen_random_uuid(),sqlc.arg(message_id),u.id,(row_number() OVER (ORDER BY u.email,u.id))::int-1,sqlc.arg(available_at)
+FROM donor_partner_users u
+WHERE u.partner_id=sqlc.arg(partner_id) AND u.disabled=false AND u.accepted_at IS NOT NULL
+ON CONFLICT (message_id,partner_user_id) DO NOTHING;
+
+-- name: FinishPartnerMessageFanOut :exec
+UPDATE donor_partner_messages SET fanned_out_at=$2,completed_at=$2 WHERE id=$1;
+
+-- name: NextPartnerDelivery :one
+-- Reserves the oldest due delivery for one send: the attempt is counted and the
+-- lease taken in the same statement, so a send that crashes the worker is still
+-- retried later and eventually parked.
+WITH next AS (
+    SELECT q.id FROM donor_partner_message_deliveries q
+    WHERE q.completed_at IS NULL AND q.attempts<5 AND q.available_at<=sqlc.arg(as_of)
+    ORDER BY q.available_at,q.id LIMIT 1 FOR UPDATE SKIP LOCKED
+), claimed AS (
+    UPDATE donor_partner_message_deliveries d
+    SET attempts=d.attempts+1,available_at=sqlc.arg(lease_until)
+    FROM next WHERE d.id=next.id
+    RETURNING d.id,d.message_id,d.partner_user_id,d.ordinal,d.attempts
+)
+SELECT c.id,c.message_id,c.ordinal,c.attempts,
+    m.subject,m.body,
+    u.email,u.disabled,(u.accepted_at IS NOT NULL)::boolean AS accepted,
+    (s.approved_at IS NOT NULL)::boolean AS partner_approved
+FROM claimed c
+JOIN donor_partner_messages m ON m.id=c.message_id
+JOIN donor_partner_users u ON u.id=c.partner_user_id
+JOIN donor_partner_signups s ON s.id=m.partner_id;
+
+-- name: CompletePartnerDelivery :exec
+UPDATE donor_partner_message_deliveries SET completed_at=$2,suppressed_reason=$3 WHERE id=$1;
+
+-- name: FailPartnerDelivery :exec
+UPDATE donor_partner_message_deliveries SET last_error=$2,available_at=$3 WHERE id=$1;
 
 -- name: PartnerForMessage :one
 SELECT id,organization,approved_at FROM donor_partner_signups WHERE id=$1;

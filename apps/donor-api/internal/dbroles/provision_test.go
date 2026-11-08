@@ -19,7 +19,7 @@ func TestProvisionRefusesTheOwnerAsALogin(t *testing.T) {
 	if err = tx.QueryRow(ctx, "SELECT current_user").Scan(&user); err != nil {
 		t.Fatal(err)
 	}
-	err = dbroles.Provision(ctx, tx, []dbroles.Login{{Role: dbroles.Rekey, User: user, Password: "0123456789abcdef", Limit: 2}})
+	err = dbroles.Provision(ctx, tx, []dbroles.Login{{Role: dbroles.Rekey, User: user, Password: "0123456789abcdef", Pool: 2}})
 	if err == nil || !strings.Contains(err.Error(), "DONOR_REKEY_DATABASE_URL names the schema owner") {
 		t.Fatalf("got %v", err)
 	}

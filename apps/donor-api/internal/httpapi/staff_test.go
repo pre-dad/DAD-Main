@@ -119,7 +119,7 @@ func TestStaffRoutesRefuseRequestsStartedOnAnotherHost(t *testing.T) {
 			}
 		}
 	}
-	for _, pattern := range []string{"GET /donor/staff/exports/{file}", "POST /donor/staff/sign-in/options"} {
+	for _, pattern := range []string{"GET /donor/staff/exports/jobs/{job_id}/file", "POST /donor/staff/sign-in/options"} {
 		for _, site := range []string{"same-origin", "none", ""} {
 			if code := send(pattern, site); code == http.StatusForbidden {
 				t.Errorf("%s with Sec-Fetch-Site %q refused", pattern, site)

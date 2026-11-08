@@ -151,6 +151,22 @@ type DonorEventReservation struct {
 	CheckedInAt pgtype.Timestamptz `json:"checked_in_at"`
 }
 
+type DonorExportJob struct {
+	ID          pgtype.UUID        `json:"id"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+	Dataset     string             `json:"dataset"`
+	State       string             `json:"state"`
+	Failure     pgtype.Text        `json:"failure"`
+	RequestedAt pgtype.Timestamptz `json:"requested_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+	Cursor      pgtype.UUID        `json:"cursor"`
+	RowCount    int64              `json:"row_count"`
+	ChunkCount  int32              `json:"chunk_count"`
+	StoredBytes int64              `json:"stored_bytes"`
+	Attempts    int32              `json:"attempts"`
+}
+
 type DonorGift struct {
 	DonorID               pgtype.UUID        `json:"donor_id"`
 	CheckoutID            pgtype.UUID        `json:"checkout_id"`
@@ -332,6 +348,7 @@ type DonorPartnerMessage struct {
 	Subject          pgtype.Text        `json:"subject"`
 	Body             pgtype.Text        `json:"body"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	FannedOutAt      pgtype.Timestamptz `json:"fanned_out_at"`
 }
 
 type DonorPartnerPushNotification struct {
