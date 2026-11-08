@@ -41,3 +41,14 @@ export async function administratorInvitation(email: string): Promise<string> {
   if (!link) throw new Error("The staff command printed no invitation");
   return link;
 }
+
+/**
+ * Runs one projections worker step, which builds any queued staff export, as the deployed
+ * projections worker would.
+ */
+export async function buildExports() {
+  await promisify(execFile)("go", ["run", "./cmd/worker", "--kind", "projections", "--once"], {
+    cwd: "../donor-api",
+    env: { ...process.env, DONOR_GO_WORKERS_ENABLED: "true", ...databaseAs("dad_worker_projections") },
+  });
+}

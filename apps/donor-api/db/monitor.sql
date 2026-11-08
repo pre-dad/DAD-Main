@@ -29,8 +29,12 @@ WITH queues AS (
  -- before then and still ongoing a day later has missed its sync.
  SELECT 'subscriptions',period_end+interval '1 day',false FROM donor_subscriptions
  WHERE status NOT IN ('canceled','incomplete_expired') AND observed_at<period_end
+UNION ALL
+ -- A staff export still being built; one that keeps failing is about to fail outright.
+ SELECT 'exports',requested_at,attempts>=3 FROM donor_export_jobs
+ WHERE state IN ('queued','running') AND expires_at>sqlc.arg(as_of)::timestamptz
 ), names AS (
- SELECT unnest(ARRAY['stripe','messages','login-email','push','reversals','email-changes','projections','subscriptions']) AS queue
+ SELECT unnest(ARRAY['stripe','messages','login-email','push','reversals','email-changes','projections','subscriptions','exports']) AS queue
 )
 SELECT n.queue,count(q.queue)::bigint AS due,
  count(q.queue) FILTER(WHERE q.parked)::bigint AS parked,

@@ -2,16 +2,13 @@ package store
 
 import (
 	"context"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"io"
 	"slices"
 	"strings"
 	"time"
 
 	"dad/donor-api/internal/store/queries"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -101,6 +98,32 @@ var exportDatasets = map[string]exportDataset{
 	"content-sources": {"donor_content_sources", "id actor_id name sha256 created_at", "content.publish"},
 }
 
+// exportAsOf names, per dataset, an insert-time timestamp column that is never
+// updated. A file excludes rows stamped after its request, which keeps it
+// consistent as of that moment without holding a snapshot. Datasets absent here
+// hold rows that change in place, so those read each row's latest state as the
+// worker reaches it.
+var exportAsOf = map[string]string{
+	"checkouts":            "created_at",
+	"donors":               "created_at",
+	"email-changes":        "created_at",
+	"identity-events":      "created_at",
+	"session-events":       "created_at",
+	"gifts":                "paid_at",
+	"refund-history":       "observed_at",
+	"billing-history":      "recorded_at",
+	"referral-corrections": "recorded_at",
+	"amount-changes":       "created_at",
+	"cancellations":        "created_at",
+	"consent-history":      "created_at",
+	"messages":             "created_at",
+	"staff-actions":        "created_at",
+	"staff":                "created_at",
+	"audit":                "created_at",
+	"partners":             "created_at",
+	"content-sources":      "created_at",
+}
+
 type ExportDatasets struct {
 	Datasets []string `json:"datasets"`
 }
@@ -151,113 +174,4 @@ func safeCSVCell(value any) (string, error) {
 		return "'" + text, nil
 	}
 	return text, nil
-}
-
-// Export streams dataset name as CSV to destination. Its start and its end,
-// complete or interrupted, are both audited.
-func (s *StaffService) Export(ctx context.Context, token, name string, destination io.Writer) (resultErr error) {
-	dataset, ok := exportDatasets[name]
-	if !ok {
-		return pgx.ErrNoRows
-	}
-	var actorID, exportID pgtype.UUID
-	_, err := staffRead(ctx, s, token, dataset.permission, func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
-		actorID = actor.ID
-		var err error
-		if exportID, err = NewID(); err != nil {
-			return struct{}{}, err
-		}
-		return struct{}{}, queries.New(tx).
-			InsertStaffAudit(ctx, queries.InsertStaffAuditParams{ID: exportID, ActorID: actor.ID, Action: "data.export_started", Target: name, Details: []byte("{}"), CreatedAt: timestamp(now)})
-	})
-	if err != nil {
-		return err
-	}
-	var count int64
-	completed := false
-	defer func() {
-		// Disconnection must still leave an incomplete-export audit record.
-		auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		now := time.Now().UTC()
-		err := auditStaff(
-			auditCtx,
-			queries.New(s.DB),
-			actorID,
-			"data.export_finished",
-			name,
-			map[string]any{"export_id": exportID.String(), "completed": completed, "row_count": count, "finished_at": now},
-			now,
-		)
-		if resultErr == nil && err != nil {
-			resultErr = err
-		}
-	}()
-	if _, err = requireStaff(ctx, queries.New(s.DB), token, dataset.permission, time.Now().UTC()); err != nil {
-		return err
-	}
-	fields := strings.Fields(dataset.fields)
-	writer := csv.NewWriter(destination)
-	writer.UseCRLF = true
-	if err = writer.Write(fields); err != nil {
-		return err
-	}
-	if dataset.table != "" {
-		if count, err = s.writeRows(ctx, writer, name, dataset.table, fields); err != nil {
-			return err
-		}
-	}
-	writer.Flush()
-	if err = writer.Error(); err != nil {
-		return err
-	}
-	completed = true
-	return nil
-}
-
-// writeRows writes every row of table from one snapshot, flushing as it goes
-// so a large export streams rather than buffers.
-func (s *StaffService) writeRows(ctx context.Context, writer *csv.Writer, name, table string, fields []string) (int64, error) {
-	// SQL identifiers come only from the fixed business-data allowlist above.
-	columns := make([]string, len(fields))
-	for i, field := range fields {
-		columns[i] = pgx.Identifier{field}.Sanitize()
-	}
-	query := "SELECT " + strings.Join(columns, ",") + " FROM " + pgx.Identifier{table}.Sanitize()
-	if name == "referrals" {
-		query += " WHERE referrer_id IS NOT NULL"
-	}
-	query += " ORDER BY id"
-	var count int64
-	err := pgx.BeginTxFunc(ctx, s.DB, readSnapshot, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, query)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			values, err := rows.Values()
-			if err != nil {
-				return err
-			}
-			cells := make([]string, len(values))
-			for i, value := range values {
-				if cells[i], err = safeCSVCell(value); err != nil {
-					return err
-				}
-			}
-			if err = writer.Write(cells); err != nil {
-				return err
-			}
-			count++
-			if count%500 == 0 {
-				writer.Flush()
-				if err = writer.Error(); err != nil {
-					return err
-				}
-			}
-		}
-		return rows.Err()
-	})
-	return count, err
 }

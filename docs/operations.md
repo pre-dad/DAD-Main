@@ -207,7 +207,7 @@ schema.
 |---|---|---|---|
 | `dad_api` | API | `DONOR_API_DATABASE_URL` | Reads every table for views and exports; writes donor, session, checkout, recurring-command, projection, staff, content, and webhook-inbox records; cannot change gifts or billing periods, and deletes only reservations, subscription leases, passkey ceremonies, and passkeys |
 | `dad_worker_stripe` | Stripe worker | `DONOR_WORKER_STRIPE_DATABASE_URL` | Processes the webhook inbox and writes gifts, billing periods and observations, refunds, subscriptions, card fingerprints, projections, and the mail and push queues; reads sessions only to find app devices; no staff or content records |
-| `dad_worker_projections` | Projection worker | `DONOR_WORKER_PROJECTIONS_DATABASE_URL` | Reads financial facts; writes projections and queues mail and push; deletes expired referral touches |
+| `dad_worker_projections` | Projection worker | `DONOR_WORKER_PROJECTIONS_DATABASE_URL` | Reads financial facts; writes projections and queues mail and push; deletes expired referral touches; builds staff CSV exports (reads only the exported columns of the export tables, appends audit rows, writes and purges export jobs and files) |
 | `dad_worker_login_email` | Login-email worker | `DONOR_WORKER_LOGIN_EMAIL_DATABASE_URL` | Sign-in email queue and the links it issues |
 | `dad_worker_email_changes` | Email-change worker | `DONOR_WORKER_EMAIL_CHANGES_DATABASE_URL` | Email-change proofs |
 | `dad_worker_messages` | Message worker | `DONOR_WORKER_MESSAGES_DATABASE_URL` | Financial mail queue; reads the facts a message renders |
@@ -854,6 +854,52 @@ The `billing-history` CSV contains verified failed and successful invoice observ
 See [analytics](analytics.md) for its coverage boundary and for timestamp, replay, and
 renewal-cohort rules.
 
+### Staff exports
+
+A staff export is built in the background, not inside the HTTP request, so a large dataset
+finishes instead of being cut off by the 30 s server write timeout. At `/staff/exports` a
+member with `data.export` (and, per dataset, `staff.manage`, `audit.read`, `partner.manage`
+or `content.publish`) requests a dataset, watches its progress, and downloads it.
+
+- `POST /donor/staff/exports/jobs` queues a job (migration 0089, `donor_export_jobs`) and
+  audits `data.export_started`. Asking again for a dataset still being built returns that job;
+  at most three jobs per member may be open. `GET /donor/staff/exports/jobs` lists the
+  member's unexpired jobs, `GET .../jobs/{job_id}` reports one, and
+  `GET .../jobs/{job_id}/file` downloads a finished one.
+- The projections worker builds jobs; no new service is needed. Each worker step claims the
+  oldest unfinished job (`FOR UPDATE SKIP LOCKED`), reads 5,000 rows by keyset (`id > cursor`),
+  gzips them as one member of `donor_export_chunks`, and moves the cursor in the same
+  transaction. A step that dies leaves nothing behind and the next one resumes at the same row,
+  so a restart repeats and loses no row. No export holds a snapshot or connection for longer
+  than one batch, and a step takes at most one batch of the worker's time per loop, so
+  projections are not starved. The worker rechecks that the requester is enabled and still
+  holds the dataset's permission on every step; otherwise the job fails `forbidden`.
+- Consistency: a dataset with an insert-time timestamp (`exportAsOf` in
+  `internal/store/exports.go`) excludes rows stamped after the request, so the file is as of
+  the request. Datasets whose rows change in place (refunds, billing periods, subscriptions,
+  preferences, referrals, streaks, referral touches) read each row as it stands when the cursor
+  reaches it, which can mix moments but never repeats or drops a row id. This replaces the old
+  single REPEATABLE READ snapshot, which pinned a connection and held back vacuum for the whole
+  download.
+- Storage: finished files are gzip chunks in Postgres, capped at 50 MB stored (a larger job
+  fails `too_large` and discards its chunks) and kept 24 hours after completion. The
+  projections worker purges expired jobs and chunks every ten minutes. Download streams the
+  chunks one at a time, uncompressed, with `Content-Disposition: attachment`, `nosniff`,
+  `no-store` and a `sandbox` content security policy; a failure after the first byte aborts the
+  connection. Only the requesting member can read a job, and only while their role still
+  permits the dataset. Each download is audited (`data.export_downloaded`, then
+  `data.export_download_finished` with `completed` true or false). Completion or failure of the
+  build is audited as `data.export_finished`.
+- A step that errors is retried; after five failures the job fails `error`. The monitor's
+  `exports` queue counts unfinished jobs and their oldest age, and parks a job after three
+  failed steps.
+- Recommended later upgrade: store files in S3 instead of Postgres. In DAD-infra
+  (`apps/dad-main/lib/services-stack.ts`) add a private, SSE-encrypted bucket with a one-day
+  lifecycle expiration, grant the projection worker's task role `grantReadWrite` and the API's
+  `grantRead`, and pass its name as an environment variable. The code change is local to
+  `exports_worker.go` (write chunks as multipart parts) and `ExportDownload.WriteTo`; the job
+  table, API and web are unchanged. Until then no AWS change is needed.
+
 At `/staff/content/wording`, content staff change badge titles, how-to-earn text, and
 streak-milestone notifications; an empty entry restores the default.
 
@@ -1040,7 +1086,7 @@ Run `./scripts/deploy.sh monitor [--max-age 10m]` (or `go run ./cmd/monitor` fro
 `apps/donor-api` with the database environment loaded). It emits only aggregate JSON counts,
 parked counts, and oldest due age for Stripe, projections, financial mail (including
 partner messages and their per-recipient deliveries), login mail, email changes, push notifications, deleted-account
-reversals, and subscriptions. It exits nonzero if any job is parked or a due item is
+reversals, staff exports, and subscriptions. It exits nonzero if any job is parked or a due item is
 older than five minutes; `--max-age 10m` changes the age threshold. Future scheduled sends
 are excluded. An ongoing subscription last synced before its billing period ended is due
 a sync one day after that end, when Stripe has renewed or ended it: one still due after

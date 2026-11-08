@@ -7,8 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
 	"dad/donor-api/internal/dbroles"
 	"dad/donor-api/internal/dbroles/dbrolestest"
+	"dad/donor-api/internal/store"
 )
 
 func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
@@ -96,5 +99,54 @@ func TestRunRefusesTheSchemaOwner(t *testing.T) {
 	env[dbroles.AllowOwnerVariable] = "true"
 	if err = run(context.Background(), []string{"--kind=projections", "--once"}, func(name string) string { return env[name] }); err != nil {
 		t.Fatalf("owner allowed: %v", err)
+	}
+}
+
+// A projections step builds a queued staff export, so exports need no worker
+// of their own.
+func TestProjectionsWorkerBuildsQueuedExports(t *testing.T) {
+	ctx := context.Background()
+	owner, err := pgx.Connect(ctx, os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = owner.Close(ctx) })
+	staff, err := store.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := store.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(ctx, "INSERT INTO donor_staff(id,email,name,role) VALUES($1,$1::uuid::text||'@example.org','Export test','SUPER_ADMIN')", staff); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for _, statement := range []string{
+			"DELETE FROM donor_export_jobs WHERE actor_id=$1", "DELETE FROM donor_staff_audit WHERE actor_id=$1", "DELETE FROM donor_staff WHERE id=$1",
+		} {
+			if _, err := owner.Exec(ctx, statement, staff); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	if _, err = owner.Exec(ctx, "INSERT INTO donor_export_jobs(id,actor_id,dataset,requested_at,expires_at) VALUES($1,$2,'staff',now(),now()+interval '1 day')", job, staff); err != nil {
+		t.Fatal(err)
+	}
+	role := dbroles.ProjectionWorker
+	env := map[string]string{
+		"DONOR_GO_WORKERS_ENABLED": "true",
+		role.Variable():            dbrolestest.URL(t, role),
+		dbroles.AllowOwnerVariable: "true",
+	}
+	if err = run(ctx, []string{"--kind=projections", "--once"}, func(name string) string { return env[name] }); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	var rows int
+	if err = owner.QueryRow(ctx, "SELECT state,row_count FROM donor_export_jobs WHERE id=$1", job).Scan(&state, &rows); err != nil ||
+		state != "complete" || rows < 1 {
+		t.Fatalf("export %s with %d rows: %v", state, rows, err)
 	}
 }

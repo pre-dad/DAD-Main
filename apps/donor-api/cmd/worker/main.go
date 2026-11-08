@@ -139,12 +139,16 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 		monthlyPartners := store.PartnerMonthlyService{DB: pool}
 		nearby := store.EventAlertService{DB: pool}
 		teamMonths := store.TeamMonthService{DB: pool}
+		exports := &store.ExportWorker{DB: pool}
 		return func(ctx context.Context) (bool, error) {
 			now := time.Now().UTC()
 			purged, err := retention.PurgeNext(ctx, now)
 			if err != nil {
 				return false, err
 			}
+			// Staff exports share this worker (no extra service to deploy): one
+			// bounded batch per step, so projections are never starved.
+			purged = exports.RunNext(ctx, now) || purged
 			processed, err := store.CatchUpProjections(ctx, pool, func() time.Time { return time.Now().UTC() }, store.CatchUpSlice)
 			if err != nil {
 				return purged || processed > 0, err
