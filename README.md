@@ -219,6 +219,7 @@ enables workers or deletes database volumes implicitly. Test-only readiness is n
 - `contracts/mobile`: the generated mobile-foundation bundle the native iOS and Android clients build against, checked by `make check-mobile`.
 - `deploy/nginx`: the production ingress configuration.
 - `scripts`: deployment, backup, restore verification, and ingress checks.
+- AWS infrastructure (CDK) lives in the separate [DAD-infra](https://github.com/pre-dad/DAD-infra) repository; see [AWS deployment](docs/aws-deployment.md).
 - `docs`: product rules, architecture, operations, and security guidance.
 
 [Contributing](CONTRIBUTING.md) · [Architecture](docs/architecture.md) · [MIT license](LICENSE)
