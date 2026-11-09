@@ -98,6 +98,7 @@ func checkoutFixture(t *testing.T) (CheckoutService, payments.CheckoutRequest, p
 		Gateway: gateway,
 		Origin:  "http://localhost:3000",
 	}, payments.CheckoutRequest{
+		Session:   sessionFor(t, pool, id),
 		RequestID: testID(t),
 		Email:     email,
 		Amount:    3000,
@@ -332,5 +333,63 @@ func TestConcurrentRetrySharesOneDraftAndProviderKey(t *testing.T) {
 		if call.key != gateway.calls[0].key || !bytes.Equal(call.params, gateway.calls[0].params) {
 			t.Fatal("concurrent retry changed Stripe request")
 		}
+	}
+}
+
+func TestCheckoutRequiresTheVerifiedSessionOwnersEmail(t *testing.T) {
+	for _, kind := range []string{"anonymous", "invalid", "expired", "revoked", "unclaimed", "disabled", "other donor", "unknown email", "staff email"} {
+		t.Run(kind, func(t *testing.T) {
+			service, request, id, gateway := checkoutFixture(t)
+			pool := database(t)
+			switch kind {
+			case "anonymous":
+				request.Session = ""
+			case "invalid":
+				request.Session = "invalid-session"
+			case "expired":
+				mustExec(t, pool, "UPDATE donor_sessions SET expires_at=now()-interval '1 minute' WHERE donor_id=$1", id)
+			case "revoked":
+				mustExec(t, pool, "UPDATE donor_sessions SET revoked_at=now() WHERE donor_id=$1", id)
+			case "unclaimed":
+				mustExec(t, pool, "UPDATE donors SET claimed_at=NULL WHERE id=$1", id)
+			case "disabled":
+				mustExec(t, pool, "UPDATE donors SET disabled=true WHERE id=$1", id)
+			case "other donor":
+				_, request.Email = donor(t, pool)
+			case "unknown email":
+				request.Email = testID(t).String() + "@example.org"
+			case "staff email":
+				request.Email = "staff@example.org"
+			}
+			if _, err := service.BeginCheckout(context.Background(), request); !errors.Is(err, ErrDenied) {
+				t.Fatalf("%s checkout: %v; want ErrDenied", kind, err)
+			}
+			var count int
+			if err := pool.QueryRow(context.Background(), "SELECT count(*) FROM donor_checkouts WHERE donor_id=$1", id).Scan(&count); err != nil ||
+				count != 0 ||
+				len(gateway.calls) != 0 {
+				t.Fatalf("unauthorized checkout left %d rows and %d provider calls: %v", count, len(gateway.calls), err)
+			}
+		})
+	}
+}
+
+func TestCheckoutRetryBelongsToTheDonorNotAReusedEmail(t *testing.T) {
+	service, request, id, gateway := checkoutFixture(t)
+	ctx := context.Background()
+	if _, err := service.BeginCheckout(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	pool := database(t)
+	other, _ := donor(t, pool)
+	token := sessionFor(t, pool, other)
+	mustExec(t, pool, "UPDATE donors SET email=$1 WHERE id=$2", testID(t).String()+"@example.org", id)
+	mustExec(t, pool, "UPDATE donors SET email=$1 WHERE id=$2", request.Email, other)
+	request.Session = token
+	if _, err := service.BeginCheckout(ctx, request); !errors.Is(err, ErrDenied) {
+		t.Fatalf("a new owner of an address retrieved the previous donor's checkout: %v", err)
+	}
+	if len(gateway.calls) != 1 {
+		t.Fatal("unauthorized retry reached the processor")
 	}
 }

@@ -27,6 +27,12 @@ test("a donor signs in from their email link, names themselves, gets a referral 
   await expect(page).toHaveURL(/\/account\/dashboard$/);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
+  await page.goto("/donate");
+  await expect(page.getByRole("button", { name: /^Continue to secure checkout/ })).toBeEnabled();
+  await expect(page.getByLabel("Email")).toHaveAttribute("readonly", "");
+  const profile = await (await page.request.get("/api/donor/me/profile")).json();
+  await expect(page.getByLabel("Email")).toHaveValue(profile.email);
+
   await page.goto("/account/share");
   await expect(page.getByLabel("Your referral link")).toHaveCount(0);
   await page.getByLabel("Public first name or nickname").fill("Robin");
@@ -39,6 +45,9 @@ test("a donor signs in from their email link, names themselves, gets a referral 
   await expect(page.getByRole("heading", { name: "Passkeys" })).toHaveCount(0);
   await page.getByRole("button", { name: "Sign out of this device" }).click();
   await expect(page.getByText(/You’re signed out/)).toBeVisible();
+  await page.goto("/donate");
+  await expect(page.getByRole("button", { name: "Email me a sign-in link", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Continue to secure checkout/ })).toHaveCount(0);
   await page.goto("/account/share");
   await expect(page.getByLabel("Public first name or nickname")).toHaveCount(0);
   await expect(page.getByText(/You’re signed out/)).toBeVisible();

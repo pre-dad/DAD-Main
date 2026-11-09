@@ -5,7 +5,7 @@ import { Announcer } from "@/components/donor/Announcer";
 import { FoundingLine } from "@/components/donor/FoundingLine";
 import { GiftFraming } from "@/components/donor/GiftFraming";
 import { Page } from "@/components/donor/Page";
-import { api, failureMessage, type RequestBody, type Schema } from "@/lib/api";
+import { ApiError, api, failureMessage, type RequestBody, type Schema } from "@/lib/api";
 import { dailyGiftMinor, MAX_DAILY_DOLLARS, monthlyFraming } from "@/lib/money";
 
 const presets = [1, 3, 5];
@@ -22,8 +22,8 @@ function remembered(): Choice | null {
   }
 }
 
-export default function Donate() {
-  const [email, setEmail] = useState("");
+export default function Donate({ verifiedEmail, onSignedOut }: { verifiedEmail: string; onSignedOut?: () => void }) {
+  const email = verifiedEmail;
   const [name, setName] = useState("");
   const [zip, setZip] = useState("");
   const [city, setCity] = useState("");
@@ -43,9 +43,8 @@ export default function Donate() {
 
   useEffect(() => {
     const choice = remembered();
-    if (choice) {
+    if (choice && choice.email === verifiedEmail) {
       setAmount(choice.amount);
-      setEmail(choice.email);
       setName(choice.name ?? "");
       setZip(choice.zip ?? "");
       setCity(choice.city ?? "");
@@ -57,7 +56,7 @@ export default function Donate() {
     };
     window.addEventListener("pageshow", reopen);
     return () => window.removeEventListener("pageshow", reopen);
-  }, []);
+  }, [verifiedEmail]);
 
   // Moves focus only after the donor asks for "Other"; a restored amount must not steal it.
   useEffect(() => {
@@ -107,6 +106,7 @@ export default function Donate() {
       });
       destination = new URL(result.url);
     } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 401) onSignedOut?.();
       setError(failureMessage(cause, "Checkout could not be opened. Please retry."));
       setBusy(false);
       return;
@@ -128,7 +128,7 @@ export default function Donate() {
   // would show one frequency while React state holds the other.
   return (
     <Page eyebrow="Give" title="Join the beginning">
-      <p className="lead">A small monthly gift. About a minute. No account needed.</p>
+      <p className="lead">A small monthly gift, securely linked to your verified donor account.</p>
       <form className="giveForm" onSubmit={submit} autoComplete="off">
         <fieldset disabled={busy}>
           <legend>1 · Your daily gift</legend>
@@ -203,11 +203,11 @@ export default function Donate() {
               value={email}
               disabled={busy}
               aria-describedby="donate-email-hint"
-              onChange={(event) => edit(() => setEmail(event.target.value))}
+              readOnly
             />
           </label>
           <p id="donate-email-hint" className="note fieldHint">
-            We’ll also send a one-tap link to claim your account.
+            Your verified account email receives the receipt. Change it in your profile.
           </p>
           <label>
             Full name

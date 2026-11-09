@@ -25,7 +25,7 @@ func (s publicSite) irlReferral(code string) string { return s.referral(code) + 
 
 // ValidReturnPath reports whether a sign-in link may return a donor to next.
 func ValidReturnPath(next string) bool {
-	return next == "/account/payment-method" || next == "/account/dashboard"
+	return next == "/donate" || next == "/account/payment-method" || next == "/account/dashboard"
 }
 
 // claim is a sign-in link, which returns the donor to next if it is set.

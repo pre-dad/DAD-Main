@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { launchDateLabel } from "@/lib/launch";
-import Donate from "./Donate";
+import VerifiedDonation from "./VerifiedDonation";
 
 export const metadata: Metadata = {
   title: "Give",
@@ -8,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function DonatePage() {
-  return <Donate />;
+  return <VerifiedDonation />;
 }

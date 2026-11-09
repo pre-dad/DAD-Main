@@ -134,7 +134,7 @@ func TestRateLimiterBoundsMemoryWithoutLockingOutNewClients(t *testing.T) {
 func TestRejectedRequestsDoNotReachHandlers(t *testing.T) {
 	stub := &checkoutStub{}
 	server := NewServer("", Services{Checkout: stub})
-	for range visitorLimit.limit + 1 {
+	for range accountLimit.limit + 1 {
 		server.Handler.ServeHTTP(httptest.NewRecorder(), checkoutRequest(`{"email":"donor@example.org","amount_minor":3000}`))
 	}
 	response := httptest.NewRecorder()
@@ -142,7 +142,7 @@ func TestRejectedRequestsDoNotReachHandlers(t *testing.T) {
 	if response.Code != http.StatusTooManyRequests || response.Header().Get("Retry-After") == "" {
 		t.Fatalf("got %d with Retry-After %q", response.Code, response.Header().Get("Retry-After"))
 	}
-	if stub.calls != visitorLimit.limit {
-		t.Fatalf("checkout ran %d times, want %d", stub.calls, visitorLimit.limit)
+	if stub.calls != accountLimit.limit {
+		t.Fatalf("checkout ran %d times, want %d", stub.calls, accountLimit.limit)
 	}
 }

@@ -53,6 +53,7 @@ func (s *checkoutStub) BeginNativeCheckout(
 
 func checkoutRequest(body string) *http.Request {
 	r := httptest.NewRequest("POST", "/donor/checkouts", strings.NewReader(body))
+	r.AddCookie(&http.Cookie{Name: donorCookie, Value: "verified-donor-session"})
 	r.Header.Set("Origin", "http://localhost:3000")
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Idempotency-Key", "8f4f52bb-99f6-490e-8313-5156cc4f8b45")
@@ -102,12 +103,15 @@ func TestCheckoutRejectsInvalidRequestsBeforeTheProcessor(t *testing.T) {
 	}
 }
 
-func TestGuestCheckoutCarriesReferralAndDefaultsToMonthly(t *testing.T) {
+func TestSignedInCheckoutCarriesReferralAndDefaultsToMonthly(t *testing.T) {
 	stub := &checkoutStub{}
 	r := checkoutRequest(`{"email":"donor@example.org","amount_minor":3000}`)
 	r.AddCookie(&http.Cookie{Name: "dad_referral", Value: "visitor"})
 	response := httptest.NewRecorder()
 	NewServer("", Services{Checkout: stub}).Handler.ServeHTTP(response, r)
+	if stub.request.Session != "verified-donor-session" {
+		t.Fatal("checkout did not carry the authenticated session")
+	}
 	if response.Code != 201 || stub.request.Frequency != "MONTHLY" || stub.request.Visitor == nil || *stub.request.Visitor != "visitor" {
 		t.Fatalf("got %d %+v, want 201 with a monthly request carrying the referral visitor", response.Code, stub.request)
 	}
@@ -130,7 +134,7 @@ func TestCheckoutErrorsArePrivate(t *testing.T) {
 	for _, tc := range []struct {
 		err    error
 		status int
-	}{{payments.ErrCheckoutConflict, 409}, {payments.ErrCheckoutThrottled, 429}, {payments.ErrCheckoutInput, 422}, {store.ErrDenied, 403}, {errors.New("private processor details"), 503}} {
+	}{{payments.ErrCheckoutConflict, 409}, {payments.ErrCheckoutThrottled, 429}, {payments.ErrCheckoutInput, 422}, {store.ErrDenied, 401}, {errors.New("private processor details"), 503}} {
 		server := NewServer("", Services{Checkout: &checkoutStub{err: tc.err}})
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, checkoutRequest(`{"email":"donor@example.org","amount_minor":3000}`))
@@ -206,6 +210,7 @@ func TestNativeRecurringCheckoutRefusals(t *testing.T) {
 		{"browser request", func(r *http.Request) {
 			r.Header.Del("X-DAD-Client")
 			r.Header.Del("Authorization")
+			r.AddCookie(&http.Cookie{Name: donorCookie, Value: "verified-donor-session"})
 			r.Header.Set("Origin", "http://localhost:3000")
 			r.AddCookie(&http.Cookie{Name: donorCookie, Value: appSession})
 		}, `{"amount_minor":3000}`, nil, 403},
@@ -244,5 +249,18 @@ func TestNativeRecurringCheckoutIsRateLimited(t *testing.T) {
 	}
 	if !limited {
 		t.Fatal("the account budget did not apply to native checkout")
+	}
+}
+
+func TestCheckoutRequiresSignInBeforeLookingAtEmail(t *testing.T) {
+	for _, email := range []string{"new@example.org", "donor@example.org", "staff@example.org"} {
+		stub := &checkoutStub{}
+		r := checkoutRequest(`{"email":"` + email + `","amount_minor":3000}`)
+		r.Header.Del("Cookie")
+		response := httptest.NewRecorder()
+		NewServer("", Services{Checkout: stub}).Handler.ServeHTTP(response, r)
+		if response.Code != http.StatusUnauthorized || stub.calls != 0 {
+			t.Fatalf("anonymous checkout got %d after %d calls", response.Code, stub.calls)
+		}
 	}
 }

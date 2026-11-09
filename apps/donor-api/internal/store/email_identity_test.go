@@ -53,7 +53,9 @@ func TestOneEmailOneRole(t *testing.T) {
 		request.RequestID = testID(t)
 		request.Email = tc.email
 		_, err := checkout.BeginCheckout(ctx, request)
-		refused("giving as a "+tc.role, err, tc.role)
+		if !errors.Is(err, ErrDenied) {
+			t.Fatalf("giving as another identity: %v; want ErrDenied", err)
+		}
 	}
 	var donors int
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donors WHERE email IN ($1, $2)", partnerEmail, staffEmail).Scan(&donors); err != nil ||

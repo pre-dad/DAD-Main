@@ -11,7 +11,11 @@ import { useFocusOnSuccess } from "@/lib/useStepFocus";
 
 // Where an emailed link may send a donor once signed in (the API's own list). Anything else
 // is ignored, so a crafted link cannot redirect anywhere else.
-const destinations = new Set<string>(["/account/dashboard", "/account/payment-method"] satisfies SignInReturn[]);
+const destinations = new Set<string>([
+  "/account/dashboard",
+  "/account/payment-method",
+  "/donate",
+] satisfies SignInReturn[]);
 
 export default function Claim() {
   const { token, next, clear } = useHashToken();

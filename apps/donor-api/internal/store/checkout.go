@@ -30,8 +30,8 @@ type CheckoutService struct {
 	FoundingClaims FoundingClaimKey
 }
 
-// BeginCheckout returns a hosted checkout for a guest gift. The attempt and
-// its frozen processor parameters commit before the processor is called, and
+// BeginCheckout returns a hosted checkout for the verified, signed-in donor.
+// Frozen processor parameters commit before the processor is called, and
 // a retry with the same request ID returns the same session.
 func (s CheckoutService) BeginCheckout(ctx context.Context, request payments.CheckoutRequest) (payments.CheckoutResult, error) {
 	hosted, err := s.begin(ctx, request)
@@ -42,7 +42,7 @@ func (s CheckoutService) BeginCheckout(ctx context.Context, request payments.Che
 }
 
 // BeginNativeCheckout opens a hosted monthly checkout for the signed-in donor
-// behind token, whose account supplies the email the web flow asks for. It is
+// behind token, whose account supplies its verified email. It is
 // the same checkout the website begins, so the processor's webhooks complete
 // the gift the same way; only the pages it returns to differ. A referral
 // visitor token the app captured credits its referrer as the web's cookie does.
@@ -159,7 +159,7 @@ func (s CheckoutService) begin(ctx context.Context, request payments.CheckoutReq
 	return hosted, nil
 }
 
-// prepare records the guest donor, their checkout with any valid referral
+// prepare records the authenticated donor's checkout with any valid referral
 // attribution, and the attempt's frozen processor parameters, or returns the
 // attempt already recorded for request. A monthly gift reserves the donor's
 // one recurring slot.
@@ -320,20 +320,26 @@ func prepareAttempt(
 	now time.Time,
 ) (queries.DonorStripeCheckout, error) {
 	empty := queries.DonorStripeCheckout{}
-	_, lookup := q.DonorByEmail(ctx, request.Email)
-	donor, err := lockGuest(ctx, q, claims, request.Email, now)
+	user, err := lockSignedIn(ctx, q, request.Session)
 	if err != nil {
 		return empty, err
 	}
-	owner := false
-	if request.Session != "" {
-		u, e := authenticate(ctx, q, request.Session, now)
-		owner = e == nil && u.ID == donor.ID
-		if e != nil && !errors.Is(e, ErrDenied) {
-			return empty, e
-		}
+	// Never resolve a caller-supplied address before proving it belongs to this session.
+	if request.Email != user.Email {
+		return empty, ErrDenied
 	}
-	if (errors.Is(lookup, pgx.ErrNoRows) || owner) && request.Name != "" {
+	donor := user.Donor
+	if err = claims.grant(ctx, q, donor.ID, donor.Email, now); err != nil {
+		return empty, err
+	}
+	projection, err := NewID()
+	if err != nil {
+		return empty, err
+	}
+	if err = q.SeedProjection(ctx, queries.SeedProjectionParams{ID: projection, DonorID: donor.ID, ComputedAt: timestamp(now)}); err != nil {
+		return empty, err
+	}
+	if request.Name != "" {
 		zone, e := geo.Timezone(request.Zip)
 		if e != nil || len(request.Name) > 150 || !plainText(request.Name, false) || len(request.City) > 80 ||
 			!plainText(request.City, false) {
@@ -345,6 +351,13 @@ func prepareAttempt(
 	}
 	attempt, err := q.StripeCheckout(ctx, request.RequestID)
 	if err == nil {
+		draft, e := q.CheckoutDraft(ctx, attempt.CheckoutID)
+		if e != nil {
+			return empty, e
+		}
+		if draft.DonorID != donor.ID {
+			return empty, ErrDenied
+		}
 		if attempt.RequestHash != digest || attempt.Status == "EXPIRED" || attempt.Status == "CANCELLED" || attempt.Status == "COMPLETE" {
 			return empty, payments.ErrCheckoutConflict
 		}

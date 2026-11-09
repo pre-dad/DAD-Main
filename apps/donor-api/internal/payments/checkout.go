@@ -31,7 +31,7 @@ var (
 	ErrListPageCap = errors.New("listing exceeded its page cap; split the range")
 )
 
-// CheckoutRequest is a guest gift. Visitor is an anonymous referral touch.
+// CheckoutRequest is a signed-in donor's gift. Visitor is an anonymous referral touch.
 type CheckoutRequest struct {
 	Session   string
 	Journey   string

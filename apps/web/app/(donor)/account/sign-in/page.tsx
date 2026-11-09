@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { GiftFraming } from "@/components/donor/GiftFraming";
 import { Page } from "@/components/donor/Page";
 import { PasskeySignIn } from "@/components/donor/PasskeySignIn";
 import { PasswordAccess } from "@/components/donor/PasswordAccess";
@@ -13,9 +12,7 @@ export default function SignInPage() {
   return (
     <Page eyebrow="My account" title="Your donor account">
       <AlreadySignedIn />
-      <p className="lead">
-        Use the email you entered when giving. We’ll email a single-use link to claim your account or sign in.
-      </p>
+      <p className="lead">Use your verified donor email. We’ll email a single-use sign-in link.</p>
       <SignInForm />
       <p className="note">The link expires after 15 minutes. You don’t need a password.</p>
       <PasskeySignIn />
@@ -26,17 +23,10 @@ export default function SignInPage() {
       </p>
       <div className="callout">
         <h2>New to DAD?</h2>
-        <p>
-          Start with a gift of <GiftFraming minor={3000} />. We’ll email you a link to claim your account.
-        </p>
-        <a className="secondary" href="/donate">
-          Give $1 a day
+        <p>Create your donor account and verify your email before starting your first gift.</p>
+        <a className="secondary" href="/account/signup">
+          Create your donor account
         </a>
-        <p>
-          <a className="quiet" href="/account/signup">
-            Create an account without giving
-          </a>
-        </p>
       </div>
     </Page>
   );

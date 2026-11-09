@@ -33,7 +33,7 @@ type checkoutBody struct {
 	Frequency json.RawMessage `json:"frequency"`
 }
 
-func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
+func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request, session string) {
 	const unavailable = "Checkout is temporarily unavailable; retry the same request"
 	key, ok := idempotencyKey(w, r)
 	if !ok {
@@ -54,6 +54,7 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request := payments.CheckoutRequest{
+		Session:   session,
 		Journey:   cookieValue(r, journeyCookie),
 		Name:      body.Name,
 		Zip:       body.Zip,
@@ -77,16 +78,14 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 			w,
 			r,
 			http.StatusConflict,
-			"A monthly gift for this email is already active or was started moments ago. Wait a few seconds and try again.",
+			"Your monthly gift is already active or in progress. Wait a few seconds and try again.",
 			nil,
 		)
 	case errors.Is(err, payments.ErrCheckoutThrottled):
 		w.Header().Set("Retry-After", strconv.Itoa(int(restartRetryAfter.Seconds())))
-		writeError(w, r, http.StatusTooManyRequests, "Too many checkouts were started for this email. Try again later.", nil)
+		writeError(w, r, http.StatusTooManyRequests, "Too many checkout attempts. Try again later.", nil)
 	case errors.Is(err, store.ErrDenied):
-		writeError(w, r, http.StatusForbidden, "Giving is unavailable for this account", nil)
-	case errors.Is(err, store.EmailRoleError{}):
-		writeError(w, r, http.StatusConflict, "This email signs in to a DAD partner or staff account. Give with a different email.", nil)
+		writeError(w, r, http.StatusUnauthorized, "Sign in required", nil)
 	case errors.Is(err, payments.ErrCheckoutInput):
 		invalidFields(w, r)
 	case err != nil:
