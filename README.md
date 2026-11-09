@@ -1,6 +1,6 @@
 # DAD — donor release
 
-The R1 application for Dynamic Aid Delivery: guest giving, direct Link and IRL
+The R1 application for Dynamic Aid Delivery: verified-account giving, direct Link and IRL
 referrals, a donor dashboard with streak recognition, badges, rankings and network
 milestones, funded initiatives with a daily rotation, events and volunteering, recurring-gift
 controls, a partner portal, employee giving with matching and teams, and an audited staff

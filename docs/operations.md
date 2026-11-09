@@ -910,7 +910,7 @@ HMAC-SHA256 of each lower-cased address under `DONOR_FOUNDING_CLAIM_KEY`, so the
 hashes cannot be matched against guessed addresses without the key; delete the source file
 once imported. Generate the key with `openssl rand -base64 32 | tr '+/' '-_'` and set it on
 the API only; without it the import answers 503 `FOUNDING_CLAIMS_UNCONFIGURED`. A donor is
-granted the badge when the import finds their address, when they first give as a guest
+granted the badge when the import finds their address, when they first give
 under it, or when they change their email to it. Grants survive a key change, but claims
 not yet granted no longer match under a new key, so re-import the file after changing it.
 Re-importing is safe and keeps each address's earliest sign-up. Qualifying claims have

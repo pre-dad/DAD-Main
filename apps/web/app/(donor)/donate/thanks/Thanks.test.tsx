@@ -14,7 +14,7 @@ it("restates a monthly gift with the charge and daily framing at equal weight", 
   expect(parts).toEqual(["$30/month", "$1 a day"]);
 });
 
-it("carries the Founding Donor timing, receipt notice, and claim call to action", async () => {
+it("carries the Founding Donor timing, receipt notice, and dashboard link", async () => {
   await renderWith({ session_id: "cs_test", amount_minor: "9000", frequency: "MONTHLY" });
   expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("You’re in. Welcome to the beginning.");
   expect(screen.getByText(/launches April 22, 2027/)).toHaveTextContent(
@@ -25,7 +25,8 @@ it("carries the Founding Donor timing, receipt notice, and claim call to action"
   expect(screen.getByText(/receipt email follows/)).toBeVisible();
   expect(screen.getByText(/test gift record, not a tax receipt/)).toBeVisible();
   expect(screen.getByText(/giving streak and your personal referral link/)).toBeVisible();
-  expect(screen.getByRole("link", { name: "request a new claim link" })).toHaveAttribute("href", "/account/sign-in");
+  expect(screen.getByRole("link", { name: "dashboard" })).toHaveAttribute("href", "/account/dashboard");
+  expect(screen.queryByText(/claim/i)).not.toBeInTheDocument();
 });
 
 it.each([
@@ -45,12 +46,12 @@ it.each([
   await renderWith(params);
   expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("You’re in. Welcome to the beginning.");
   expect(screen.queryByText(/Your gift:/)).not.toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "request a new claim link" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "dashboard" })).toBeVisible();
 });
-it("hands only the email to sign-in and clears the remembered choice", async () => {
+it("clears the remembered choice without handing anything to sign-in", async () => {
   sessionStorage.setItem("dad.donate.choice", JSON.stringify({ amount: "1", email: "d@example.org", zip: "10001" }));
   await renderWith({});
   await waitFor(() => expect(sessionStorage.getItem("dad.donate.choice")).toBeNull());
-  expect(sessionStorage.getItem("dad.signin.email")).toBe("d@example.org");
+  expect(sessionStorage.getItem("dad.signin.email")).toBeNull();
   sessionStorage.clear();
 });

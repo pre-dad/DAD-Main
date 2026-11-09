@@ -5,8 +5,8 @@ import { RoleLink } from "@/components/donor/RoleLink";
 import { launchDateLabel, launchMonthLabel } from "@/lib/launch";
 
 const steps = [
-  { number: "01", title: "Give", detail: "Verify your email, then choose a monthly gift." },
-  { number: "02", title: "Claim your account", detail: "One tap from the email we send you." },
+  { number: "01", title: "Create your account", detail: "Verify your email with one tap." },
+  { number: "02", title: "Give", detail: "Choose a monthly gift and pay on Stripe’s secure page." },
   { number: "03", title: "Invite someone", detail: "Share your link or show your code in person." },
 ];
 

@@ -8,8 +8,8 @@ it("explains the donor release, monthly billing, direct referral credit, and lau
   render(<HowItWorks />);
   expect(screen.getByText(/April 22, 2027/)).toHaveTextContent("Founding Donor badge");
   expect(screen.getByText(/April 22, 2027/)).toHaveTextContent("by December 31, 2026 (New York time)");
-  expect(screen.getByText(/about a dollar a day/)).toHaveTextContent(
-    "$30/month. You can also choose $90, $150, or any amount up to $900/month",
+  expect(screen.getByText(/verify your email, then give monthly/)).toHaveTextContent(
+    "up to $30 a day ($900/month); the monthly charge is always the daily amount × 30",
   );
   expect(screen.getByText(/only people you personally refer/)).toHaveTextContent("less successful refunds");
   expect(screen.getByText(/streak growing in local calendar days/)).toHaveTextContent("7 days to recover");
