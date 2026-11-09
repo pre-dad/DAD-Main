@@ -89,8 +89,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Start a guest Stripe Checkout
-         * @description Web only: giving stays on the website. Reads the `dad_referral` cookie for attribution. 403 also means giving is unavailable for this account. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor. Refused with 409 when the email signs in to a DAD partner or staff account: one email holds one role, so such a person gives with a different email. The email is not authenticated, so an earlier open, unpaid checkout for it is never handed back: starting again, with any new key, expires that session at Stripe (outside any database lock) and returns a new one for the requested amount, whether the amount is the same or not. A checkout begun in the last 15 seconds is left alone and answers `409`, as does one paid just as the request arrives or a monthly gift that is already active. At most 10 checkouts can be begun for one email in an hour: beyond that the answer is `429` with `Retry-After`. If expiring the earlier session fails the answer is a retryable `503` and nothing changes. Retrying with the same `Idempotency-Key` returns the same session; the key of a replaced checkout answers `409`.
+         * Start Stripe Checkout for the signed-in donor
+         * @description Browser checkout requires a verified donor session. The submitted email must match the authenticated account; other addresses are rejected before identity or subscription lookup. Reads the dad_referral cookie for attribution. An anonymous, invalid, expired or revoked session receives 401. A monthly gift already active or begun in the last 15 seconds receives 409. Restarting an abandoned unpaid checkout expires it at Stripe outside the database lock before creating a replacement. Retrying the same Idempotency-Key returns the same session; a replaced key receives 409. At most ten starts per account email per hour; excess attempts receive 429 with Retry-After. Processor failures are retryable 503; PAYMENTS_UNCONFIGURED indicates a missing processor.
          */
         post: operations["beginCheckout"];
         delete?: never;
@@ -131,7 +131,7 @@ export interface paths {
         put?: never;
         /**
          * Record a company-code visit
-         * @description Records a pre-signup visit through an employer's company code (30 days, last touch wins). A browser keeps the visitor token in the HttpOnly `dad_company` cookie, which binds when the donor proves account ownership in that browser. The app, opening the same link, sends the `token` from its previous capture, if any, and after sign-in sends the one returned to POST /donor/me/company-touch. A guest checkout cannot change an employer based on email alone. The code is normalised to upper case. The response never reveals whether the code resolves to a partner.
+         * @description Records a pre-signup visit through an employer's company code (30 days, last touch wins). A browser keeps the visitor token in the HttpOnly `dad_company` cookie, which binds when the donor proves account ownership in that browser. The app, opening the same link, sends the `token` from its previous capture, if any, and after sign-in sends the one returned to POST /donor/me/company-touch. Checkout requires a verified donor session and cannot change an employer based on a supplied email alone. The code is normalised to upper case. The response never reveals whether the code resolves to a partner.
          */
         post: operations["captureCompany"];
         delete?: never;
@@ -2907,7 +2907,7 @@ export interface paths {
         put?: never;
         /**
          * /donor/signup
-         * @description Starts account creation by emailing a verification link; no session is issued here. Answers 200 `{"sent":true}` whether or not the address already has an account, so it never reveals which. 503 `EMAIL_UNCONFIGURED` when the deployment has no email. The link (`/account/claim#token=…`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim, which takes the optional `device_name` and `platform` that label the resulting session.
+         * @description Starts account creation by emailing a verification link; no session is issued here. Answers 200 `{"sent":true}` whether or not the address already has an account, so it never reveals which. 503 `EMAIL_UNCONFIGURED` when the deployment has no email. The link (`/account/claim#token=…`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim, which takes the optional `device_name` and `platform` that label the resulting session. The response does not reveal whether an email belongs to a disabled donor, staff or partner; unavailable identities receive the same sent:true response without creating a donor account.
          */
         post: operations["postDonorSignup"];
         delete?: never;
@@ -4811,7 +4811,10 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** Format: email */
+                    /**
+                     * Format: email
+                     * @description Must match the verified signed-in donor email; cannot select another account.
+                     */
                     email: string;
                     /**
                      * Format: int64
@@ -4839,6 +4842,7 @@ export interface operations {
                     "application/json": components["schemas"]["CheckoutResult"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             413: components["responses"]["PayloadTooLarge"];
@@ -5035,7 +5039,7 @@ export interface operations {
                      * @description Page the emailed link returns to after sign-in. Optional; null or any other value is 422.
                      * @enum {string}
                      */
-                    next?: "/account/payment-method" | "/account/dashboard";
+                    next?: "/account/payment-method" | "/account/dashboard" | "/donate";
                 };
             };
         };

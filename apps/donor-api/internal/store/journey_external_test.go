@@ -85,7 +85,7 @@ func (m *journeyMail) Send(_ context.Context, message mail.Message) error {
 	return nil
 }
 
-func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
+func TestHTTPReferralVerificationCheckoutWebhookAndReceipt(t *testing.T) {
 	ctx := context.Background()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	config, err := pgxpool.ParseConfig(dsn)
@@ -111,7 +111,7 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 	eventID := "evt_journey_" + owner.String()
 	defer func() {
 		// Scope every cleanup to this journey's generated identities, including the
-		// guest whose identity does not exist until the HTTP checkout request.
+		// new donor whose identity is created by signup before checkout.
 		for _, sql := range []string{
 			"DELETE FROM donor_messages WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
 			"DELETE FROM donor_login_emails WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
@@ -155,6 +155,7 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 		Origin:          origin,
 		EmailConfigured: true,
 		Account:         store.AccountService{DB: api},
+		Passwords:       store.PasswordService{DB: api},
 		Donor:           store.DonorService{DB: api, Origin: origin},
 		Checkout:        store.CheckoutService{DB: api, Origin: origin, Gateway: journeyGateway{}},
 		Dashboard:       store.DashboardReader{DB: api},
@@ -260,6 +261,37 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 		409,
 	)
 	checkoutBody := map[string]any{"email": guestEmail, "amount_minor": 3000, "frequency": "MONTHLY"}
+	call(guest, "POST", "/donor/checkouts", checkoutBody, map[string]string{"Idempotency-Key": requestID.String()}, 401)
+	call(
+		guest,
+		"POST",
+		"/donor/signup",
+		map[string]string{"name": "Verified Donor", "email": guestEmail, "zip": "10001", "city": "New York"},
+		nil,
+		200,
+	)
+	transport := &journeyMail{}
+	keys, err := credentials.ParseKeyring("MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	email := store.LoginEmailWorker{
+		DB:        dbrolestest.Open(t, dbroles.LoginEmailWorker),
+		Settings:  mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: keys},
+		Origin:    origin,
+		Transport: transport,
+	}
+	if worked, err := email.DeliverNext(ctx, time.Now().Add(time.Second)); err != nil || !worked {
+		t.Fatal(worked, err)
+	}
+	_, tail, _ := strings.Cut(transport.message.Body, "#token=")
+	claim, _, _ := strings.Cut(tail, "\n")
+	if transport.message.To != guestEmail || claim == "" {
+		t.Fatal("pre-checkout verification email missing")
+	}
+	claim, _, _ = strings.Cut(claim, "&")
+	call(guest, "POST", "/donor/claim", map[string]string{"token": claim}, nil, 200)
+	call(guest, "GET", "/donor/me/profile", nil, nil, 200)
 	body = call(guest, "POST", "/donor/checkouts", checkoutBody, map[string]string{"Idempotency-Key": requestID.String()}, 201)
 	var checkout payments.CheckoutResult
 	if err = json.Unmarshal(body, &checkout); err != nil {
@@ -352,26 +384,6 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 		dashboard.Referrals.Total != 3000 {
 		t.Fatal("guest credit missing", string(body), err)
 	}
-	transport := &journeyMail{}
-	keys, err := credentials.ParseKeyring("MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
-	if err != nil {
-		t.Fatal(err)
-	}
-	email := store.LoginEmailWorker{
-		DB:        dbrolestest.Open(t, dbroles.LoginEmailWorker),
-		Settings:  mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: keys},
-		Origin:    origin,
-		Transport: transport,
-	}
-	if worked, err := email.DeliverNext(ctx, time.Now().Add(time.Second)); err != nil || !worked {
-		t.Fatal(worked, err)
-	}
-	_, tail, _ := strings.Cut(transport.message.Body, "#token=")
-	claim, _, _ := strings.Cut(tail, "\n")
-	if transport.message.To != guestEmail || claim == "" {
-		t.Fatal("guest claim email missing")
-	}
-	call(guest, "POST", "/donor/claim", map[string]string{"token": claim}, nil, 200)
 	body = call(guest, "GET", "/donor/me/gifts", nil, nil, 200)
 	var gifts store.GiftsPage
 	if err = json.Unmarshal(body, &gifts); err != nil || len(gifts.Gifts) != 1 || gifts.Gifts[0].AmountMinor != 3000 {

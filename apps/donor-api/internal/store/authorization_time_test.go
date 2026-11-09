@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/payments"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -18,11 +19,11 @@ import (
 func TestOwnerSessionIsRecheckedAfterLock(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
-	for _, kind := range []string{"donor", "donor-passkey", "staff"} {
+	for _, kind := range []string{"donor", "donor-passkey", "checkout", "staff"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			donorID, _ := donor(t, pool)
+			donorID, email := donor(t, pool)
 			var resolve func(pgx.Tx) error
 			var expire string
 			var subject pgtype.UUID
@@ -35,6 +36,20 @@ func TestOwnerSessionIsRecheckedAfterLock(t *testing.T) {
 					t.Fatal(err)
 				}
 				resolve = func(tx pgx.Tx) error { _, err := donorOwner(token)(ctx, tx); return err }
+				if kind == "checkout" {
+					resolve = func(tx pgx.Tx) error {
+						_, err := prepareAttempt(
+							ctx,
+							queries.New(tx),
+							nil,
+							publicSite("https://donor.example.org"),
+							payments.CheckoutRequest{Session: token, Email: email},
+							"synthetic",
+							time.Now().UTC(),
+						)
+						return err
+					}
+				}
 				if kind == "donor-passkey" {
 					resolve = func(tx pgx.Tx) error {
 						_, err := loadDonorUserByToken(ctx, queries.New(tx), token)

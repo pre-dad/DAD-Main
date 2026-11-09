@@ -42,7 +42,12 @@ func (a *api) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.passwords().serve(w, r, func(ctx context.Context) (any, error) {
-		return map[string]bool{"sent": true}, a.Passwords.Signup(ctx, body)
+		err := a.Passwords.Signup(ctx, body)
+		if errors.Is(err, store.EmailRoleError{}) || errors.Is(err, store.ErrDenied) {
+			// Account creation must not become an alternative email-enumeration endpoint.
+			err = nil
+		}
+		return map[string]bool{"sent": true}, err
 	})
 }
 func (a *api) passwordSignIn(w http.ResponseWriter, r *http.Request) {

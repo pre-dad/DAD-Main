@@ -271,7 +271,7 @@ func invoice(checkout, id string, start time.Time, paid bool) map[string]any {
 	}
 }
 
-func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
+func TestLegacyGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 	pool := database(t)
 	referrer, _ := donor(t, pool)
 	accountCleanup(t, pool, referrer)
@@ -288,6 +288,9 @@ func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 		}
 	})
 	checkout := f.checkout(t)
+	// Guest checkouts issued before mandatory verification must still settle and send account proof.
+	mustExec(t, pool, "UPDATE donors SET claimed_at=NULL WHERE id=$1", f.donorID)
+	mustExec(t, pool, "UPDATE donor_sessions SET revoked_at=now() WHERE donor_id=$1", f.donorID)
 	invoiceID := "in_" + f.donorID.String()
 	start := time.Now().UTC().Truncate(time.Second).Add(-2 * 24 * time.Hour)
 	obj := invoice(checkout.CheckoutID, invoiceID, start, true)
@@ -337,7 +340,7 @@ func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 	}
 	attribution := refDashboard.Referrals
 	if attribution == nil || attribution.IRL != 1 || attribution.TotalMinor != 3000 {
-		t.Fatal("guest referral not credited")
+		t.Fatal("legacy guest referral not credited")
 	}
 	refundID := "re_" + f.donorID.String()
 	raw, err := json.Marshal(

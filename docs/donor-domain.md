@@ -16,7 +16,7 @@ daily amount; larger gifts are arranged with DAD directly. The daily amount and 
 monthly charge always appear at equal visual weight; an amount set before this rule
 shows its daily figure as "about". DAD absorbs fees; there is no cover-fees prompt.
 
-Giving collects a private name, email, ZIP and city. A verified account is not required for hosted checkout. Matching is case-insensitive and does not
+Giving collects a private name, email, ZIP and city. Hosted checkout requires a verified, signed-in donor account. The receipt email must match that account; a checkout cannot select another address. Matching is case-insensitive and does not
 remove dots or plus tags. Different addresses are separate identities until an explicit
 merge verifies both. Never infer identity from a shared card, device, or postal address.
 The initial implementation accepts ASCII mailbox names and IDNA domains.
@@ -30,8 +30,7 @@ this check keep working; operators can list them with the query in
 
 A company-code visit is captured before giving and kept for 30 days. It links the donor
 to the employer when they prove account ownership in that browser, or when they enter
-the code in their signed-in profile. Starting a guest checkout with someone's email
-cannot change their employer or attribute their giving to a company. An email link
+the code in their signed-in profile. Starting checkout cannot change a donor's employer or attribute their giving to a company without the donor's account proof. An email link
 opened in another browser needs the code entered after sign-in; app-install attribution
 still requires a deferred-link integration.
 

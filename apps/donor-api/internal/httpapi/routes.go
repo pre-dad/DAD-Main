@@ -35,7 +35,7 @@ func (a *api) routes() []route {
 		a.public("GET /health/ready", a.ready),
 		a.public("GET /donor/public/spend", a.overallSpend),
 		{"POST /donor/stripe/webhook", stripeAuth, a.stripeWebhook},
-		a.visitor("POST /donor/checkouts", a.beginCheckout),
+		{"POST /donor/checkouts", donorAuth, a.guarded(a.Origin, accountLimit, false, signedIn(donorSession, a.beginCheckout))},
 		a.public("GET /donor/referrals/{code}", a.referrer),
 		a.capture("POST /donor/referrals/{code}", a.captureReferral),
 		a.capture("POST /donor/company/{code}", a.captureCompany),
