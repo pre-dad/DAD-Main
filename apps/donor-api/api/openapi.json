@@ -7,7 +7,7 @@
    "name": "MIT",
    "identifier": "MIT"
   },
-  "description": "The DAD (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <access token>`. A request with Origin or cookies is a browser request whatever else it carries. Sign in by calling POST /donor/login, opening the emailed `/account/claim#token=…` link in the app, and sending the fragment's token to POST /donor/claim as a native request, which returns a 15-minute access token and a rotating refresh token. Exchange the refresh token at POST /donor/refresh when the access token expires or a request answers 401; send one refresh at a time and keep only the newest tokens. Routes that admit the app list `native` in `x-clients`, and POST /donor/refresh, the push-device routes, POST /donor/me/company-touch, and POST /donor/me/recurring/checkout admit nothing else. The app may record referral and company-code link visits, keeping the returned token in place of the browser's cookie. Guest giving, partner applications, and every staff route are web-only.\n- **Partner portal** users are separate from donors (P-5). They sign in by calling POST /donor/partner/sign-in and opening the emailed `/partner/accept#token=…` link, whose token POST /donor/partner/accept-invite exchanges for a 12-hour session: an HttpOnly cookie for a browser (`__Host-dad_partner_session` over HTTPS, otherwise `dad_partner_session`), or a bearer token for a native request, sent like the donor app's.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"…\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `…+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
+  "description": "The DAD (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <access token>`. A request with Origin or cookies is a browser request whatever else it carries. Sign in by calling POST /donor/login, opening the emailed `/account/claim#token=\u2026` link in the app, and sending the fragment's token to POST /donor/claim as a native request, which returns a 15-minute access token and a rotating refresh token. Exchange the refresh token at POST /donor/refresh when the access token expires or a request answers 401; send one refresh at a time and keep only the newest tokens. Routes that admit the app list `native` in `x-clients`, and POST /donor/refresh, the push-device routes, POST /donor/me/company-touch, and POST /donor/me/recurring/checkout admit nothing else. The app may record referral and company-code link visits, keeping the returned token in place of the browser's cookie. Guest giving, partner applications, and every staff route are web-only.\n- **Partner portal** users are separate from donors (P-5). They sign in by calling POST /donor/partner/sign-in and opening the emailed `/partner/accept#token=\u2026` link, whose token POST /donor/partner/accept-invite exchanges for a 12-hour session: an HttpOnly cookie for a browser (`__Host-dad_partner_session` over HTTPS, otherwise `dad_partner_session`), or a bearer token for a native request, sent like the donor app's.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"\u2026\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `\u2026+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
  },
  "servers": [
   {
@@ -241,13 +241,20 @@
   "/donor/checkouts": {
    "post": {
     "operationId": "beginCheckout",
-    "summary": "Start a guest Stripe Checkout",
-    "description": "Web only: giving stays on the website. Reads the `dad_referral` cookie for attribution. 403 also means giving is unavailable for this account. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor. Refused with 409 when the email signs in to a DAD partner or staff account: one email holds one role, so such a person gives with a different email. The email is not authenticated, so an earlier open, unpaid checkout for it is never handed back: starting again, with any new key, expires that session at Stripe (outside any database lock) and returns a new one for the requested amount, whether the amount is the same or not. A checkout begun in the last 15 seconds is left alone and answers `409`, as does one paid just as the request arrives or a monthly gift that is already active. At most 10 checkouts can be begun for one email in an hour: beyond that the answer is `429` with `Retry-After`. If expiring the earlier session fails the answer is a retryable `503` and nothing changes. Retrying with the same `Idempotency-Key` returns the same session; the key of a replaced checkout answers `409`.",
+    "summary": "Start Stripe Checkout for the signed-in donor",
+    "description": "Browser checkout requires a verified donor session. The submitted email must match the authenticated account; other addresses are rejected before identity or subscription lookup. Reads the dad_referral cookie for attribution. An anonymous, invalid, expired or revoked session receives 401. A monthly gift already active or begun in the last 15 seconds receives 409. Restarting an abandoned unpaid checkout expires it at Stripe outside the database lock before creating a replacement. Retrying the same Idempotency-Key returns the same session; a replaced key receives 409. At most ten starts per account email per hour; excess attempts receive 429 with Retry-After. Processor failures are retryable 503; PAYMENTS_UNCONFIGURED indicates a missing processor.",
     "tags": [
      "Public"
     ],
-    "security": [],
-    "x-rate-limit": "visitor",
+    "security": [
+     {
+      "cookieAuth": []
+     },
+     {
+      "bearerAuth": []
+     }
+    ],
+    "x-rate-limit": "account",
     "x-clients": [
      "browser"
     ],
@@ -266,7 +273,8 @@
          "email": {
           "type": "string",
           "format": "email",
-          "maxLength": 320
+          "maxLength": 320,
+          "description": "Must match the verified signed-in donor email; cannot select another account."
          },
          "amount_minor": {
           "type": "integer",
@@ -333,6 +341,9 @@
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
      }
     }
    }
@@ -501,7 +512,7 @@
    "post": {
     "operationId": "captureCompany",
     "summary": "Record a company-code visit",
-    "description": "Records a pre-signup visit through an employer's company code (30 days, last touch wins). A browser keeps the visitor token in the HttpOnly `dad_company` cookie, which binds when the donor proves account ownership in that browser. The app, opening the same link, sends the `token` from its previous capture, if any, and after sign-in sends the one returned to POST /donor/me/company-touch. A guest checkout cannot change an employer based on email alone. The code is normalised to upper case. The response never reveals whether the code resolves to a partner.",
+    "description": "Records a pre-signup visit through an employer's company code (30 days, last touch wins). A browser keeps the visitor token in the HttpOnly `dad_company` cookie, which binds when the donor proves account ownership in that browser. The app, opening the same link, sends the `token` from its previous capture, if any, and after sign-in sends the one returned to POST /donor/me/company-touch. Checkout requires a verified donor session and cannot change an employer based on a supplied email alone. The code is normalised to upper case. The response never reveals whether the code resolves to a partner.",
     "tags": [
      "Public"
     ],
@@ -598,7 +609,7 @@
    "post": {
     "operationId": "ingestAnalytics",
     "summary": "Record analytics events",
-    "description": "Ingests a batch of §9 analytics events from any platform into the shared append-only stream. Authenticated-or-anonymous: a valid donor session attributes the events, otherwise they are recorded anonymously (events before sign-in are expected). The platform source is the native client's `X-DAD-Platform` header, or WEB for a browser. The whole batch is rejected (422) if any event has an unknown name or an invalid property payload. Batch size is capped at 100.",
+    "description": "Ingests a batch of \u00a79 analytics events from any platform into the shared append-only stream. Authenticated-or-anonymous: a valid donor session attributes the events, otherwise they are recorded anonymously (events before sign-in are expected). The platform source is the native client's `X-DAD-Platform` header, or WEB for a browser. The whole batch is rejected (422) if any event has an unknown name or an invalid property payload. Batch size is capped at 100.",
     "tags": [
      "Public"
     ],
@@ -624,7 +635,7 @@
            "properties": {
             "name": {
              "type": "string",
-             "description": "A §9 taxonomy event name.",
+             "description": "A \u00a79 taxonomy event name.",
              "enum": [
               "app_opened",
               "role_selected",
@@ -741,7 +752,7 @@
    "post": {
     "operationId": "login",
     "summary": "Email a sign-in link",
-    "description": "503 `EMAIL_UNCONFIGURED` when the deployment has no email. Never reveals whether the address exists. The link (`/account/claim#token=…`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim.",
+    "description": "503 `EMAIL_UNCONFIGURED` when the deployment has no email. Never reveals whether the address exists. The link (`/account/claim#token=\u2026`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim.",
     "tags": [
      "Account"
     ],
@@ -768,7 +779,8 @@
           "description": "Page the emailed link returns to after sign-in. Optional; null or any other value is 422.",
           "enum": [
            "/account/payment-method",
-           "/account/dashboard"
+           "/account/dashboard",
+           "/donate"
           ]
          }
         },
@@ -7744,7 +7756,7 @@
       "$ref": "#/components/responses/Unavailable"
      }
     },
-    "description": "The link (`/partner/accept#token=…`) comes from an approval, an invitation, or POST /donor/partner/sign-in. It is single-use: approval and invitation links expire after 7 days, requested links after 15 minutes. A browser receives an HttpOnly session cookie and `signed_in`; the app, sending a native request, receives the bearer `session` instead."
+    "description": "The link (`/partner/accept#token=\u2026`) comes from an approval, an invitation, or POST /donor/partner/sign-in. It is single-use: approval and invitation links expire after 7 days, requested links after 15 minutes. A browser receives an HttpOnly session cookie and `signed_in`; the app, sending a native request, receives the bearer `session` instead."
    }
   },
   "/donor/partner/overview": {
@@ -7779,7 +7791,7 @@
           },
           "description": {
            "type": "string",
-           "description": "The organization's description, as its administrators wrote it (§7.2)."
+           "description": "The organization's description, as its administrators wrote it (\u00a77.2)."
           },
           "role": {
            "type": "string",
@@ -9606,7 +9618,7 @@
       "$ref": "#/components/responses/Unavailable"
      }
     },
-    "description": "Replaces the organization's name and description (§7.2). Partner administrators only; viewers get 403. Both are trimmed; the name must be 1 to 200 characters and the description at most 4000."
+    "description": "Replaces the organization's name and description (\u00a77.2). Partner administrators only; viewers get 403. Both are trimmed; the name must be 1 to 200 characters and the description at most 4000."
    }
   },
   "/donor/staff/partners/{partnerID}/match-status": {
@@ -11694,7 +11706,7 @@
    "post": {
     "operationId": "postDonorSignup",
     "summary": "/donor/signup",
-    "description": "Starts account creation by emailing a verification link; no session is issued here. Answers 200 `{\"sent\":true}` whether or not the address already has an account, so it never reveals which. 503 `EMAIL_UNCONFIGURED` when the deployment has no email. The link (`/account/claim#token=…`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim, which takes the optional `device_name` and `platform` that label the resulting session.",
+    "description": "Starts account creation by emailing a verification link; no session is issued here. Answers 200 `{\"sent\":true}` whether or not the address already has an account, so it never reveals which. 503 `EMAIL_UNCONFIGURED` when the deployment has no email. The link (`/account/claim#token=\u2026`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim, which takes the optional `device_name` and `platform` that label the resulting session. The response does not reveal whether an email belongs to a disabled donor, staff or partner; unavailable identities receive the same sent:true response without creating a donor account.",
     "tags": [
      "Account"
     ],
@@ -11948,7 +11960,7 @@
   "/donor/staff/failed-payments": {
    "get": {
     "operationId": "failedPayments",
-    "summary": "Failed payments and accounts in grace (PRD §8)",
+    "summary": "Failed payments and accounts in grace (PRD \u00a78)",
     "tags": [
      "Staff donors"
     ],
@@ -11994,7 +12006,7 @@
   "/donor/staff/deletions": {
    "get": {
     "operationId": "accountDeletions",
-    "summary": "Completed account deletions (PRD §8)",
+    "summary": "Completed account deletions (PRD \u00a78)",
     "tags": [
      "Staff donors"
     ],
@@ -12657,7 +12669,7 @@
      },
      "network_visible": {
       "type": "boolean",
-      "description": "When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). On by default: visibility is opt-out (§10)."
+      "description": "When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). On by default: visibility is opt-out (\u00a710)."
      },
      "volunteer": {
       "type": "boolean",
@@ -12821,7 +12833,7 @@
      },
      "label": {
       "type": "string",
-      "description": "A name the donor can recognize, safe to display as plain text: the device name the app reported, otherwise “iOS device”, “Android device”, or “Mobile device”; every browser is “Web browser”."
+      "description": "A name the donor can recognize, safe to display as plain text: the device name the app reported, otherwise \u201ciOS device\u201d, \u201cAndroid device\u201d, or \u201cMobile device\u201d; every browser is \u201cWeb browser\u201d."
      },
      "created_at": {
       "type": "string",
@@ -15948,7 +15960,7 @@
      },
      "in_rotation": {
       "type": "boolean",
-      "description": "Whether the daily rotation may show it once published and active (§8 Content)."
+      "description": "Whether the daily rotation may show it once published and active (\u00a78 Content)."
      },
      "updated_at": {
       "type": "string",
@@ -16127,7 +16139,7 @@
      },
      "in_rotation": {
       "type": "boolean",
-      "description": "Whether the daily rotation may show it once published and active (§8 Content)."
+      "description": "Whether the daily rotation may show it once published and active (\u00a78 Content)."
      },
      "updated_at": {
       "type": "string",

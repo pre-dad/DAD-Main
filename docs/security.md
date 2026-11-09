@@ -255,3 +255,15 @@ procedures, managed secret storage, backup/restore evidence, the Cloudflare edge
 configuration and origin firewall,
 provider acceptance, and security/accessibility review. This document describes controls
 implemented in code, not a claim of independent certification or production readiness.
+
+## Checkout identity
+
+Browser and native checkout both require a verified donor session. The browser's
+email must match that account and is shown read-only. The checkout transaction
+authenticates and locks the session owner, then rechecks the session after the
+lock before resolving email, recurring status, referral attribution or an existing
+checkout. Anonymous, expired, revoked, disabled and unverified accounts cannot
+reach checkout; a signed-in donor cannot probe another address's role or giving.
+Sign-in email links allow the exact `/donate` return path. Signup also answers
+uniformly for unavailable staff/partner and disabled addresses, without creating
+an account, so it cannot expose those roles as an alternative to checkout.

@@ -140,6 +140,7 @@ func TestLoginReturnPathIsAllowlisted(t *testing.T) {
 		{``, 202, ""},
 		{`,"next":"/account/payment-method"`, 202, "/account/payment-method"},
 		{`,"next":"/account/dashboard"`, 202, "/account/dashboard"},
+		{`,"next":"/donate"`, 202, "/donate"},
 		{`,"next":"https://evil.example.org"`, 422, ""},
 		{`,"next":"//evil.example.org"`, 422, ""},
 		{`,"next":"/account/payment-method?x=1"`, 422, ""},

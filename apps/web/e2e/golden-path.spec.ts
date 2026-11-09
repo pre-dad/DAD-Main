@@ -10,7 +10,7 @@ async function expectNoHorizontalScroll(page: Page) {
   expect(await page.locator("body").evaluate((body) => body.scrollWidth <= window.innerWidth + 1)).toBe(true);
 }
 
-test("a mobile or desktop visitor can reach giving without an account", async ({ page }) => {
+test("giving requires email verification before checkout", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("A dollar a day");
   await expect(page.getByRole("complementary", { name: "DAD at a glance" })).toContainText("April 22, 2027");
@@ -18,9 +18,9 @@ test("a mobile or desktop visitor can reach giving without an account", async ({
   await page.getByRole("link", { name: /Give \$1 a day/ }).click();
   await expect(page).toHaveURL(/\/donate$/);
   await expect(page.getByLabel("Email")).toBeVisible();
-  await expect(page.getByLabel("Full name")).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Continue to secure checkout · \$30\/month$/ })).toBeVisible();
-  await expect(page.getByText(/\$30\/month/).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Email me a sign-in link", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Continue to secure checkout/ })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Create your donor account", exact: true })).toBeVisible();
   await expectNoHorizontalScroll(page);
 });
 

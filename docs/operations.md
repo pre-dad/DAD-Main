@@ -756,8 +756,7 @@ entitlement with `applinks:` and `webcredentials:` entries for the public host.
 ## Starting a monthly gift from the app
 
 `POST /donor/me/recurring/checkout` opens Stripe-hosted Checkout for a signed-in donor with
-no active or pending monthly gift. It is the website's guest checkout run for the donor's own
-account, so the same verified webhooks complete the gift; only the pages Checkout returns to
+no active or pending monthly gift. It uses the same authenticated checkout implementation as the website, so the same verified webhooks complete the gift; only the pages Checkout returns to
 differ. They are `/app/return?result=success&session_id=…` after payment and
 `/app/return?result=cancel` if the donor backs out, both served by the web app, which shows
 a short "return to the app" notice. The app watches for that address, or opens from it once
@@ -785,27 +784,22 @@ for a replaced session is harmless: it releases only the reservation of its own 
 
 ### Restarting a website checkout
 
-The website's guest checkout (`POST /donor/checkouts`) restarts the same way but never hands
-a session back. Its caller is whoever typed the email, so returning the open session's URL
-would let anyone who knows an address resume, and pay into, someone else's checkout. Instead
-a new start for an email whose earlier checkout is open and unpaid expires that session at
-Stripe and creates a new one, for the same amount or another, through the same race-safe
-steps as the app (donor row lock, Stripe call outside any lock, the reservation re-locked
-before the attempt is marked `EXPIRED`). Paid just as the request arrives is `409`; an expiry
-that fails is a retryable `503` with the reservation untouched. A retry with the same
-`Idempotency-Key` returns the same session; the key of a replaced checkout answers `409`.
-An app start that finds a website checkout holding the slot replaces it the same way.
+Browser checkout (`POST /donor/checkouts`) requires a verified donor session and an
+email matching that account. The transaction authenticates and locks the donor, then
+rechecks the session before inspecting account or checkout state. A caller cannot
+select another email to inspect its role or giving, or expire another donor's checkout.
 
-The trade-off is that a stranger who knows an email can make a donor's open checkout close:
-the donor sees Stripe's expired page and starts again, and no payment is lost, because an
-expired session cannot be paid. Three limits bound it. A checkout begun in the last 15 seconds
-is never expired by another website request, so concurrent restarts cannot expire each
-other's replacement and leave nothing open (`409`; retry). At most 10 checkouts can be
-begun for one email in an hour, counting the new one; the next answers `429` with
-`Retry-After`. That budget is per email in the database, so it holds across API instances,
-and it sits beside the per-address `visitor` limit of 60 a minute. An attacker who spends the
-budget also blocks that donor's own restart until it refills or the open session lapses, which
-is no worse than the hour-long lockout this replaces.
+A new start expires the signed-in donor's abandoned unpaid session at Stripe and
+creates a replacement through the same race-safe steps as the app. A checkout begun
+in the last 15 seconds is left alone (`409`). Payment arriving during expiration is
+`409`; failed expiration is a retryable `503`, leaving the reservation untouched.
+Retrying the same `Idempotency-Key` returns the same session only for the same donor;
+a replaced key answers `409`. An app start finding that donor's website checkout
+holding the slot replaces it the same way.
+
+At most ten checkouts per account email can begin in an hour, across API instances.
+The next attempt answers `429` with `Retry-After`. The per-address `account` budget
+also applies. Anonymous requests and expired or revoked sessions receive `401`.
 
 ## Staff and content
 

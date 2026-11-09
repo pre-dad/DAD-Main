@@ -5,7 +5,7 @@ import { RoleLink } from "@/components/donor/RoleLink";
 import { launchDateLabel, launchMonthLabel } from "@/lib/launch";
 
 const steps = [
-  { number: "01", title: "Give", detail: "Monthly, in about a minute. No account needed." },
+  { number: "01", title: "Give", detail: "Verify your email, then choose a monthly gift." },
   { number: "02", title: "Claim your account", detail: "One tap from the email we send you." },
   { number: "03", title: "Invite someone", detail: "Share your link or show your code in person." },
 ];
@@ -17,10 +17,7 @@ export default function DonorHome() {
         <div className="heroCopy">
           <span className="eyebrow">Aid, delivered.</span>
           <h1>A dollar a day. Every dollar on the record.</h1>
-          <p>
-            Give monthly in about a minute, no account needed. Then invite the people you know and watch your circle
-            grow.
-          </p>
+          <p>Verify your email and give monthly. Then invite the people you know and watch your circle grow.</p>
           <div className="actions">
             <RoleLink className="button" href="/donate">
               Give $1 a day{" "}

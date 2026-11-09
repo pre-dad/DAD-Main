@@ -19,7 +19,9 @@ export default function Signup() {
           setError("");
           try {
             await api("/donor/signup", { method: "POST", body: JSON.stringify(Object.fromEntries(f)) });
-            setStatus("Check your email for a verification link. You can choose a password after opening it.");
+            setStatus(
+              "If this address can be used for a donor account, a verification link will arrive shortly. You can choose a password after opening it.",
+            );
           } catch (c) {
             setError(failureMessage(c, "Your account could not be started."));
           } finally {

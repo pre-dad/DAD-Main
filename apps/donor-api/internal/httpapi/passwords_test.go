@@ -101,3 +101,19 @@ func TestPasswordSignInLabelsOnlyTheAppsSession(t *testing.T) {
 		}
 	}
 }
+
+func TestSignupDoesNotRevealAnUnavailableIdentity(t *testing.T) {
+	for _, err := range []error{nil, store.EmailRoleError{Role: "STAFF"}, store.EmailRoleError{Role: "PARTNER"}, store.ErrDenied} {
+		r := httptest.NewRequest(
+			"POST",
+			"/donor/signup",
+			strings.NewReader(`{"name":"Ada","email":"ada@example.org","zip":"10001","city":"X"}`),
+		)
+		r.Header.Set("Origin", "http://localhost:3000")
+		response := httptest.NewRecorder()
+		NewServer("", Services{Passwords: &passwordStub{err: err}, EmailConfigured: true}).Handler.ServeHTTP(response, r)
+		if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != `{"sent":true}` {
+			t.Fatalf("signup revealed an identity state: %d %s", response.Code, response.Body)
+		}
+	}
+}

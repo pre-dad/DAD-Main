@@ -18,7 +18,7 @@
     "generate:api": "{ echo '// Generated from apps/donor-api/api/openapi.json; run `make generate` after changing it.'; openapi-typescript ../donor-api/api/openapi.json --empty-objects-unknown; } > lib/openapi.d.ts.tmp && mv lib/openapi.d.ts.tmp lib/openapi.d.ts"
   },
   "dependencies": {
-    "next": "16.4.1",
+    "next": "16.4.5",
     "react": "19.1.1",
     "react-dom": "19.1.1"
   },
