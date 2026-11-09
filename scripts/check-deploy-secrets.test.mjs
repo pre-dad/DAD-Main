@@ -39,6 +39,11 @@ function render(overrides = {}) {
     DONOR_EVENT_CHECKIN_SECRET: "canary-checkin",
     DONOR_FOUNDING_CLAIM_KEY: "canary-founding",
     DONOR_SMS_AUTH_TOKEN: "canary-sms",
+    DONOR_OAUTH_APPLE_CLIENT_ID: "fixture-apple-web",
+    DONOR_OAUTH_APPLE_CLIENT_SECRET: "canary-apple-oauth",
+    DONOR_OAUTH_GOOGLE_CLIENT_ID: "fixture-google-web",
+    DONOR_OAUTH_GOOGLE_CLIENT_SECRET: "canary-google-oauth",
+    DONOR_OIDC_REQUIRE_NONCE: "true",
     UNRELATED_SECRET: "must-never-reach-a-process",
     ...overrides,
   });
@@ -78,7 +83,17 @@ function render(overrides = {}) {
 test("rendered deployment gives each process only its credential capabilities", () => {
   const services = render();
   for (const service of Object.values(services)) assert.equal(service.environment?.UNRELATED_SECRET, undefined);
+  for (const [name, service] of Object.entries(services)) {
+    for (const [key, value] of Object.entries({
+      DONOR_OAUTH_APPLE_CLIENT_ID: "fixture-apple-web",
+      DONOR_OAUTH_APPLE_CLIENT_SECRET: "canary-apple-oauth",
+      DONOR_OAUTH_GOOGLE_CLIENT_ID: "fixture-google-web",
+      DONOR_OAUTH_GOOGLE_CLIENT_SECRET: "canary-google-oauth",
+    }))
+      assert.equal(service.environment?.[key], name === "web" ? value : undefined, `${name}:${key}`);
+  }
   const api = services.api.environment;
+  assert.equal(api.DONOR_OIDC_REQUIRE_NONCE, "true");
   assert.equal(api.STRIPE_SECRET_KEY, "canary-stripe");
   assert.equal(api.DONOR_EMAIL_ENCRYPTION_KEY, "canary-email");
   assert.equal(api.DONOR_FOUNDING_CLAIM_KEY, "canary-founding");
