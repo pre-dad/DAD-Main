@@ -24,9 +24,9 @@ export default function HowItWorks() {
       </p>
       <h2>Your circle</h2>
       <p>
-        Your account holds your personal link and a referral code to show on your phone. A Link
-        Referral begins with a shared link; an IRL Referral begins when someone scans your code. Your dashboard counts
-        them separately, once a first gift completes.
+        Your account holds your personal link and a referral code to show on your phone. A Link Referral begins with a
+        shared link; an IRL Referral begins when someone scans your code. Your dashboard counts them separately, once a
+        first gift completes.
       </p>
       <p>
         Your circle includes only people you personally refer. Attributed dollars reflect money actually collected, less
