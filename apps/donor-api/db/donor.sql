@@ -76,16 +76,20 @@ UPDATE donors SET zip=$2, city=$3, timezone=$4, phone=$5 WHERE id=$1 RETURNING *
 
 -- name: UpsertPhoneCode :exec
 -- Last request wins: a new code for the same phone overwrites the pending one
--- and resets the attempt counter.
+-- and resets its attempt counter. The phone's guess window carries over until
+-- it is a day old.
 INSERT INTO donor_phone_codes (phone, code_hash, attempts, expires_at)
 VALUES ($1, $2, 0, $3)
-ON CONFLICT (phone) DO UPDATE SET code_hash=EXCLUDED.code_hash, attempts=0, expires_at=EXCLUDED.expires_at, created_at=now();
+ON CONFLICT (phone) DO UPDATE SET code_hash=EXCLUDED.code_hash, attempts=0, expires_at=EXCLUDED.expires_at, created_at=now(),
+ window_attempts=CASE WHEN donor_phone_codes.window_started_at > now() - interval '1 day' THEN donor_phone_codes.window_attempts ELSE 0 END,
+ window_started_at=CASE WHEN donor_phone_codes.window_started_at > now() - interval '1 day' THEN donor_phone_codes.window_started_at ELSE now() END;
 
 -- name: PhoneCode :one
-SELECT phone, code_hash, attempts, expires_at, created_at FROM donor_phone_codes WHERE phone=$1 FOR UPDATE;
+SELECT phone, code_hash, attempts, expires_at, created_at, window_started_at, window_attempts
+FROM donor_phone_codes WHERE phone=$1 FOR UPDATE;
 
 -- name: RecordPhoneCodeAttempt :exec
-UPDATE donor_phone_codes SET attempts=attempts+1 WHERE phone=$1;
+UPDATE donor_phone_codes SET attempts=attempts+1, window_attempts=window_attempts+1 WHERE phone=$1;
 
 -- name: DeletePhoneCode :exec
 DELETE FROM donor_phone_codes WHERE phone=$1;

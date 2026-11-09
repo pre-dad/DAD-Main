@@ -431,11 +431,13 @@ type DonorPaymentUpdate struct {
 }
 
 type DonorPhoneCode struct {
-	Phone     string             `json:"phone"`
-	CodeHash  string             `json:"code_hash"`
-	Attempts  int32              `json:"attempts"`
-	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Phone           string             `json:"phone"`
+	CodeHash        string             `json:"code_hash"`
+	Attempts        int32              `json:"attempts"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	WindowStartedAt pgtype.Timestamptz `json:"window_started_at"`
+	WindowAttempts  int32              `json:"window_attempts"`
 }
 
 type DonorPreference struct {
