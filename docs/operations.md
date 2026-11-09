@@ -1031,6 +1031,28 @@ engagement soak at 32 users (`dashboard` 40, `today-initiative` 30, `team` 30, 1
 Each exits nonzero on any failed request or exceeded budget; an interrupted run writes the result so far and exits nonzero. For
 other shapes run `go run ./cmd/loadtest` with `-duration`, `-concurrency` (up to 2,048),
 `-mix name=weight,...` and `-max-p99 250ms,dashboard=400ms`.
+
+For multi-hour acceptance, `make loadtest-soak` runs three consecutive one-hour
+segments of the seeded mix at 32 users, each with a 100 ms p99 budget per scenario.
+The process restarts between segments; the API, workers, and database stay running.
+A failed request, exceeded budget, or interrupted segment stops the remaining runs.
+Each JSON result is retained separately with private permissions; existing result
+files are never overwritten. Use a fresh directory for each run:
+
+```sh
+make loadtest-soak LOAD_API=http://api.staging.internal:8002 LOAD_ORIGIN=https://staging.example.org \
+  LOAD_FIXTURE=/secure/dad-load.json LOAD_RESULTS_DIR=/secure/dad-load-results
+```
+
+`LOAD_SOAK_DURATION` defaults to `1h` (the generator's per-run upper bound); a shorter
+value is useful for checking the procedure but does not satisfy multi-hour acceptance.
+`LOAD_MIX` applies to each segment as it does to `loadtest-seeded`.
+Record the application commit/image digest, instance and replica sizes, donor/session
+counts, generator host, start/end times, and the proxy/header configuration with the
+results. Observe database connections/CPU, API memory/CPU, and projection lag during
+the run. Run the burst target separately and record any budget miss and its scaling
+lever; a successful local rehearsal alone does not close deployed-capacity acceptance.
+
 The default weights are referral-lookup 30, referral-capture 12, referral-missing 3 (an
 unknown code, expecting 404), spend 15, dashboard 18, gifts 7, sharing 5, profile 4,
 recurring 4 and annual-summary 2. The scenarios `events`, `event-detail`, `event-reserve`,
@@ -1321,9 +1343,8 @@ The web Apple and Google authorization-code flows use these server-only variable
 - `DONOR_OAUTH_GOOGLE_CLIENT_ID` and `DONOR_OAUTH_GOOGLE_CLIENT_SECRET`.
 
 `DONOR_PUBLIC_ORIGIN` is compiled into the web image. The shipped `docker-compose.prod.yml`
-does not yet pass these four variables to the `web` container's runtime environment, and the
-callback route answers 503 without them, so add them to the `web` service's `environment`
-before enabling these flows with Compose. Register the exact redirect URLs `${DONOR_PUBLIC_ORIGIN}/account/oauth/apple` and
+passes these four variables only to the `web` container at runtime; leaving them empty
+keeps the corresponding callback unavailable (503). Register the exact redirect URLs `${DONOR_PUBLIC_ORIGIN}/account/oauth/apple` and
 `${DONOR_PUBLIC_ORIGIN}/account/oauth/google` with the providers. Include the web
 client IDs in the corresponding `DONOR_OIDC_*_CLIENT_ID` audience allowlists and use
 `DONOR_OIDC_MODE=live`. Apple requires HTTPS for its cross-site form-post callback.

@@ -10,6 +10,8 @@ GENERATED := apps/donor-api/internal/store/queries apps/web/lib/openapi.d.ts app
 SEED_DONORS ?= 50000
 LOAD_API ?= http://127.0.0.1:8002
 LOAD_MIX ?=
+LOAD_SOAK_DURATION ?= 1h
+LOAD_RESULTS_DIR ?=
 # Must equal the API's DONOR_PUBLIC_ORIGIN, or referral captures get 403.
 LOAD_ORIGIN ?= http://localhost:3000
 LOADTEST = cd apps/donor-api && go run ./cmd/loadtest -api "$(LOAD_API)" -fixture "$(LOAD_FIXTURE)" -mix "$(LOAD_MIX)" -origin "$(LOAD_ORIGIN)" -client-ips
@@ -17,7 +19,7 @@ LOADTEST = cd apps/donor-api && go run ./cmd/loadtest -api "$(LOAD_API)" -fixtur
 .PHONY: install db-up migrate provision api donor-go web dev worker reconcile seed
 .PHONY: test test-api test-donor-go test-web test-ledger test-browser-e2e
 .PHONY: lint lint-go lint-web lint-ledger lint-scripts format format-go format-web
-.PHONY: check-ingress smoke-ingress check-images generate check-generated loadtest-seeded
+.PHONY: check-ingress smoke-ingress check-images generate check-generated loadtest-seeded loadtest-soak
 .PHONY: deploy-build deploy-up deploy-smoke deploy-down deploy-logs
 .PHONY: generate-mobile check-mobile bundle-mobile
 .PHONY: test-native-clients
@@ -152,6 +154,15 @@ loadtest-seeded:
 	$(LOADTEST) -duration 5m -concurrency 32 \
 		-mix "referral-lookup=0,referral-capture=0,referral-missing=0,spend=0,gifts=0,sharing=0,profile=0,recurring=0,annual-summary=0,dashboard=40,today-initiative=30,team=30" \
 		-max-p99 150ms
+
+# Three bounded segments retain separate p99 distributions and stop on the first failure.
+loadtest-soak:
+	@test -n "$(LOAD_RESULTS_DIR)" || { echo "Set LOAD_RESULTS_DIR to a new results directory" >&2; exit 1; }
+	@umask 077; set -eC; mkdir -p "$(LOAD_RESULTS_DIR)"; \
+	for segment in 1 2 3; do \
+		($(LOADTEST) -duration "$(LOAD_SOAK_DURATION)" -concurrency 32 -max-p99 100ms) \
+			> "$(LOAD_RESULTS_DIR)/soak-$$segment.json"; \
+	done
 
 deploy-build:
 	./scripts/deploy.sh build
