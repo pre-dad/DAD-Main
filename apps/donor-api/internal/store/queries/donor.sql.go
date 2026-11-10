@@ -307,7 +307,8 @@ func (q *Queries) PasswordReauthentication(ctx context.Context, arg PasswordReau
 }
 
 const phoneCode = `-- name: PhoneCode :one
-SELECT phone, code_hash, attempts, expires_at, created_at FROM donor_phone_codes WHERE phone=$1 FOR UPDATE
+SELECT phone, code_hash, attempts, expires_at, created_at, window_started_at, window_attempts
+FROM donor_phone_codes WHERE phone=$1 FOR UPDATE
 `
 
 func (q *Queries) PhoneCode(ctx context.Context, phone string) (DonorPhoneCode, error) {
@@ -319,6 +320,8 @@ func (q *Queries) PhoneCode(ctx context.Context, phone string) (DonorPhoneCode, 
 		&i.Attempts,
 		&i.ExpiresAt,
 		&i.CreatedAt,
+		&i.WindowStartedAt,
+		&i.WindowAttempts,
 	)
 	return i, err
 }
@@ -406,7 +409,7 @@ func (q *Queries) RecordDonorDeletion(ctx context.Context, arg RecordDonorDeleti
 }
 
 const recordPhoneCodeAttempt = `-- name: RecordPhoneCodeAttempt :exec
-UPDATE donor_phone_codes SET attempts=attempts+1 WHERE phone=$1
+UPDATE donor_phone_codes SET attempts=attempts+1, window_attempts=window_attempts+1 WHERE phone=$1
 `
 
 func (q *Queries) RecordPhoneCodeAttempt(ctx context.Context, phone string) error {
@@ -754,7 +757,9 @@ func (q *Queries) UpsertCompanyTouch(ctx context.Context, arg UpsertCompanyTouch
 const upsertPhoneCode = `-- name: UpsertPhoneCode :exec
 INSERT INTO donor_phone_codes (phone, code_hash, attempts, expires_at)
 VALUES ($1, $2, 0, $3)
-ON CONFLICT (phone) DO UPDATE SET code_hash=EXCLUDED.code_hash, attempts=0, expires_at=EXCLUDED.expires_at, created_at=now()
+ON CONFLICT (phone) DO UPDATE SET code_hash=EXCLUDED.code_hash, attempts=0, expires_at=EXCLUDED.expires_at, created_at=now(),
+ window_attempts=CASE WHEN donor_phone_codes.window_started_at > now() - interval '1 day' THEN donor_phone_codes.window_attempts ELSE 0 END,
+ window_started_at=CASE WHEN donor_phone_codes.window_started_at > now() - interval '1 day' THEN donor_phone_codes.window_started_at ELSE now() END
 `
 
 type UpsertPhoneCodeParams struct {
@@ -764,7 +769,8 @@ type UpsertPhoneCodeParams struct {
 }
 
 // Last request wins: a new code for the same phone overwrites the pending one
-// and resets the attempt counter.
+// and resets its attempt counter. The phone's guess window carries over until
+// it is a day old.
 func (q *Queries) UpsertPhoneCode(ctx context.Context, arg UpsertPhoneCodeParams) error {
 	_, err := q.db.Exec(ctx, upsertPhoneCode, arg.Phone, arg.CodeHash, arg.ExpiresAt)
 	return err

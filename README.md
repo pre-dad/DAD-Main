@@ -1,6 +1,6 @@
 # DAD — donor release
 
-The R1 application for Dynamic Aid Delivery: guest giving, direct Link and IRL
+The R1 application for Dynamic Aid Delivery: verified-account giving, direct Link and IRL
 referrals, a donor dashboard with streak recognition, badges, rankings and network
 milestones, funded initiatives with a daily rotation, events and volunteering, recurring-gift
 controls, a partner portal, employee giving with matching and teams, and an audited staff
@@ -219,6 +219,7 @@ enables workers or deletes database volumes implicitly. Test-only readiness is n
 - `contracts/mobile`: the generated mobile-foundation bundle the native iOS and Android clients build against, checked by `make check-mobile`.
 - `deploy/nginx`: the production ingress configuration.
 - `scripts`: deployment, backup, restore verification, and ingress checks.
+- AWS infrastructure (CDK) lives in the separate [DAD-infra](https://github.com/pre-dad/DAD-infra) repository; see [AWS deployment](docs/aws-deployment.md).
 - `docs`: product rules, architecture, operations, and security guidance.
 
 [Contributing](CONTRIBUTING.md) · [Architecture](docs/architecture.md) · [MIT license](LICENSE)

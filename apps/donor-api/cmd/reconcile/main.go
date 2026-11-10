@@ -235,10 +235,9 @@ func reconcileWindowPaced(
 	}
 	// The diff needs the complete DB set for the window in memory to compare it
 	// against the complete Stripe set, so this bounds memory rather than the
-	// window length — Stripe listing itself is no longer day-capped (it splits
-	// sub-day; see listSplitting). A window whose DB side exceeds this bound is
-	// rejected with guidance to narrow it; streaming the DB-side diff to lift
-	// this bound entirely is a follow-up for horizon-scale daily volumes.
+	// window length; Stripe listing splits windows itself (see listSplitting).
+	// A window whose DB side exceeds this bound is rejected with guidance to
+	// narrow it.
 	if len(giftRows) > reconcileRowBound || len(refundRows) > reconcileRowBound {
 		return reconcile.Report{}, errors.New("reconciliation window exceeds the in-memory row bound; use a smaller -since/-until range")
 	}

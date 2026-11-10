@@ -4,7 +4,7 @@ import { Page } from "@/components/donor/Page";
 import { foundingDeadlineLabel, launchDateLabel } from "@/lib/launch";
 import { isGiftAmount } from "@/lib/money";
 
-import { ResendLink } from "./ResendLink";
+import { DashboardLink } from "./DashboardLink";
 
 export const metadata: Metadata = { title: "Thank you", robots: { index: false } };
 
@@ -33,18 +33,15 @@ export default async function ThankYouPage({ searchParams }: PageProps<"/donate/
       <div className="callout highlight">
         <h2>What happens next</h2>
         <ol>
-          <li>Stripe confirms your gift, then we email your receipt and a claim link to the address you gave.</li>
+          <li>Stripe confirms your gift, then we email your receipt to your account’s address.</li>
           <li>
-            Open the link to claim your account. It holds your giving streak and your personal referral link and code,
-            so the people you invite count toward your circle.
+            Your <DashboardLink>dashboard</DashboardLink> holds your giving streak and your personal referral link and
+            code, so the people you invite count toward your circle.
           </li>
           <li>
             When you’re ready, <a href="/account/share">invite someone to give with you</a>.
           </li>
         </ol>
-        <p>
-          If it hasn’t arrived in a few minutes, <ResendLink>request a new claim link</ResendLink>.
-        </p>
       </div>
       <p className="note">
         Your receipt email follows once Stripe confirms the payment. In this sandbox preview it is a test gift record,

@@ -18,15 +18,15 @@ export default function HowItWorks() {
       </p>
       <h2>Giving</h2>
       <p>
-        Give monthly on the web, without creating an account first. Giving suggests about a dollar a day, billed as
-        $30/month. You can also choose $90, $150, or any amount up to $900/month. The monthly amount is what your card
-        is charged.
+        Create a donor account and verify your email, then give monthly on the web. Giving suggests a dollar a day,
+        billed as $30/month. You can give more in whole dollars a day, up to $30 a day ($900/month); the monthly charge
+        is always the daily amount × 30.
       </p>
       <h2>Your circle</h2>
       <p>
-        After giving, claim your account to share your personal link or show your referral code on your phone. A Link
-        Referral begins with a shared link; an IRL Referral begins when someone scans your code. Your dashboard counts
-        them separately, once a first gift completes.
+        Your account holds your personal link and a referral code to show on your phone. A Link Referral begins with a
+        shared link; an IRL Referral begins when someone scans your code. Your dashboard counts them separately, once a
+        first gift completes.
       </p>
       <p>
         Your circle includes only people you personally refer. Attributed dollars reflect money actually collected, less

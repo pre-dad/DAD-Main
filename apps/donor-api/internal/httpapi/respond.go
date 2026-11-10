@@ -113,7 +113,12 @@ func (s service) serve(w http.ResponseWriter, r *http.Request, call func(context
 
 func writeError(w http.ResponseWriter, r *http.Request, status int, detail string, cause error) {
 	if status >= http.StatusInternalServerError && cause != nil {
-		slog.LogAttrs(r.Context(), slog.LevelError, "request failed",
+		// A client that disconnects cancels its own request; that is not a server failure.
+		level, message := slog.LevelError, "request failed"
+		if errors.Is(cause, context.Canceled) && r.Context().Err() != nil {
+			level, message = slog.LevelInfo, "request canceled by client"
+		}
+		slog.LogAttrs(r.Context(), level, message,
 			slog.String("route", r.Pattern), slog.Int("status", status), slog.String("cause", errorClass(cause)))
 	}
 	writeJSON(w, status, problem{Detail: detail})

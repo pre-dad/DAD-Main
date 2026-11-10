@@ -147,6 +147,64 @@ func TestPhoneSignInSerializesGuessesAndResends(t *testing.T) {
 	}
 }
 
+func TestPhoneGuessesAreBoundedAcrossResends(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	id, _ := donor(t, pool)
+	const phone = "+14155550127"
+	mustExec(t, pool, "UPDATE donors SET phone=$2 WHERE id=$1", id, phone)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_phone_codes WHERE phone=$1", phone) })
+	sender := &sms.StubSender{}
+	sends := &sync.WaitGroup{}
+	svc := PhoneService{DB: as(t, dbroles.API), Sender: sender, sends: sends}
+	resend := func() string {
+		t.Helper()
+		mustExec(t, pool, "UPDATE donor_phone_codes SET created_at=now()-interval '2 minutes' WHERE phone=$1", phone)
+		if err := svc.BeginSignIn(ctx, phone); err != nil {
+			t.Fatal(err)
+		}
+		sends.Wait()
+		message, _ := sender.Last(phone)
+		return extractCode(t, message)
+	}
+	wrongFor := func(code string) string {
+		if code == "000000" {
+			return "111111"
+		}
+		return "000000"
+	}
+
+	code := resend()
+	for range phoneWindowMaxTries / phoneCodeMaxTries {
+		for range phoneCodeMaxTries {
+			if _, err := svc.FinishSignIn(ctx, phone, wrongFor(code), Client{}); !errors.Is(err, ErrSignInCode) {
+				t.Fatalf("wrong guess: %v", err)
+			}
+		}
+		code = resend()
+	}
+	if _, err := svc.FinishSignIn(ctx, phone, code, Client{}); !errors.Is(err, ErrSignInCode) {
+		t.Fatalf("a code issued after the day's guesses were spent signed in: %v", err)
+	}
+	hash := func() (h string) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, "SELECT code_hash FROM donor_phone_codes WHERE phone=$1", phone).Scan(&h); err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	spent := hash()
+	resend()
+	if hash() != spent {
+		t.Fatal("a code was issued after the day's guesses were spent")
+	}
+
+	mustExec(t, pool, "UPDATE donor_phone_codes SET window_started_at=now()-interval '25 hours' WHERE phone=$1", phone)
+	if _, err := svc.FinishSignIn(ctx, phone, resend(), Client{}); err != nil {
+		t.Fatalf("a fresh code after the window rolled over: %v", err)
+	}
+}
+
 func TestPhoneChangeInvalidatesPendingCode(t *testing.T) {
 	s, token, id := donorServiceFixture(t)
 	pool := database(t)

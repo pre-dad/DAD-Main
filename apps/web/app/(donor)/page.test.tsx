@@ -23,7 +23,7 @@ it("states the gift beside its daily framing and the launch date from lib/launch
 it("shows three step cards under the section heading and no sandbox sentence, and the deadline at most once", () => {
   render(<DonorHome />);
   const steps = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-  expect(steps).toEqual(["Give", "Claim your account", "Invite someone"]);
+  expect(steps).toEqual(["Create your account", "Give", "Invite someone"]);
   expect(screen.queryByText(/Stripe test payments/)).not.toBeInTheDocument();
   // FoundingLine owns the deadline (it may be hidden after the window); no other block repeats it.
   expect(screen.queryAllByText(/December 31, 2026/).length).toBeLessThanOrEqual(1);

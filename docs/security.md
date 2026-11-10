@@ -65,7 +65,9 @@ Phone sign-in sends a six-digit code to a phone already saved on an account. The
 stored hashed, expires after 10 minutes, and allows five attempts. A wrong guess commits
 while holding the code lock, before the request is rejected, so concurrent guesses cannot
 exceed the budget. A replacement is limited to one a minute per phone across API replicas;
-an immediate retry preserves the existing code and attempt count. Changing or removing a
+an immediate retry preserves the existing code and attempt count. Each phone also has
+20 wrong guesses across all its codes in a rolling day; once they are spent, no new code
+is sent and none is accepted until the day has passed. Changing or removing a
 phone, or deleting its account, invalidates its pending code. Requesting a code answers the same whether or not the number has an account, and
 a wrong, expired, or exhausted code and an unknown number all fail with one message.
 Apple and Google sign-in verify the ID token's RS256 signature against the provider's
@@ -136,7 +138,7 @@ rate limited in the same classes, refreshes in the account class rather than the
 sign-in budget. Only donor account routes admit the app (sign-in, claim, passkey sign-in,
 refresh, email-change confirmation, sign-out, `/donor/me/*`) and referral and company-code
 link capture, which hands the app the visitor token a browser keeps as an HttpOnly cookie;
-guest giving, partner signup, and all staff routes stay browser-only, and staff sessions are
+web checkout, partner signup, and all staff routes stay browser-only, and staff sessions are
 never accepted as bearer tokens. The app must keep its tokens in the platform keychain/keystore and send
 one refresh at a time. The Next proxy does not forward `Authorization` or
 `X-DAD-Client`, so the app calls the API host directly. The bundled nginx serves only the

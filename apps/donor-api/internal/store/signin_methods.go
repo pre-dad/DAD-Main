@@ -36,8 +36,17 @@ var phonePatternStore = regexp.MustCompile(`^\+[1-9][0-9]{1,14}$`)
 const (
 	phoneCodeTTL      = 10 * time.Minute
 	phoneCodeMaxTries = 5
-	phoneSendTimeout  = 15 * time.Second
+	// phoneWindowMaxTries bounds wrong guesses for a phone across resends in a
+	// rolling day, keeping a sustained guess rate near 20 in a million a day.
+	phoneWindowMaxTries = 20
+	phoneGuessWindow    = 24 * time.Hour
+	phoneSendTimeout    = 15 * time.Second
 )
+
+// windowSpent reports whether the phone has used its day's wrong guesses.
+func windowSpent(code queries.DonorPhoneCode, now time.Time) bool {
+	return code.WindowAttempts >= phoneWindowMaxTries && now.Before(code.WindowStartedAt.Time.Add(phoneGuessWindow))
+}
 
 // PhoneService runs phone/SMS sign-in. Sender is nil when SMS is unconfigured.
 type PhoneService struct {
@@ -82,7 +91,7 @@ func (s PhoneService) BeginSignIn(ctx context.Context, phone string) error {
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if err == nil && time.Since(pending.CreatedAt.Time) < time.Minute {
+		if err == nil && (time.Since(pending.CreatedAt.Time) < time.Minute || windowSpent(pending, time.Now())) {
 			return nil
 		}
 		sent = true
@@ -149,7 +158,7 @@ func (s PhoneService) FinishSignIn(ctx context.Context, phone, code string, clie
 		}
 		now := time.Now().UTC()
 		expired := !now.Before(pending.ExpiresAt.Time)
-		overTried := pending.Attempts >= phoneCodeMaxTries
+		overTried := pending.Attempts >= phoneCodeMaxTries || windowSpent(pending, now)
 		matched := HashToken(code) == pending.CodeHash
 		if expired || overTried || !matched {
 			if !expired && !overTried {
