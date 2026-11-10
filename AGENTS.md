@@ -11,6 +11,9 @@ Start with these; this file only adds what they do not say.
   before touching that tree.
 - **Cross-repo system docs** live in the separate **DAD-Docs** repo (topology, the
   mobile contract, branch conventions). Read them when a change crosses repo boundaries.
+- **[Shared agent workflow](https://github.com/pre-dad/DAD-Docs/blob/dev/conventions/agent-workflow.md)** —
+  read DAD-Docs for skill setup, routing, and independent-review boundaries. Keep
+  shared procedures there; this guide owns repo-local commands and constraints.
 
 ## Branch and push discipline
 
