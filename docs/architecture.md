@@ -85,7 +85,8 @@ app's conversion moment.
 
 ## Financial consistency
 
-Guest checkouts capture last-touch attribution before accounts exist. Durable commands
+Checkout requires a verified, signed-in donor and carries the last-touch attribution
+captured before sign-up. Durable commands
 are committed before external mutations and carry frozen parameters and stable processor
 idempotency keys. An ambiguous provider response is reconciled before another mutation;
 old unknown commands require operator review rather than a new blind request.

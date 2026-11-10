@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -122,5 +123,33 @@ func TestFailuresAreLoggedWithoutPrivateDetail(t *testing.T) {
 	}
 	if strings.Contains(out, "donor@example.org") {
 		t.Fatal("log exposed private error text")
+	}
+}
+
+func TestClientCancellationIsNotLoggedAsAFailure(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	server := NewServer("", Services{Dashboard: &dashboardStub{err: context.Canceled}})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r := httptest.NewRequestWithContext(ctx, "GET", "/donor/me/dashboard", nil)
+	r.AddCookie(&http.Cookie{Name: donorCookie, Value: "session"})
+	server.Handler.ServeHTTP(httptest.NewRecorder(), r)
+
+	out := logs.String()
+	if strings.Contains(out, `"level":"ERROR"`) || !strings.Contains(out, `"msg":"request canceled by client"`) {
+		t.Fatalf("client cancellation logged as a failure: %s", out)
+	}
+
+	logs.Reset()
+	server = NewServer("", Services{Dashboard: &dashboardStub{err: context.Canceled}})
+	r = httptest.NewRequest("GET", "/donor/me/dashboard", nil)
+	r.AddCookie(&http.Cookie{Name: donorCookie, Value: "session"})
+	server.Handler.ServeHTTP(httptest.NewRecorder(), r)
+	if !strings.Contains(logs.String(), `"level":"ERROR"`) {
+		t.Fatalf("a cancellation the client did not cause must stay an error: %s", logs.String())
 	}
 }
