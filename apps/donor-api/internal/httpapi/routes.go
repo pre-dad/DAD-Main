@@ -25,10 +25,9 @@ type route struct {
 // change state. Mutations pass the Origin and rate-limit guard: donor and
 // public routes admit the public origin, and the native donor app on donor
 // account routes and link capture only, of which app entry routes admit
-// nothing else; staff
-// routes admit only the staff origin, and refuse any request a browser reports
-// as started elsewhere. The Stripe webhook is authenticated by its signature
-// instead.
+// nothing else; staff routes admit only the staff origin, and refuse any
+// request a browser reports as started elsewhere. The Stripe webhook is
+// authenticated by its signature instead.
 func (a *api) routes() []route {
 	return []route{
 		a.public("GET /health/live", a.live),
