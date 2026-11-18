@@ -3,9 +3,11 @@ import Form from "next/form";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
+import { KeysetPager } from "@/components/donor/KeysetPager";
 import { Page } from "@/components/donor/Page";
 import { ApiError, api, failureMessage, type ResponseBody, type Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
+import { useKeysetResource } from "@/lib/useKeysetResource";
 
 /** `q` is the submitted search, kept in the URL so Back from a donor record returns to it. */
 export default function Staff({ q }: { q: string | null }) {
@@ -296,12 +298,11 @@ export default function Staff({ q }: { q: string | null }) {
 }
 
 function DonorSearch({ q }: { q: string }) {
-  // Keyset paging: each entry is the cursor that opened a page, the first being none.
-  const [cursors, setCursors] = useState<string[]>([]);
-  const cursor = cursors.at(-1);
-  const query = new URLSearchParams({ q });
-  if (cursor) query.set("cursor", cursor);
-  const { resource, data, reload } = useApiResource<Schema<"DonorSearch">>(`/donor/staff/donors?${query}`);
+  const { resource, data, reload, heading, newer, older } = useKeysetResource<Schema<"DonorSearch">>((cursor) => {
+    const query = new URLSearchParams({ q });
+    if (cursor) query.set("cursor", cursor);
+    return `/donor/staff/donors?${query}`;
+  });
   const messages = resourceMessages(resource, {
     loading: "Searching donors…",
     failure: "Donor search could not be completed right now. Please retry in a moment.",
@@ -309,7 +310,9 @@ function DonorSearch({ q }: { q: string }) {
   });
   return (
     <section aria-labelledby="donor-results">
-      <h2 id="donor-results">Donors</h2>
+      <h2 id="donor-results" ref={heading} tabIndex={-1}>
+        Donors
+      </h2>
       {resource.state === "signedOut" && (
         <p>
           <Link className="button" href="/staff/sign-in">
@@ -332,20 +335,11 @@ function DonorSearch({ q }: { q: string }) {
           ) : (
             <p>No matching donors.</p>
           )}
-          {cursors.length > 0 && (
-            <button type="button" className="secondary" onClick={() => setCursors(cursors.slice(0, -1))}>
-              Previous donor page
-            </button>
-          )}
-          {data.next_cursor !== null && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setCursors([...cursors, data.next_cursor ?? ""])}
-            >
-              Next donor page
-            </button>
-          )}
+          <KeysetPager
+            newer={newer}
+            older={older}
+            labels={{ newer: "Previous donor page", older: "Next donor page" }}
+          />
         </>
       )}
       {(resource.state === "offline" || resource.state === "error") && (

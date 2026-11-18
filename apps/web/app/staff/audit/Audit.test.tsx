@@ -13,7 +13,7 @@ const event = (id: string) => ({
   details: {},
 });
 
-it("pages the audit history by cursor, newest first", async () => {
+it("pages the audit history by cursor, newest first, returning focus to the heading", async () => {
   const fetch = vi.fn(async (input: string) =>
     Response.json(
       input.includes("cursor=c%2B2")
@@ -29,8 +29,10 @@ it("pages the audit history by cursor, newest first", async () => {
   expect(await screen.findByText(/action\.older/)).toBeVisible();
   expect(fetch).toHaveBeenLastCalledWith("/api/donor/staff/audit?cursor=c%2B2", expect.anything());
   expect(screen.queryByRole("button", { name: "Older events" })).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 1, name: "Staff audit history" })).toHaveFocus();
   fireEvent.click(screen.getByRole("button", { name: "Newer events" }));
   expect(await screen.findByText(/action\.newer/)).toBeVisible();
+  expect(screen.getByRole("heading", { level: 1, name: "Staff audit history" })).toHaveFocus();
 });
 
 it("says when no events are recorded and when the history cannot load", async () => {

@@ -2,11 +2,13 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
+import { KeysetPager } from "@/components/donor/KeysetPager";
 import { Page } from "@/components/donor/Page";
 import { api, type Schema } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
+import { useKeysetResource } from "@/lib/useKeysetResource";
 
 import { RecomputeRecognition } from "./RecomputeRecognition";
 
@@ -186,11 +188,8 @@ export default function DonorDetail({ donor }: { donor: string }) {
 }
 
 function ActionHistory({ donor }: { donor: string }) {
-  // Keyset paging: each entry is the cursor that opened a page, the first being none.
-  const [cursors, setCursors] = useState<string[]>([]);
-  const cursor = cursors.at(-1);
-  const { resource, data, reload } = useApiResource<Schema<"ActionPage">>(
-    `/donor/staff/donors/${donor}/actions${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+  const { resource, data, reload, heading, newer, older } = useKeysetResource<Schema<"ActionPage">>(
+    (cursor) => `/donor/staff/donors/${donor}/actions${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
   );
   const messages = resourceMessages(resource, {
     loading: "Loading staff actions…",
@@ -198,7 +197,9 @@ function ActionHistory({ donor }: { donor: string }) {
   });
   return (
     <section aria-labelledby="staff-actions">
-      <h2 id="staff-actions">Staff financial actions</h2>
+      <h2 id="staff-actions" ref={heading} tabIndex={-1}>
+        Staff financial actions
+      </h2>
       {data && (
         <>
           {data.actions.length ? (
@@ -219,20 +220,7 @@ function ActionHistory({ donor }: { donor: string }) {
           ) : (
             <p>No refunds or cancellations recorded.</p>
           )}
-          {cursors.length > 0 && (
-            <button type="button" className="secondary" onClick={() => setCursors(cursors.slice(0, -1))}>
-              Newer actions
-            </button>
-          )}
-          {data.next_cursor !== null && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setCursors([...cursors, data.next_cursor ?? ""])}
-            >
-              Older actions
-            </button>
-          )}
+          <KeysetPager newer={newer} older={older} labels={{ newer: "Newer actions", older: "Older actions" }} />
         </>
       )}
       <Announcer status={messages.status} alert={messages.alert} />
