@@ -185,7 +185,8 @@ func TestSharedLimitRefusesWhatThisProcessWouldAdmit(t *testing.T) {
 	stub := &checkoutStub{}
 	server := NewServer("", Services{Checkout: stub, RateLimit: shared})
 	server.Handler.ServeHTTP(httptest.NewRecorder(), checkoutRequest(body))
-	if stub.calls != 1 || len(shared.calls) != 1 || shared.calls[0] != fmt.Sprintf("%s 192.0.2.1 %d", accountLimit.name, accountLimit.limit) {
+	if stub.calls != 1 || len(shared.calls) != 1 ||
+		shared.calls[0] != fmt.Sprintf("%s 192.0.2.1 %d", accountLimit.name, accountLimit.limit) {
 		t.Fatalf("admitted: %d checkouts, shared calls %v", stub.calls, shared.calls)
 	}
 }

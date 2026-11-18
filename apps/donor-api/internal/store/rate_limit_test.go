@@ -36,7 +36,8 @@ func TestClientRateLimitIsSharedByEveryReplica(t *testing.T) {
 		t.Fatal(err)
 	}
 	var left int
-	if err := replicas[0].DB.QueryRow(ctx, "SELECT count(*) FROM donor_rate_limits WHERE client=$1", client).Scan(&left); err != nil || left != 0 {
+	if err := replicas[0].DB.QueryRow(ctx, "SELECT count(*) FROM donor_rate_limits WHERE client=$1", client).Scan(&left); err != nil ||
+		left != 0 {
 		t.Fatalf("spent limits after retention: %d, %v", left, err)
 	}
 }
