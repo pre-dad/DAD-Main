@@ -12,6 +12,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"dad/donor-api/internal/store/queries"
@@ -99,7 +100,7 @@ func plainText(s string, multiline bool) bool {
 		if multiline && (r == '\t' || r == '\n' || r == '\r') {
 			return false
 		}
-		return r < 0x20 || r == 0x7f
+		return unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r)
 	})
 }
 

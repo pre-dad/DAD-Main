@@ -249,3 +249,61 @@ func mustUUID(t *testing.T, s string) pgtype.UUID {
 	}
 	return id
 }
+
+func TestPartnerSignInSerializesWithRecipientChanges(t *testing.T) {
+	pool := database(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	partner := approvedPartner(t, pool, "Serialized inbox", "SERIALINBOX", 0, 0)
+	user, _ := partnerPushSession(t, pool, partner, false)
+	email := user.String() + "@partner.test"
+	lock, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback(context.Background())
+	mustExec(t, lock, "UPDATE donor_partner_users SET disabled=true WHERE id=$1", user)
+	done := make(chan error, 1)
+	go func() { done <- (PartnerPortalService{DB: as(t, dbroles.API)}).RequestSignIn(ctx, email) }()
+	select {
+	case err := <-done:
+		t.Fatalf("sign-in did not wait for recipient changes: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := lock.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_partner_login_emails WHERE partner_user_id=$1 AND kind='SIGN_IN'", user).Scan(&count); err != nil ||
+		count != 0 {
+		t.Fatalf("disabled recipient queued %d sign-in emails: %v", count, err)
+	}
+}
+
+func TestPartnerProfileRejectsControlsAndKeepsMultilineDescriptions(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	partner := approvedPartner(t, pool, "Profile validation", "PROFILEVALID", 0, 0)
+	_, token := partnerPushSession(t, pool, partner, false)
+	service := PartnerPortalService{DB: as(t, dbroles.API)}
+	for _, input := range [][2]string{{"Injected\nOrganization", "Details"}, {"Organization", "Hidden\x1bvalue"}} {
+		if err := service.SaveProfile(ctx, token, input[0], input[1]); !errors.Is(err, ErrPartnerApplication) {
+			t.Errorf("accepted control characters: %v", err)
+		}
+	}
+	if err := service.SaveProfile(ctx, token, "Organization", "First line\nSecond line"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDonorProfileRejectsCityControls(t *testing.T) {
+	service, token, _ := donorServiceFixture(t)
+	for _, city := range []string{"New\nYork", "Hidden\x1bcity", "Directional\u202ecity"} {
+		if _, err := service.SaveProfile(context.Background(), token, ProfileUpdate{City: city}); !errors.Is(err, ErrCity) {
+			t.Errorf("accepted city control characters: %v", err)
+		}
+	}
+}

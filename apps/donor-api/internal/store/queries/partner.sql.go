@@ -1128,7 +1128,7 @@ const partnerUsersForSignIn = `-- name: PartnerUsersForSignIn :many
 SELECT u.id FROM donor_partner_users u
 JOIN donor_partner_signups p ON p.id = u.partner_id
 WHERE u.email=$1 AND NOT u.disabled AND p.approved_at IS NOT NULL
-ORDER BY u.id
+ORDER BY u.id FOR UPDATE OF u
 `
 
 // The enabled users of approved partners who sign in with this email.

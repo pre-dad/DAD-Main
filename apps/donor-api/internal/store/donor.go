@@ -329,7 +329,7 @@ func (s DonorService) SaveProfile(ctx context.Context, token string, in ProfileU
 
 	var cityCol pgtype.Text
 	if city != "" {
-		if utf8.RuneCountInString(city) > 80 {
+		if utf8.RuneCountInString(city) > 80 || !plainText(city, false) {
 			return Profile{}, ErrCity
 		}
 		cityCol = text(city)

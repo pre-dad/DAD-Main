@@ -321,7 +321,7 @@ WHERE sqlc.arg(kind)::text <> 'SIGN_IN' OR (
 SELECT u.id FROM donor_partner_users u
 JOIN donor_partner_signups p ON p.id = u.partner_id
 WHERE u.email=$1 AND NOT u.disabled AND p.approved_at IS NOT NULL
-ORDER BY u.id;
+ORDER BY u.id FOR UPDATE OF u;
 
 -- name: NextPartnerLoginEmail :one
 SELECT * FROM donor_partner_login_emails WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1

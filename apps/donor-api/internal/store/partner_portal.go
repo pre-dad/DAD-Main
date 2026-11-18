@@ -117,7 +117,8 @@ func partnerAdminTransaction[T any](ctx context.Context, db *pgxpool.Pool, token
 // Admin-only.
 func (s PartnerPortalService) SaveProfile(ctx context.Context, token, organization, description string) error {
 	organization, description = strings.TrimSpace(organization), strings.TrimSpace(description)
-	if organization == "" || utf8.RuneCountInString(organization) > 200 || utf8.RuneCountInString(description) > 4000 {
+	if organization == "" || utf8.RuneCountInString(organization) > 200 || utf8.RuneCountInString(description) > 4000 ||
+		!plainText(organization, false) || !plainText(description, true) {
 		return ErrPartnerApplication
 	}
 	_, err := partnerAdminWrite(ctx, s.DB, token, func(tx pgx.Tx, actor PartnerActor, _ time.Time) (struct{}, error) {
