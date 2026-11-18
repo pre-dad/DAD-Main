@@ -40,10 +40,24 @@ it("does not offer a broken Apple pass when issuance fails", async () => {
     vi
       .fn()
       .mockResolvedValueOnce(response({ apple: true, google: false }))
-      .mockResolvedValueOnce({ ok: false, status: 503 }),
+      .mockResolvedValueOnce(Response.json({ detail: "Wallet passes are unavailable" }, { status: 503 })),
   );
   render(<WalletButtons />);
   fireEvent.click(await screen.findByRole("button", { name: "Add to Apple Wallet" }));
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("pass could not be prepared"));
   expect(screen.getByRole("button", { name: "Add to Apple Wallet" })).toBeEnabled();
+});
+it("says when a pass request was rate limited, since retrying at once cannot help", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValueOnce(response({ apple: true, google: false }))
+      .mockResolvedValueOnce(Response.json({ detail: "Too many requests" }, { status: 429 })),
+  );
+  render(<WalletButtons />);
+  fireEvent.click(await screen.findByRole("button", { name: "Add to Apple Wallet" }));
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent("Too many requests from this connection. Wait a minute"),
+  );
 });
