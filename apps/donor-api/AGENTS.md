@@ -59,8 +59,8 @@ true; add a rule when a mistake would otherwise be repeated.
   `latest_charge` as a bare id, never the expanded object — you cannot "trust
   the payload" for charge facts that live on the expanded charge.
 - **Preserve the fetch-outside-lock discipline.** The Stripe worker fetches
-  provider state *before* taking the donor lock; re-fetch on conflict happens
-  under the lock. Do not move a provider round trip inside the lock — a test
+  provider state *before* taking the donor lock; a stale snapshot rolls back
+  the transaction before a bounded re-fetch outside the lock. Do not move a provider round trip inside the lock — a test
   (`TestEventWorkerReadsProcessorOutsideDonorLock`) enforces this.
 - **Every Stripe call spends from the account's request budget**
   (`internal/payments/ratebudget.go`, buckets worker/checkout/staff/reconcile).

@@ -91,27 +91,28 @@ func (s RecurringService) BeginPaymentUpdate(ctx context.Context, token string, 
 	if err != nil {
 		return PaymentUpdate{}, err
 	}
-	prefetch, err := s.prefetchPaymentSetup(ctx, token, requestID)
-	if err != nil {
-		return PaymentUpdate{}, err
-	}
-	if s.Gateway == nil {
-		return PaymentUpdate{}, payments.ErrUnconfigured
-	}
-	owner := donorOwner(token)
-	var updateID pgtype.UUID
-	finished, err := donorWrite(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (*PaymentUpdate, error) {
-		id, finished, err := s.stagePaymentUpdate(ctx, queries.New(tx), d, requestID, prefetch, site, now)
-		updateID = id
-		return finished, err
-	})
-	if err != nil {
-		return PaymentUpdate{}, err
-	}
-	if finished != nil {
-		return *finished, nil
-	}
-	return s.openPaymentSession(ctx, owner, updateID)
+	return withFreshSnapshot(
+		func() (paymentSetupPrefetch, error) { return s.prefetchPaymentSetup(ctx, token, requestID) },
+		func(prefetch paymentSetupPrefetch) (PaymentUpdate, error) {
+			if s.Gateway == nil {
+				return PaymentUpdate{}, payments.ErrUnconfigured
+			}
+			owner := donorOwner(token)
+			var updateID pgtype.UUID
+			finished, err := donorWrite(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (*PaymentUpdate, error) {
+				id, finished, err := s.stagePaymentUpdate(ctx, queries.New(tx), d, requestID, prefetch, site, now)
+				updateID = id
+				return finished, err
+			})
+			if err != nil {
+				return PaymentUpdate{}, err
+			}
+			if finished != nil {
+				return *finished, nil
+			}
+			return s.openPaymentSession(ctx, owner, updateID)
+		}, ErrSubscriptionConflict,
+	)
 }
 
 // stagePaymentUpdate returns the update to open: requestID's own, the
@@ -146,11 +147,7 @@ func (s RecurringService) stagePaymentUpdate(
 		}
 		facts := prefetch.unfinished
 		if facts == nil || facts.update != row.ID {
-			fetched, err := fetchPaymentUpdate(ctx, q, s.Gateway, row, "", now)
-			if err != nil {
-				return pgtype.UUID{}, nil, err
-			}
-			facts = &fetched
+			return pgtype.UUID{}, nil, errRefetch
 		}
 		status, err := applyPaymentUpdate(ctx, q, row, *facts, now)
 		if err != nil {
@@ -187,7 +184,7 @@ func (s RecurringService) insertPaymentUpdate(
 	if err != nil {
 		return err
 	}
-	remote, err := currentSubscription(ctx, q, newSubFetcher(s.Gateway), attempt, snapshot)
+	remote, err := lockedSubscription(ctx, q, attempt, snapshot)
 	if err != nil {
 		return err
 	}

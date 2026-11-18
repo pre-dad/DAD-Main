@@ -33,10 +33,8 @@ func newSubFetcher(gateway payments.FinancialGateway) *subFetcher {
 // caller holding a transaction never calls the processor.
 func (f *subFetcher) freeze() { f.frozen = true }
 
-// retrieve returns the processor's view of id, fetching it at most once per
-// step for a given id. It is for a resolution that is content with any state
-// read during this step (a first resolution): the under-lock conflict re-read
-// uses refresh instead, so this memo never masks a needed fresh read.
+// retrieve reuses a resolution within one step. A stale snapshot uses refresh
+// instead, so the memo cannot mask a needed fresh read.
 func (f *subFetcher) retrieve(ctx context.Context, id string) (payments.Object, error) {
 	if cached, ok := f.seen[id]; ok {
 		return cached, nil
@@ -44,9 +42,8 @@ func (f *subFetcher) retrieve(ctx context.Context, id string) (payments.Object, 
 	return f.refresh(ctx, id)
 }
 
-// refresh always reads the processor and records the result for the rest of
-// the step. The under-lock conflict path calls this so a state that moved
-// after the pre-lock read is observed, never a memoized pre-lock value.
+// refresh bypasses the memo. Frozen fetchers make a locked caller roll back
+// before fetching again.
 func (f *subFetcher) refresh(ctx context.Context, id string) (payments.Object, error) {
 	if f.frozen {
 		return nil, errRefetch
@@ -93,11 +90,8 @@ func fetchSubscription(
 	return &subscriptionSnapshot{attempt: attempt, id: id, observed: observed, remote: remote}, nil
 }
 
-// currentSubscription returns processor state for the locked attempt. A
-// snapshot is used only if nothing was reconciled after it was read; otherwise
-// it may predate the stored state, so the processor is read again — but still
-// through the step memo, so a subscription already resolved this step is not
-// fetched twice.
+// currentSubscription accepts a snapshot only if no reconciliation has passed
+// it. Locked callers freeze the fetcher so stale state requires a new transaction.
 func currentSubscription(
 	ctx context.Context,
 	q *queries.Queries,
@@ -289,4 +283,34 @@ func reconcileAmount(
 		return nil
 	}
 	return payments.ErrFacts
+}
+
+// withFreshSnapshot retries after the applying transaction rolls back and
+// releases its locks. Repeated churn becomes a conflict rather than unbounded work.
+func withFreshSnapshot[S, T any](fetch func() (S, error), apply func(S) (T, error), conflict error) (T, error) {
+	var zero T
+	for range 2 {
+		snapshot, err := fetch()
+		if err != nil {
+			return zero, err
+		}
+		result, err := apply(snapshot)
+		if !errors.Is(err, errRefetch) {
+			return result, err
+		}
+	}
+	return zero, conflict
+}
+
+func lockedSubscription(
+	ctx context.Context,
+	q *queries.Queries,
+	attempt queries.DonorStripeCheckout,
+	snapshot *subscriptionSnapshot,
+) (payments.Object, error) {
+	remote, err := currentSubscription(ctx, q, &subFetcher{frozen: true}, attempt, snapshot)
+	if errors.Is(err, errRefetch) {
+		err = errors.Join(ErrSubscriptionConflict, err)
+	}
+	return remote, err
 }

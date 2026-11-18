@@ -364,6 +364,11 @@ func TestRecurringCommandReadsProcessorOutsideDonorLock(t *testing.T) {
 			if err = lock.Commit(ctx); err != nil {
 				t.Fatal(err)
 			}
+			if reconciledMeanwhile {
+				r.sub.mu.Lock()
+				r.sub.beforeRetrieve = func() { probeDonorLock(t, pool, r.donorID) }
+				r.sub.mu.Unlock()
+			}
 			close(release)
 			got := <-done
 			if got.err != nil {
@@ -872,6 +877,7 @@ func TestStaffRefundRetrySettlesLostOutcome(t *testing.T) {
 					)
 					r.process(t)
 					assertEventProcessed(t, r.workerFixture, event, true)
+					r.sub.beforeList = func() { probeDonorLock(t, pool, r.donorID) }
 				}
 			}
 			result, err := s.Refund(
