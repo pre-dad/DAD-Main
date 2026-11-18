@@ -578,3 +578,26 @@ func TestListSplittingPropagatesNonCapErrors(t *testing.T) {
 		t.Fatalf("a non-cap error must not trigger a split: %d calls", calls)
 	}
 }
+
+func TestListSplittingStopsAtStripeSecondResolution(t *testing.T) {
+	start := time.Date(2027, 3, 1, 12, 0, 0, 0, time.UTC)
+	calls := 0
+	sentinel := errors.New("split did not terminate")
+	list := func(_ context.Context, s, e time.Time) ([]payments.Object, error) {
+		calls++
+		if calls > 16 {
+			return nil, sentinel
+		}
+		if s.Unix() > e.Unix() {
+			t.Errorf("invalid Stripe interval: %v .. %v", s, e)
+		}
+		if e.Unix() == start.Add(time.Second).Unix() {
+			return nil, payments.ErrListPageCap
+		}
+		return nil, nil
+	}
+	_, err := listSplitting(context.Background(), start, start.Add(time.Second), list)
+	if !errors.Is(err, payments.ErrListPageCap) {
+		t.Fatalf("busy second: %v after %d calls", err, calls)
+	}
+}

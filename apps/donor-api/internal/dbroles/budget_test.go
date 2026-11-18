@@ -21,8 +21,8 @@ func TestDefaultLimitsCoverReplicasWithinTheBudget(t *testing.T) {
 	if err := dbroles.Plan(all, nil, dbroles.DefaultBudget); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int32{"dad_api": 640}
-	var total int32
+	want := map[string]int64{"dad_api": 640}
+	var total int64
 	for _, login := range all {
 		expected, set := want[login.Role.Name]
 		if !set {
@@ -115,5 +115,13 @@ func TestEveryRoleHasAUniqueKey(t *testing.T) {
 	}
 	if !slices.Contains(keys, "email-changes") || !slices.Contains(keys, "staff-cli") || !slices.Contains(keys, "api") {
 		t.Errorf("unexpected keys %v", keys)
+	}
+}
+
+func TestPlanRejectsOverflowingConnectionLimits(t *testing.T) {
+	login := dbroles.Login{Role: dbroles.API, Pool: 3}
+	replicas := map[string]int32{"api": 1431655765}
+	if err := dbroles.Plan([]dbroles.Login{login}, replicas, dbroles.DefaultBudget); err == nil {
+		t.Fatal("overflowing pool allowance bypassed the connection budget")
 	}
 }

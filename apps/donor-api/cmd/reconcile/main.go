@@ -394,10 +394,11 @@ func listSplitting(
 	if !errors.Is(err, payments.ErrListPageCap) {
 		return nil, err
 	}
-	if !end.After(start) {
+	first, last := start.Unix(), end.Unix()
+	if last <= first {
 		return nil, err
 	}
-	mid := start.Add(end.Sub(start) / 2)
+	mid := time.Unix(first+(last-first)/2+1, 0)
 	left, err := listSplitting(ctx, start, mid.Add(-time.Second), list)
 	if err != nil {
 		return nil, err
