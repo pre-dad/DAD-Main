@@ -23,3 +23,8 @@ DELETE FROM donor_phone_codes WHERE phone=ANY(ARRAY(
  SELECT phone FROM donor_phone_codes WHERE expires_at<sqlc.arg(expired_before)::timestamptz
  ORDER BY expires_at,phone LIMIT sqlc.arg(batch)
 ));
+
+-- name: PurgeRateLimits :execrows
+DELETE FROM donor_rate_limits WHERE (class, client) IN (
+ SELECT class, client FROM donor_rate_limits WHERE tat < clock_timestamp() LIMIT sqlc.arg(batch)
+);

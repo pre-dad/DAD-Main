@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"math"
 	"net"
 	"net/http"
@@ -28,6 +29,10 @@ var (
 )
 
 const maxRatePeers = 65536
+
+// rateLimitTimeout bounds the shared limit's round trip; past it the request
+// is refused rather than admitted without a limit.
+const rateLimitTimeout = 2 * time.Second
 
 type rateKey struct {
 	class  string
@@ -127,14 +132,27 @@ func (l *rateLimiter) evictOne() {
 
 // guarded admits a mutation only from the given browser origin or, where
 // appClients is set, from the native donor app, and rate limits either per
-// client address before the handler runs.
+// client address before the handler runs: first in this process, which sheds
+// a flood without a database round trip, then in the limit every replica
+// shares.
 func (a *api) guarded(origin string, class rateClass, appClients bool, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Origin") != origin && !(appClients && native(r)) {
 			writeError(w, r, http.StatusForbidden, "Request origin is not allowed", nil)
 			return
 		}
-		if wait := a.limiter.wait(r, class, time.Now()); wait > 0 {
+		wait := a.limiter.wait(r, class, time.Now())
+		if wait == 0 && a.RateLimit != nil {
+			ctx, cancel := context.WithTimeout(r.Context(), rateLimitTimeout)
+			var err error
+			wait, err = a.RateLimit.Admit(ctx, class.name, a.limiter.client(r).String(), class.limit)
+			cancel()
+			if err != nil {
+				writeError(w, r, http.StatusServiceUnavailable, "Request limits are temporarily unavailable", err)
+				return
+			}
+		}
+		if wait > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
 			writeError(w, r, http.StatusTooManyRequests, "Too many requests", nil)
 			return

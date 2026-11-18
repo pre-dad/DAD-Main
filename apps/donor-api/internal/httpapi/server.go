@@ -16,6 +16,10 @@ import (
 	"dad/donor-api/internal/wallet"
 )
 
+type RateLimitSource interface {
+	Admit(ctx context.Context, class, client string, perMinute int) (time.Duration, error)
+}
+
 type WebhookReceiver interface {
 	Receive(context.Context, []byte, string) error
 }
@@ -27,6 +31,9 @@ type Services struct {
 	StaffOrigin    string // the exact back-office Origin admitted on staff mutations
 	TrustedProxies []netip.Prefix
 	Ready          func(context.Context) error
+	// RateLimit shares each client's limits across replicas; nil leaves only
+	// this process's buckets.
+	RateLimit RateLimitSource
 
 	Checkout CheckoutSource
 	Webhook  WebhookReceiver

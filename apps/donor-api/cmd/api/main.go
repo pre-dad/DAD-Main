@@ -216,6 +216,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		stripeGateway.UseBudget(store.StripeBudget{DB: pool, PerSecond: stripeCeiling})
 	}
 	services.Ready = func(ctx context.Context) error { return migrations.Verify(ctx, pool) }
+	services.RateLimit = store.ClientRateLimit{DB: pool}
 	services.InitiativeRead = store.InitiativeReader{DB: pool}
 	services.TodayInitiative = store.DonorInitiativeService{DB: pool}
 	services.EventRead = store.EventReader{DB: pool, SupportEmail: getenv("DONOR_SUPPORT_EMAIL")}

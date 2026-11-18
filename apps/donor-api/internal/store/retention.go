@@ -28,10 +28,11 @@ const (
 	loginRetention       = 30 * 24 * time.Hour
 	phoneCodeRetention   = 24 * time.Hour
 	credentialPurgeBatch = 2000
+	rateLimitPurgeBatch  = 5000
 )
 
 // TouchRetention deletes analytics events past retention, lapsed credentials,
-// referral touches past retention, and company-code touches once they expire,
+// spent rate limits, referral touches past retention, and company-code touches once they expire,
 // since an expired one can never bind. A pass starts once an interval and deletes one batch per call
 // until a batch comes up short. Concurrent passes skip each other's rows, so
 // every worker may run one.
@@ -84,6 +85,7 @@ func (r *TouchRetention) PurgeNext(ctx context.Context, now time.Time) (bool, er
 					Batch:         credentialPurgeBatch,
 				})
 			}},
+			{rateLimitPurgeBatch, func() (int64, error) { return q.PurgeRateLimits(ctx, rateLimitPurgeBatch) }},
 		} {
 			deleted, err := batch.purge()
 			if err != nil {

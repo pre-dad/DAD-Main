@@ -120,6 +120,10 @@ before each costs a signature check.
 | General | pages, assets, other API calls | 1,200/min uncached, challenge | 30/s, burst 300 | account writes 30/min, analytics 120/min, staff writes 60/min |
 | Stripe webhook | `/api/donor/stripe/webhook` | skipped | 20/s, burst 500 | signature verified |
 
+The API's limits hold across all its tasks, which share each client's budget through
+PostgreSQL; if that check cannot complete within two seconds the API answers 503 rather
+than admit the request unlimited.
+
 nginx also caps each client at 100 concurrent requests and answers rejections with
 `429 {"detail":"Too many requests"}`, `Retry-After` (60 for auth, otherwise 5), and
 `Cache-Control: no-store`. Like the API, nginx counts an IPv4 client by its address and
@@ -271,6 +275,9 @@ as well as the API. In order of what limits an origin:
   Keep each worker kind on one host until concurrent workers are verified. Every API and
   Stripe worker shares the Stripe account's request limit through PostgreSQL
   ([Stripe](operations.md#stripe)).
-- **Per-origin limits.** nginx's zones and the API's buckets are per origin, so N origins
-  grant a client up to N times its quota there. Cloudflare's rate limiting rules, applied
-  before any origin, are the shared limit; they are approximate.
+- **Per-origin limits.** nginx's zones are per origin, so N origins grant a client up to
+  N times its nginx quota. The API's limit is not: every API task checks its own buckets
+  first, which shed a flood without a database round trip, and then the client's shared
+  budget in PostgreSQL (`donor_rate_limits`), so neither more tasks nor more origins raise
+  it. Cloudflare's rate limiting rules, applied before any origin, stay the first shared
+  limit; they are approximate.

@@ -92,3 +92,17 @@ func (q *Queries) PurgePhoneCodes(ctx context.Context, arg PurgePhoneCodesParams
 	}
 	return result.RowsAffected(), nil
 }
+
+const purgeRateLimits = `-- name: PurgeRateLimits :execrows
+DELETE FROM donor_rate_limits WHERE (class, client) IN (
+ SELECT class, client FROM donor_rate_limits WHERE tat < clock_timestamp() LIMIT $1
+)
+`
+
+func (q *Queries) PurgeRateLimits(ctx context.Context, batch int32) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeRateLimits, batch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

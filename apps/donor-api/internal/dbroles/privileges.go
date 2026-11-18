@@ -161,6 +161,7 @@ var grants = map[string]map[Role]string{
 	},
 	"donor_payment_updates": {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE"},
 	"donor_stripe_budgets":  {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, INSERT, UPDATE"},
+	"donor_rate_limits":     {API: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT, DELETE"},
 
 	"donor_metric_projections": {
 		API:              "SELECT, INSERT, UPDATE",

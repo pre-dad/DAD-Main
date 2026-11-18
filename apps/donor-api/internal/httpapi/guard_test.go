@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -144,5 +146,46 @@ func TestRejectedRequestsDoNotReachHandlers(t *testing.T) {
 	}
 	if stub.calls != accountLimit.limit {
 		t.Fatalf("checkout ran %d times, want %d", stub.calls, accountLimit.limit)
+	}
+}
+
+type sharedLimitStub struct {
+	wait  time.Duration
+	err   error
+	calls []string
+}
+
+func (s *sharedLimitStub) Admit(_ context.Context, class, client string, perMinute int) (time.Duration, error) {
+	s.calls = append(s.calls, fmt.Sprintf("%s %s %d", class, client, perMinute))
+	return s.wait, s.err
+}
+
+func TestSharedLimitRefusesWhatThisProcessWouldAdmit(t *testing.T) {
+	body := `{"email":"donor@example.org","amount_minor":3000}`
+	for _, tt := range []struct {
+		name       string
+		shared     sharedLimitStub
+		status     int
+		retryAfter string
+	}{
+		{"another replica spent the budget", sharedLimitStub{wait: 1500 * time.Millisecond}, http.StatusTooManyRequests, "2"},
+		{"the shared limit is unreachable", sharedLimitStub{err: errors.New("connection refused")}, http.StatusServiceUnavailable, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stub := &checkoutStub{}
+			server := NewServer("", Services{Checkout: stub, RateLimit: &tt.shared})
+			response := httptest.NewRecorder()
+			server.Handler.ServeHTTP(response, checkoutRequest(body))
+			if response.Code != tt.status || response.Header().Get("Retry-After") != tt.retryAfter || stub.calls != 0 {
+				t.Fatalf("got %d, Retry-After %q, %d checkouts", response.Code, response.Header().Get("Retry-After"), stub.calls)
+			}
+		})
+	}
+	shared := &sharedLimitStub{}
+	stub := &checkoutStub{}
+	server := NewServer("", Services{Checkout: stub, RateLimit: shared})
+	server.Handler.ServeHTTP(httptest.NewRecorder(), checkoutRequest(body))
+	if stub.calls != 1 || len(shared.calls) != 1 || shared.calls[0] != fmt.Sprintf("%s 192.0.2.1 %d", accountLimit.name, accountLimit.limit) {
+		t.Fatalf("admitted: %d checkouts, shared calls %v", stub.calls, shared.calls)
 	}
 }
