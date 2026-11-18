@@ -13,9 +13,10 @@ import (
 // partnerPortalDouble records the partner session each call carries.
 type partnerPortalDouble struct {
 	PartnerPortalSource
-	acceptedApp []bool
-	overview    []string
-	signedOut   []string
+	acceptedApp  []bool
+	overview     []string
+	signedOut    []string
+	signOutError error
 }
 
 func (d *partnerPortalDouble) AcceptInvite(_ context.Context, _ string, app ...bool) (string, error) {
@@ -30,7 +31,7 @@ func (d *partnerPortalDouble) Overview(_ context.Context, token string) (store.P
 
 func (d *partnerPortalDouble) SignOut(_ context.Context, token string) error {
 	d.signedOut = append(d.signedOut, token)
-	return nil
+	return d.signOutError
 }
 
 var partnerInviteBody = `{"invite":"` + strings.Repeat("i", 43) + `"}`
@@ -118,6 +119,9 @@ func TestPartnerSignOutRevokesTheNativeSession(t *testing.T) {
 		t.Fatalf("native sign-out: %d %v", response.Code, portal.signedOut)
 	}
 
+	if len(response.Result().Cookies()) != 0 {
+		t.Fatal("native sign-out set browser cookies")
+	}
 	r := httptest.NewRequest("POST", "/donor/partner/sign-out", nil)
 	r.AddCookie(&http.Cookie{Name: partnerCookie, Value: "cookie-session"})
 	response = httptest.NewRecorder()

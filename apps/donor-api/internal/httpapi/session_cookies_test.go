@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -258,5 +259,40 @@ func TestOIDCSignInPassesTheNonceThrough(t *testing.T) {
 	if code := post(`{"id_token":"tok","nonce":"` + strings.Repeat("n", maxOIDCNonce+1) + `"}`); code != http.StatusUnprocessableEntity ||
 		source.calls != calls {
 		t.Fatalf("oversized nonce: %d after %d calls, want 422 before verification", code, source.calls)
+	}
+}
+
+func TestNativeDeletionDoesNotSetCookies(t *testing.T) {
+	source := &deleteStub{}
+	server := NewServer("", Services{Donor: source, Origin: secureOrigin})
+	response := httptest.NewRecorder()
+	server.Handler.ServeHTTP(response, appRequest("POST", "/donor/me/delete", "{}"))
+	if response.Code != http.StatusOK || len(source.deleted) != 1 || source.deleted[0] != appSession {
+		t.Fatalf("deletion: %d %+v", response.Code, source.deleted)
+	}
+	if cookies := response.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("native deletion set cookies: %+v", cookies)
+	}
+}
+
+func TestPartnerSignOutPreservesCookieUntilRevocationSucceeds(t *testing.T) {
+	source := &partnerPortalDouble{signOutError: errors.New("database unavailable")}
+	server := NewServer("", Services{PartnerPortal: source, Origin: secureOrigin})
+	request := func() *http.Request {
+		r := httptest.NewRequest("POST", "/donor/partner/sign-out", nil)
+		r.Header.Set("Origin", secureOrigin)
+		r.AddCookie(&http.Cookie{Name: "__Host-dad_partner_session", Value: appSession})
+		return r
+	}
+	failed := httptest.NewRecorder()
+	server.Handler.ServeHTTP(failed, request())
+	if failed.Code != http.StatusServiceUnavailable || len(failed.Result().Cookies()) != 0 {
+		t.Fatalf("failed revocation discarded the retry credential: %d %+v", failed.Code, failed.Result().Cookies())
+	}
+	source.signOutError = nil
+	retried := httptest.NewRecorder()
+	server.Handler.ServeHTTP(retried, request())
+	if retried.Code != http.StatusOK || len(retried.Result().Cookies()) != 2 {
+		t.Fatalf("retry: %d", retried.Code)
 	}
 }

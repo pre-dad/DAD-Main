@@ -183,9 +183,14 @@ func (a *api) partnerAccept(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) partnerSignOut(w http.ResponseWriter, r *http.Request, session string) {
-	a.setSessionCookie(w, partnerCookie, "", -1)
 	a.partnerPortal().serve(w, r, func(ctx context.Context) (any, error) {
-		return map[string]any{"signed_out": true}, a.PartnerPortal.SignOut(ctx, session)
+		if err := a.PartnerPortal.SignOut(ctx, session); err != nil {
+			return nil, err
+		}
+		if !native(r) {
+			a.setSessionCookie(w, partnerCookie, "", -1)
+		}
+		return map[string]bool{"signed_out": true}, nil
 	})
 }
 
