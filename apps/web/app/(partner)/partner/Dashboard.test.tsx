@@ -205,6 +205,34 @@ it("tells a partner admin why an export was refused instead of asking them to re
   expect(await screen.findByText("Too many requests from this connection. Wait a minute, then retry.")).toBeVisible();
 });
 
+it("lets a partner admin remove a colleague but not themselves", async () => {
+  stub({ user_id: "u1" });
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/users") && init?.method !== "POST")
+      return Promise.resolve(
+        Response.json({
+          users: [
+            { id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN" },
+            { id: "u2", email: "v@delta.test", name: "Val", role: "VIEWER" },
+          ],
+        }),
+      );
+    if (String(input).endsWith("/remove")) return Promise.resolve(Response.json({ removed: true }));
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  expect(await screen.findByRole("button", { name: "Remove v@delta.test" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Remove a@delta.test" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Remove v@delta.test" }));
+  expect(await screen.findByText("Removed v@delta.test.")).toBeInTheDocument();
+  expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+    "/api/donor/partner/users/u2/remove",
+    expect.objectContaining({ method: "POST" }),
+  );
+});
+
 it("keeps a partner viewer read-only", async () => {
   stub({ role: "VIEWER" });
   render(<Dashboard />);

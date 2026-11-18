@@ -323,7 +323,7 @@ function ReportsSection({ admin }: { admin: boolean }) {
   );
 }
 
-function UsersSection() {
+function UsersSection({ self }: { self: string }) {
   const users = useApiResource<Users>("/donor/partner/users");
   const [invite, setInvite] = useState({ email: "", name: "", role: "VIEWER" });
   const [busy, setBusy] = useState(false);
@@ -373,9 +373,13 @@ function UsersSection() {
                   {u.email} · {u.role === "ADMIN" ? "Administrator" : "Viewer"}
                 </span>
               </span>
-              <button type="button" className="secondary" onClick={() => removeUser(u.id, u.email)}>
-                Remove<span className="visuallyHidden"> {u.email}</span>
-              </button>
+              {u.id === self ? (
+                <span className="note">You</span>
+              ) : (
+                <button type="button" className="secondary" onClick={() => removeUser(u.id, u.email)}>
+                  Remove <span className="visuallyHidden">{u.email}</span>
+                </button>
+              )}
             </li>
           ))}
         </ul>
@@ -592,7 +596,7 @@ export default function Dashboard() {
           <SpendSection />
           <PeopleSection companyCode={o.company_code} />
           <ReportsSection admin={admin} />
-          {admin && <UsersSection />}
+          {admin && <UsersSection self={o.user_id} />}
           {admin && <OrganizationSection overview={o} onSaved={overview.reload} />}
           <p>
             <button type="button" className="secondary" onClick={signOut} disabled={signingOut}>
