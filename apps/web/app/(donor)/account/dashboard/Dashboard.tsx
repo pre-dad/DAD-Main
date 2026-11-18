@@ -130,7 +130,7 @@ export default function Dashboard() {
   // always today's New York date and never baked into cached HTML.
   const foundingLeft = data?.state === "ready" && !data.founding_donor ? foundingDaysLeft(new Date()) : null;
   return (
-    <Page wide eyebrow="Your impact" title="Welcome back.">
+    <Page wide eyebrow="Your impact" title={resource.state === "signedOut" ? "Your dashboard" : "Welcome back."}>
       {resource.state !== "signedOut" && (
         <div className="dashBand">
           {/* Reserved while loading so the band is the same height before and after the data arrives. */}

@@ -183,6 +183,7 @@ it("handles a logged-out response", async () => {
   stubFetch(vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) }));
   render(<DashboardPage />);
   expect(await screen.findByRole("link", { name: "Sign in to view your dashboard" })).toBeVisible();
+  expect(screen.getByRole("heading", { level: 1, name: "Your dashboard" })).toBeVisible();
   expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
 });
 
