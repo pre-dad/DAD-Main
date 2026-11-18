@@ -100,7 +100,9 @@ it("saves the streak-lapsed and badge pushes, rankings and network visibility", 
   const rankings = privacy.getByRole("checkbox", { name: "Rank my giving streak nationally and in my city" });
   expect(rankings).toBeChecked();
   fireEvent.click(rankings);
-  fireEvent.click(privacy.getByRole("checkbox", { name: "Show my first name and last initial to the person who invited me" }));
+  fireEvent.click(
+    privacy.getByRole("checkbox", { name: "Show my first name and last initial to the person who invited me" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
   expect(await screen.findByText("Preferences saved.")).toBeVisible();
   expect(sent(fetch, "/api/donor/me/preferences")).toMatchObject({
