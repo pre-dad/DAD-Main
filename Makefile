@@ -111,7 +111,7 @@ test-ledger:
 lint: lint-go lint-web lint-ledger lint-scripts
 
 lint-ledger:
-	cd apps/atm-ledger && npm run lint && npm audit --audit-level=high
+	cd apps/atm-ledger && npm run lint && node ../../scripts/npm-audit.mjs
 
 # staticcheck is pinned in apps/donor-api/tools/go.mod with a newer x/tools than its
 # release requires, which is what reads the export data of the Go release CI uses.
@@ -119,8 +119,11 @@ lint-go:
 	cd apps/donor-api && bash ../../scripts/check-go-dependencies.sh && go tool -modfile=tools/go.mod staticcheck ./... && go run $(GOVULNCHECK) ./... && go run $(GOVULNCHECK) -C tools tool
 
 # The Node scripts share the web app's Biome install, so they are checked here.
+# npm-audit.mjs fails on high advisories except dated, development-only exceptions
+# in scripts/npm-audit-exceptions.json.
 lint-web:
-	cd apps/web && npm audit --audit-level=high
+	node --test scripts/npm-audit.test.mjs
+	cd apps/web && node ../../scripts/npm-audit.mjs
 	cd scripts && ../apps/web/node_modules/.bin/biome check --error-on-warnings .
 
 lint-scripts:

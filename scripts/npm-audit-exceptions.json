@@ -1,0 +1,8 @@
+[
+ {
+  "advisory": "https://github.com/advisories/GHSA-fc5q-39xc-vjpf",
+  "packages": ["dad-web", "dad-atm-ledger"],
+  "reason": "picomatch ReDoS (all releases to 4.0.7, the latest, with no fix published). It reaches only vite and vitest, which run in development and CI on this repository's own globs, never in a shipped image. npm's only remedy is downgrading vite and vitest a major version.",
+  "expires": "2027-02-18"
+ }
+]

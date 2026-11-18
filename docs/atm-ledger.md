@@ -81,7 +81,7 @@ npm ci
 npm run typecheck
 npm test
 npm run lint
-npm audit --audit-level=high
+node ../../scripts/npm-audit.mjs
 npm run build
 npx wrangler whoami
 # If required, authenticate interactively: npx wrangler login

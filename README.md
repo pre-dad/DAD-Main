@@ -149,7 +149,8 @@ named `donor_go` and refuse the application database. Stop any running `make api
 well as `make web` before testing, so a test cannot reuse an application server.
 Use a synthetic application database and no live
 SMTP settings for those tests. `make lint` runs staticcheck, govulncheck for the API and its separate Go tooling module,
-`npm audit`, and shellcheck when installed. `make check-ingress` runs `nginx -t` on the production ingress
+`npm audit` (high and critical advisories fail it, except development-only ones listed with a reason and an
+expiry date in `scripts/npm-audit-exceptions.json`), and shellcheck when installed. `make check-ingress` runs `nginx -t` on the production ingress
 in both modes; `make smoke-ingress` checks its hosts, client addresses, body sizes, and
 rate limits in front of a stub web service; `make check-images` builds both production
 images, verifies the deployment commands are included, and serves the web image through nginx. CI runs all of these through the same
