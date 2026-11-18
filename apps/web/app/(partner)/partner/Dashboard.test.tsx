@@ -191,6 +191,20 @@ it("gives a partner admin export and user management, and emails invitations", a
   expect(screen.getByText("DELTA-7KQ4MX")).toBeInTheDocument();
 });
 
+it("tells a partner admin why an export was refused instead of asking them to retry", async () => {
+  stub();
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/report.pdf"))
+      return Promise.resolve(Response.json({ detail: "Too many requests" }, { status: 429 }));
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  fireEvent.click(await screen.findByRole("button", { name: "Export verified report (PDF)" }));
+  expect(await screen.findByText("Too many requests from this connection. Wait a minute, then retry.")).toBeVisible();
+});
+
 it("keeps a partner viewer read-only", async () => {
   stub({ role: "VIEWER" });
   render(<Dashboard />);

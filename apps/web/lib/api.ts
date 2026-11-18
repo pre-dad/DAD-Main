@@ -62,6 +62,13 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return result;
 }
 
+/** Browser-side call for a file, such as a PDF; a refusal throws the same ApiError as api(). */
+export async function apiFile(path: string, init: RequestInit = {}): Promise<Blob> {
+  const response = await fetch(`/api${path}`, { ...init, credentials: "include" });
+  if (!response.ok) throw await toError(response);
+  return response.blob();
+}
+
 type Failure =
   | "signedOut"
   | "forbidden"

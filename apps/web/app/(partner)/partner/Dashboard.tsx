@@ -5,7 +5,7 @@ import { Announcer } from "@/components/donor/Announcer";
 import { LogoEditor } from "@/components/donor/LogoEditor";
 import { Page } from "@/components/donor/Page";
 import { hours, TeamLeaderboard } from "@/components/donor/TeamLeaderboard";
-import { api, failureMessage, type RequestBody, type ResponseBody, unconfirmedMessage } from "@/lib/api";
+import { api, apiFile, failureMessage, type RequestBody, type ResponseBody, unconfirmedMessage } from "@/lib/api";
 import { formatDateTime, formatDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
@@ -257,9 +257,7 @@ function ReportsSection({ admin }: { admin: boolean }) {
     setError("");
     setStatus("");
     try {
-      const response = await fetch("/api/donor/partner/report.pdf", { credentials: "include" });
-      if (!response.ok) throw new Error(String(response.status));
-      const url = URL.createObjectURL(await response.blob());
+      const url = URL.createObjectURL(await apiFile("/donor/partner/report.pdf"));
       const link = document.createElement("a");
       link.href = url;
       link.download = "dad-impact-report.pdf";
@@ -267,8 +265,8 @@ function ReportsSection({ admin }: { admin: boolean }) {
       URL.revokeObjectURL(url);
       setStatus("Your verified impact report was downloaded.");
       exports.reload();
-    } catch {
-      setError("The report could not be generated right now. Please retry in a moment.");
+    } catch (cause) {
+      setError(failureMessage(cause, "The report could not be generated right now. Please retry in a moment."));
     } finally {
       setBusy(false);
     }
