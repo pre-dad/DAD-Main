@@ -42,6 +42,29 @@ export default function HowItWorks() {
         DAD launches on {launchDateLabel()}. A first gift completed by {foundingDeadlineLabel()} (New York time) earns a
         permanent Founding Donor badge.
       </p>
+      <p>
+        Badges mark milestones in giving, inviting and volunteering, and stay earned even if a streak later ends.
+        Rankings place your current streak nationally and in your city. Only you see your own position, and you can turn
+        rankings off in your profile.
+      </p>
+      <h2>Today’s initiative</h2>
+      <p>
+        Your dashboard shows one active initiative each day, in turn, with its published figures and spend by category.
+        This is display only: every gift is unrestricted and supports DAD as a whole, and none is designated to this
+        initiative.
+      </p>
+      <h2>Events and volunteering</h2>
+      <p>
+        Turn on volunteering in your profile to hear about events near your ZIP code. Reserve a spot, or join the
+        waitlist when an event is full; when someone cancels, the first person waiting takes their place. Checking in at
+        the event counts toward your volunteering record.
+      </p>
+      <h2>Giving through your employer</h2>
+      <p>
+        If your employer partners with DAD, enter its company code to link your giving to its program and join a team.
+        Your gifts and streak stay your own: your employer sees only totals, and figures are only ever reported for
+        groups of five or more.
+      </p>
       <h2>Clear records, honest limits</h2>
       <p>
         DAD publishes spend as totals by category, never as individual transactions. Staff verify each figure against

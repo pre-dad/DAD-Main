@@ -26,6 +26,17 @@ it("explains the donor release, monthly billing, direct referral credit, and lau
   expect(screen.queryByText(/sandbox preview/)).not.toBeInTheDocument();
 });
 
+it("explains recognition, display attribution, events, and employee giving within the product's privacy rules", () => {
+  render(<HowItWorks />);
+  expect(screen.getByText(/Badges mark milestones/)).toHaveTextContent("stay earned even if a streak later ends");
+  expect(screen.getByText(/Badges mark milestones/)).toHaveTextContent("Only you see your own position");
+  expect(screen.getByText(/one active initiative each day/)).toHaveTextContent(
+    "every gift is unrestricted and supports DAD as a whole, and none is designated to this initiative",
+  );
+  expect(screen.getByText(/Reserve a spot/)).toHaveTextContent("the first person waiting takes their place");
+  expect(screen.getByText(/company code/)).toHaveTextContent("groups of five or more");
+});
+
 it("links the explanation to giving, spend by category, and partner interest", () => {
   render(<HowItWorks />);
   expect(screen.getByRole("link", { name: "Give $1 a day" })).toHaveAttribute("href", "/donate");
