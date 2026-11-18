@@ -3,7 +3,10 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"dad/donor-api/internal/store/queries"
 
@@ -42,13 +45,6 @@ type NetworkMilestone struct {
 	Remaining int64  `json:"remaining"`
 }
 
-var milestoneLabels = map[string]string{
-	"REF1":  "First Referral",
-	"REF3":  "Community Builder",
-	"REF12": "Super Connector",
-	"TC":    "Team Captain",
-}
-
 // Network assembles the donor's network summary.
 func (s NetworkService) Network(ctx context.Context, token string) (NetworkSummary, error) {
 	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (NetworkSummary, error) {
@@ -75,13 +71,21 @@ func buildNetwork(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) 
 		if err != nil {
 			return out, err
 		}
+		catalog, err := badgeWording(ctx, q)
+		if err != nil {
+			return out, err
+		}
+		titles := make(map[string]string, len(catalog))
+		for _, b := range catalog {
+			titles[b.Code] = b.Title
+		}
 		for _, rule := range rules.Badges {
 			if rule.Signal != "referrals" || rule.Threshold <= converted {
 				continue
 			}
 			if out.NextMilestone == nil || rule.Threshold < out.NextMilestone.Target {
 				out.NextMilestone = &NetworkMilestone{
-					Label:     milestoneLabels[rule.Code],
+					Label:     titles[rule.Code],
 					Target:    rule.Threshold,
 					Remaining: rule.Threshold - converted,
 				}
@@ -100,7 +104,11 @@ func buildNetwork(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) 
 	var visibleActive int64
 	out.Invitees = make([]NetworkInvitee, 0, len(invitees))
 	for _, iv := range invitees {
-		out.Invitees = append(out.Invitees, NetworkInvitee{Name: iv.PublicName.String, Active: iv.Active})
+		name := listedName(iv.FullName.String, iv.PublicName.String)
+		if name == "" {
+			continue
+		}
+		out.Invitees = append(out.Invitees, NetworkInvitee{Name: name, Active: iv.Active})
 		if iv.Active {
 			visibleActive++
 		}
@@ -109,4 +117,18 @@ func buildNetwork(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) 
 		out.AnonymousActive = anon
 	}
 	return out, nil
+}
+
+// listedName is how N-3 lists an invitee: first name and last initial, or the
+// public first name they chose when no full name is on record.
+func listedName(full, public string) string {
+	parts := strings.Fields(full)
+	if len(parts) == 0 {
+		return strings.TrimSpace(public)
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	initial, _ := utf8.DecodeRuneInString(parts[len(parts)-1])
+	return parts[0] + " " + string(unicode.ToUpper(initial)) + "."
 }

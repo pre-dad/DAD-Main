@@ -305,12 +305,12 @@ export default function Profile() {
                       checked={data.network_visible}
                       onChange={(event) => setData({ ...data, network_visible: event.target.checked })}
                     />{" "}
-                    Show my public nickname to the person who invited me
+                    Show my first name and last initial to the person who invited me
                   </label>
                 </fieldset>
                 <p className="note">
                   Only you see your own rank; no one sees a list of names. When hidden, you’re counted in your inviter’s
-                  network without your nickname.
+                  network without your name.
                 </p>
                 <fieldset disabled={busy}>
                   <legend>Volunteering</legend>

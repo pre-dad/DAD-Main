@@ -3938,7 +3938,7 @@ export interface components {
         };
         /** @description One opted-in person the donor brought in (N-3). */
         NetworkInvitee: {
-            /** @description First name + last initial, as the invitee chose to display it. */
+            /** @description First name and last initial from the invitee's full name, or their public first name when no full name is on record. */
             name: string;
             /** @description Whether the invitee is still giving. */
             active: boolean;

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -74,6 +75,9 @@ func TestNetworkTotalsActiveOnlyAnnualizedAndInviteeVisibility(t *testing.T) {
 	// Visibility is opt-out: a referral who never saved a choice is listed.
 	unset := referredDonor(t, pool, referrer, true, 1000, "Una S.", false)
 	mustExec(t, pool, "DELETE FROM donor_preferences WHERE donor_id=$1", unset)
+	// A full name on record is listed as first name and last initial, not as
+	// the public first name.
+	mustExec(t, pool, "UPDATE donors SET full_name='Una Margaret Smith', public_name='Unicorn' WHERE id=$1", unset)
 
 	// buildNetwork is the engine behind NetworkService.Network; drive it
 	// directly against the referrer id (Network() only adds session auth).
@@ -105,6 +109,10 @@ func TestNetworkTotalsActiveOnlyAnnualizedAndInviteeVisibility(t *testing.T) {
 			namedActive++
 		}
 	}
+	if !slices.Contains(got.Invitees, NetworkInvitee{Name: "Una S.", Active: true}) ||
+		!slices.Contains(got.Invitees, NetworkInvitee{Name: "Ada L.", Active: true}) {
+		t.Fatalf("invitees: got %+v, want Una S. from her full name and Ada L. from her public name", got.Invitees)
+	}
 	if named != 3 || namedActive != 2 {
 		t.Fatalf("invitee names: got named=%d active=%d want named=3 active=2", named, namedActive)
 	}
@@ -114,8 +122,8 @@ func TestNetworkTotalsActiveOnlyAnnualizedAndInviteeVisibility(t *testing.T) {
 	}
 
 	// N-2: 3 converted referrals -> next milestone is the 12 tier, 9 remaining.
-	if got.NextMilestone == nil || got.NextMilestone.Target != 12 || got.NextMilestone.Remaining != 9 {
-		t.Fatalf("next_milestone: got %+v want target=12 remaining=9", got.NextMilestone)
+	if got.NextMilestone == nil || *got.NextMilestone != (NetworkMilestone{Label: "Brought 12 In", Target: 12, Remaining: 9}) {
+		t.Fatalf("next_milestone: got %+v want Brought 12 In, target=12 remaining=9", got.NextMilestone)
 	}
 }
 
@@ -150,5 +158,20 @@ func TestNetworkMilestoneLadderEndsAtTheLastTier(t *testing.T) {
 	}
 	if got.Invitees == nil || len(got.Invitees) != 0 || got.ActiveCount != 0 || got.AnonymousActive != 0 {
 		t.Fatalf("a donor with no referrals: %+v", got)
+	}
+}
+
+func TestListedNameIsFirstNameAndLastInitial(t *testing.T) {
+	for _, tt := range []struct{ full, public, want string }{
+		{"Ada Lovelace", "Countess", "Ada L."},
+		{"  grace   brewster  hopper ", "", "grace H."},
+		{"Zoë ångström", "", "Zoë Å."},
+		{"Cher", "", "Cher"},
+		{"", " Ada ", "Ada"},
+		{"   ", "", ""},
+	} {
+		if got := listedName(tt.full, tt.public); got != tt.want {
+			t.Errorf("listedName(%q, %q) = %q, want %q", tt.full, tt.public, got, tt.want)
+		}
 	}
 }
