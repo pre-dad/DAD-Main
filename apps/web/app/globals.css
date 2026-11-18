@@ -428,7 +428,7 @@ fieldset:disabled .segmented label {
 }
 /* Vertical rhythm for stacked content. Zero specificity, so any component spacing wins;
    grid and flex children are untouched because only these flow containers apply it. */
-:where(.panel, .panel > section, .callout, form, fieldset, details) > * + * {
+:where(.panel, .panel > section, .callout, .analyticsChoice, form, fieldset, details) > * + * {
   margin-top: var(--space-4);
 }
 /* Sets a block apart from the list or text above it. */
@@ -564,6 +564,7 @@ details[open] > summary::after {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .metric {
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -727,6 +728,7 @@ span.metricLink {
   padding: 0;
 }
 .todayMetrics li {
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
