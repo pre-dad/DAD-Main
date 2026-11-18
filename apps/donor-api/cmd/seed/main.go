@@ -208,7 +208,9 @@ func seed(ctx context.Context, pool *pgxpool.Pool, o options, now time.Time) (po
 	// suppress it however refreshing ends, interrupted included.
 	defer func() {
 		var suppressErr error
-		r.SuppressedMessages, suppressErr = suppressHistory(context.WithoutCancel(ctx), pool)
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		r.SuppressedMessages, suppressErr = suppressHistory(cleanup, pool)
 		err = errors.Join(err, suppressErr)
 	}()
 	projected := time.Now()

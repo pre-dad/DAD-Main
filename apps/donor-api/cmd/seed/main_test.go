@@ -401,3 +401,32 @@ func TestSeededDonorsAreServedFromTheirFacts(t *testing.T) {
 		t.Fatalf("seeded a database holding a real donor: %v", err)
 	}
 }
+
+func TestCopyFailureStopsProductionAndRollsBackTheSeedMarker(t *testing.T) {
+	pool, _ := isolatedDatabase(t)
+	ctx := context.Background()
+	produced := 0
+	tables := []table{{"donors", "id email", func(emit func(...any) bool) {
+		for range 10000 {
+			produced++
+			if !emit("invalid UUID", "synthetic@example.invalid") {
+				return
+			}
+		}
+	}}}
+	if _, err := copyAll(ctx, pool, tables); err == nil {
+		t.Fatal("invalid COPY succeeded")
+	}
+	if produced >= 10000 {
+		t.Fatal("failed COPY continued producing the whole population")
+	}
+	var count int
+	var marked bool
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM donors),
+ coalesce(shobj_description((SELECT oid FROM pg_database WHERE datname=current_database()),'pg_database')=$1,false)`, seedMarker).Scan(&count, &marked); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 || marked {
+		t.Fatalf("failed seed retained %d donors or marker=%v", count, marked)
+	}
+}
