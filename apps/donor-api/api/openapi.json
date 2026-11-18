@@ -11640,7 +11640,7 @@
    "post": {
     "operationId": "postDonorStaffContentRules",
     "summary": "/donor/staff/content/rules",
-    "description": "Replaces the words only; how badges and milestones are earned does not change. An empty title and text restore the default.",
+    "description": "Replaces badge earning thresholds, minimum ranking populations, PNG/JPEG artwork, and the milestone ladder. Every catalog badge must be supplied. The JSON body may be up to 10 MiB to hold the complete artwork batch. Wording changes use /donor/staff/content/wording.",
     "tags": [
      "Content"
     ],
@@ -11698,6 +11698,12 @@
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
+     },
+     "413": {
+      "$ref": "#/components/responses/PayloadTooLarge"
+     },
+     "415": {
+      "$ref": "#/components/responses/UnsupportedMediaType"
      }
     }
    }

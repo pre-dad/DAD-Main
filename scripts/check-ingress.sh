@@ -233,6 +233,14 @@ check 'webhook refuses larger bodies' 413 "$(post_bytes 262145 https://public.te
 check 'public API refuses bodies over 256 KiB' 413 "$(post_bytes 262145 https://public.test/api/donor/checkouts)"
 check 'staff source upload accepts 10 MiB' 200 "$(post_bytes 10485760 https://staff.test/api/donor/staff/content/sources)"
 check 'staff source upload refuses more' 413 "$(post_bytes 10485761 https://staff.test/api/donor/staff/content/sources)"
+for route in https://public.test/api/donor/partner/logo https://staff.test/api/donor/staff/partners/00000000-0000-4000-8000-000000000001/logo; do
+  check "$route accepts the API logo limit" 200 "$(post_bytes 360000 "$route")"
+  check "$route refuses larger logos" 413 "$(post_bytes 360001 "$route")"
+done
+check 'founding-claim imports accept 5 MiB' 200 "$(post_bytes 5242880 https://staff.test/api/donor/staff/founding-claims)"
+check 'founding-claim imports refuse more' 413 "$(post_bytes 5242881 https://staff.test/api/donor/staff/founding-claims)"
+check 'recognition artwork batches accept 10 MiB' 200 "$(post_bytes 10485760 https://staff.test/api/donor/staff/content/rules)"
+check 'recognition artwork batches refuse more' 413 "$(post_bytes 10485761 https://staff.test/api/donor/staff/content/rules)"
 check 'other staff API refuses bodies over 256 KiB' 413 "$(post_bytes 262145 https://staff.test/api/donor/staff/accounts)"
 check 'webhook accepts only POST' 403 "$(status https://public.test/api/donor/stripe/webhook)"
 repeat https://public.test/api/donor/stripe/webhook 1000

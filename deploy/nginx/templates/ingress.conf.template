@@ -52,6 +52,11 @@ server {
         proxy_pass http://web;
     }
 
+    location = /api/donor/partner/logo {
+        client_max_body_size 360000;
+        proxy_pass http://web;
+    }
+
     location = /api/donor/stripe/webhook {
         limit_except POST {
             deny all;
@@ -88,6 +93,21 @@ server {
     location ~ ^/api/donor/staff/(sign-in|activate)(/options)?$ {
         limit_req zone=auth burst=20 nodelay;
         error_page 429 @auth_limited;
+        proxy_pass http://web;
+    }
+
+    location ~ ^/api/donor/staff/partners/[^/]+/logo$ {
+        client_max_body_size 360000;
+        proxy_pass http://web;
+    }
+
+    location = /api/donor/staff/founding-claims {
+        client_max_body_size 5m;
+        proxy_pass http://web;
+    }
+
+    location = /api/donor/staff/content/rules {
+        client_max_body_size 10m;
         proxy_pass http://web;
     }
 

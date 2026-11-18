@@ -2887,7 +2887,7 @@ export interface paths {
         put?: never;
         /**
          * /donor/staff/content/rules
-         * @description Replaces the words only; how badges and milestones are earned does not change. An empty title and text restore the default.
+         * @description Replaces badge earning thresholds, minimum ranking populations, PNG/JPEG artwork, and the milestone ladder. Every catalog badge must be supplied. The JSON body may be up to 10 MiB to hold the complete artwork batch. Wording changes use /donor/staff/content/wording.
          */
         post: operations["postDonorStaffContentRules"];
         delete?: never;
@@ -10165,6 +10165,8 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
