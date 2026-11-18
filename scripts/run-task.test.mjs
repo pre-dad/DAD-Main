@@ -16,6 +16,18 @@ const TD = (family) => `arn:aws:ecs:us-east-2:111111111111:task-definition/${fam
 //   ecs describe-tasks  -> STUB_DESCRIBE_JSON
 const stub = `#!/bin/sh
 echo "$*" >> "$STUB_DIR/calls.log"
+if [ -n "$STUB_CAPTURE_OVERRIDE" ] && [ "$2" = run-task ]; then
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = --overrides ]; then
+      shift
+      printf '%s' "$1" > "$STUB_DIR/override.json"
+      break
+    fi
+    shift
+  done
+  printf '%s' "$STUB_RUN_JSON"
+  exit 0
+fi
 case "$2" in
   run-task) printf '%s' "$STUB_RUN_JSON" ;;
   wait)
@@ -54,7 +66,12 @@ function run(args, env = {}, taskdefs = null) {
     try {
       calls = readFileSync(path.join(dir, "calls.log"), "utf8");
     } catch {}
-    return { status: result.status, stdout: result.stdout, stderr: result.stderr, calls };
+    return {
+      status: result.status,
+      stdout: env.STUB_CAPTURE_OVERRIDE ? readFileSync(path.join(dir, "override.json"), "utf8") : result.stdout,
+      stderr: result.stderr,
+      calls,
+    };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -157,4 +174,19 @@ test("rejects an unknown environment or task, and a missing cluster", () => {
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /DAD_CLUSTER/);
   assert.doesNotMatch(r.calls, /run-task/);
+});
+
+test("preserves exact argument boundaries and JSON characters in command overrides", () => {
+  const args = ['a"b', "c\\d", "line\nbreak", "", "--name", "Jane Doe"];
+  const r = run(["staging", "staff", ...args], { DAD_WAIT: "false", STUB_CAPTURE_OVERRIDE: "1" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).containerOverrides, [
+    { name: "maint-staff-Container", command: ["staff", ...args] },
+  ]);
+});
+
+test("provision-roles overrides invoke the provision binary", () => {
+  const r = run(["staging", "provision-roles", "--help"], { DAD_WAIT: "false", STUB_CAPTURE_OVERRIDE: "1" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).containerOverrides[0].command, ["provision", "--help"]);
 });

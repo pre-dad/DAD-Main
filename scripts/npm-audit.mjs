@@ -12,8 +12,17 @@ const blocking = new Set(["high", "critical"]);
 
 /** The blocking advisories in an `npm audit --json` report, by URL. */
 export function advisories(report) {
+  if (
+    !report ||
+    report.error ||
+    !report.vulnerabilities ||
+    typeof report.vulnerabilities !== "object" ||
+    Array.isArray(report.vulnerabilities)
+  )
+    throw new Error("Invalid npm audit report");
   const found = new Map();
-  for (const vulnerability of Object.values(report.vulnerabilities ?? {})) {
+  for (const vulnerability of Object.values(report.vulnerabilities)) {
+    if (!vulnerability || !Array.isArray(vulnerability.via)) throw new Error("Invalid npm audit report");
     for (const via of vulnerability.via) {
       if (typeof via === "object" && blocking.has(via.severity)) found.set(via.url, via.title);
     }

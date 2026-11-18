@@ -37,3 +37,20 @@ test("an exception whose advisory is gone fails until it is removed", () => {
     `${url} no longer appears; remove its exception`,
   ]);
 });
+
+test("rejects missing or error audit reports instead of passing a failed registry request", () => {
+  for (const invalid of [
+    { error: { code: "ENOAUDIT", summary: "Registry unavailable" } },
+    {},
+    null,
+    { vulnerabilities: [] },
+    { vulnerabilities: { pkg: {} } },
+  ]) {
+    for (const side of ["full", "production"]) {
+      assert.throws(
+        () => problems({ full: clean, production: clean, [side]: invalid, exceptions: [], today }),
+        /audit report/i,
+      );
+    }
+  }
+});

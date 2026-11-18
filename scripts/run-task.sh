@@ -82,8 +82,11 @@ fi
 # `migrate --adopt-existing`). The container name follows the factory id.
 overrides=()
 if [ "$#" -gt 0 ]; then
-  args_json="$(printf '%s\n' "$@" | awk '{ printf "%s\"%s\"", (NR>1?",":""), $0 }')"
-  overrides=(--overrides "{\"containerOverrides\":[{\"name\":\"maint-${task}-Container\",\"command\":[\"${task}\",${args_json}]}]}")
+  binary="$task"
+  if [ "$task" = provision-roles ]; then binary=provision; fi
+  override="$(jq -cn --arg name "maint-${task}-Container" --args \
+    '{containerOverrides: [{name: $name, command: $ARGS.positional}]}' -- "$binary" "$@")"
+  overrides=(--overrides "$override")
 fi
 
 # AWS CLI shorthand syntax; ids are comma-separated and need no quoting here.
