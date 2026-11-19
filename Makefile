@@ -4,7 +4,7 @@ SQLC_GO := github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
 # SQLC_MODE=docker or go forces one way to run sqlc; by default Docker is used when its daemon answers.
 SQLC_MODE ?=
 GOLINES := go tool -modfile=tools/go.mod golines -m 140
-GENERATED := apps/donor-api/internal/store/queries apps/web/lib/openapi.d.ts apps/web/design/tokens.ts
+GENERATED := apps/donor-api/internal/store/queries apps/web/lib/openapi.d.ts apps/web/design/tokens.ts deploy/nginx/conf/native-routes.conf
 
 # Load testing against a disposable, seeded deployment; see docs/operations.md.
 SEED_DONORS ?= 50000
@@ -62,6 +62,7 @@ generate:
 	fi
 	cd apps/web && npm run --silent generate:api
 	node scripts/mobile-foundation.mjs generate
+	node scripts/native-ingress.mjs
 
 generate-mobile:
 	node scripts/mobile-foundation.mjs generate
@@ -130,6 +131,8 @@ lint-scripts:
 	@if command -v shellcheck >/dev/null || [ -n "$$CI" ]; then shellcheck scripts/*.sh deploy/nginx/*.sh deploy/nginx/*.envsh; else echo "shellcheck not installed; skipping script lint" >&2; fi
 
 check-ingress:
+	node scripts/native-ingress.mjs --check
+	node --test scripts/native-ingress.test.mjs
 	./scripts/check-ingress.sh config
 
 smoke-ingress:

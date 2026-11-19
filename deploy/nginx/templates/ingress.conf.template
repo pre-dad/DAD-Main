@@ -11,7 +11,7 @@ server {
 server {
     listen 8080;
     listen [::]:8080;
-    server_name ${INGRESS_PUBLIC_HOST} ${INGRESS_STAFF_HOST};
+    server_name ${INGRESS_PUBLIC_HOST} ${INGRESS_STAFF_HOST} ${INGRESS_NATIVE_HOST};
     return 301 https://$host$request_uri;
 }
 
@@ -119,5 +119,59 @@ server {
 
     location ~ ^/(|favicon\.ico|icon\.svg|robots\.txt|staff|staff/.*|_next/.*|api/donor/staff/.*)$ {
         proxy_pass http://web;
+    }
+}
+
+upstream native_api {
+    zone native_api 64k;
+    server ${INGRESS_NATIVE_UPSTREAM} resolve;
+    keepalive 32;
+    keepalive_timeout 4s;
+}
+
+server {
+    listen 8443 ssl;
+    listen [::]:8443 ssl;
+    http2 on;
+    server_name ${INGRESS_NATIVE_HOST};
+    include /etc/nginx/ingress/${INGRESS_MODE}/origin.conf;
+    default_type application/json;
+    set $native_enabled ${INGRESS_NATIVE_ENABLED};
+    if ($native_enabled = 0) { return 404 '{"detail":"Not found"}'; }
+    if ($native_allowed_methods = "") { return 404 '{"detail":"Not found"}'; }
+    if ($native_request_valid = 0) { return 403 '{"detail":"Native requests must omit Origin and cookies"}'; }
+    if ($native_operation_class = forbidden) { return 405 '{"detail":"Method not allowed"}'; }
+    error_page 429 @native_limited;
+    error_page 502 504 =503 @native_unavailable;
+    error_page 413 @native_too_large;
+    proxy_hide_header Cache-Control;
+    proxy_hide_header X-Content-Type-Options;
+    add_header Allow $native_method_allow always;
+    limit_req zone=general burst=300 nodelay;
+    limit_req zone=native_auth burst=20 nodelay;
+    limit_req zone=native_visitor burst=60 nodelay;
+    add_header Cache-Control "no-store" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options nosniff always;
+
+    location / {
+        proxy_pass http://native_api;
+    }
+    location = /donor/partner/logo {
+        client_max_body_size 360000;
+        proxy_pass http://native_api;
+    }
+    location @native_unavailable {
+        add_header_inherit merge;
+        add_header Retry-After 1 always;
+        return 503 '{"detail":"API temporarily unavailable"}';
+    }
+    location @native_too_large {
+        return 413 '{"detail":"Request body is too large"}';
+    }
+    location @native_limited {
+        add_header_inherit merge;
+        add_header Retry-After $native_retry_after always;
+        return 429 '{"detail":"Too many requests"}';
     }
 }

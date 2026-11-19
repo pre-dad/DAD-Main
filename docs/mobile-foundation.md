@@ -27,7 +27,8 @@ in the first mobile product. Backend authorization remains authoritative. Native
 call the API host directly with `X-DAD-Client: native`, no cookies or Origin, and a bearer
 access token when authenticated. The website checkout and staff operations stay on the
 web; native recurring checkout uses its dedicated operation. Partner applications admit both client types. A deployed
-native API host is a release prerequisite; see [native ingress](edge.md#native-api-ingress-prerequisite).
+native API host is configured through `DONOR_NATIVE_API_ORIGIN`; activation and acceptance
+prerequisites are in [native ingress](edge.md#native-api-ingress-prerequisite).
 
 After checks pass on the release commit, tag it `mobile-foundation-v<version>` (using the
 version in the file, for example `mobile-foundation-v2.12.0`) and push that tag. The

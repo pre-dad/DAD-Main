@@ -18,8 +18,8 @@ COPY staff-access.conf /etc/nginx/staff-access.conf
 #  - The stock image ships conf.d/default.conf. Compose hides it with a tmpfs over conf.d;
 #    here it is removed, and conf.d is made writable for the unprivileged user because the
 #    entrypoint renders the ingress template into it.
-#  - nginx.conf resolves `web` at run time through Docker's embedded DNS (127.0.0.11),
-#    which does not exist on Fargate. Service Connect gives `web` a stable endpoint name
+#  - nginx.conf resolves `web` and the native API at run time through Docker's embedded DNS (127.0.0.11),
+#    which does not exist on Fargate. Service Connect gives both services stable endpoint names
 #    that survives redeploys, so resolve it once at start instead. The build fails if the
 #    lines being rewritten change, rather than silently shipping a config that cannot work.
 RUN set -eu \
@@ -29,6 +29,8 @@ RUN set -eu \
       -e '/^    resolver 127\.0\.0\.11 valid=10s ipv6=off;$/d' \
       -e 's/server web:3000 resolve;/server web:3000;/' \
       /etc/nginx/nginx.conf \
+ && grep -q 'server ${INGRESS_NATIVE_UPSTREAM} resolve;' /etc/nginx/templates/ingress.conf.template \
+ && sed -i 's/ resolve;/;/' /etc/nginx/templates/ingress.conf.template \
  && rm -f /etc/nginx/conf.d/default.conf \
  && chmod 0755 /docker-entrypoint.d/04-tls-from-env.sh /docker-entrypoint.d/05-ingress.envsh \
  && install -d -o 101 -g 101 -m 0700 /etc/nginx/tls \

@@ -284,15 +284,28 @@ as well as the API. In order of what limits an origin:
 
 ## Native API ingress prerequisite
 
-Native clients call API paths directly with bearer credentials and `X-DAD-Client: native`.
-The browser ingress described above does not provide this route: it forwards to the web
-service, whose browser proxy does not forward native authorization headers. Compose
-publishes the API only on loopback, and the current ECS topology admits it internally
-through Service Connect. A publicly reachable native API host must therefore be
-provisioned in DAD-infra before mobile release acceptance.
+`DONOR_NATIVE_API_ORIGIN` enables a dedicated TLS virtual host that proxies straight to
+`api:8002` through Service Connect or the private Compose `app` network. It must differ
+from the public and staff hosts. An empty setting leaves native ingress disabled. The
+public and staff hosts continue to use the browser proxy.
 
-Use a dedicated TLS API host with explicit native-operation routing, client-address
-trust, shared rate limits, and verification that staff and browser-only operations
-remain inaccessible to bearer credentials. Test native sign-in, rotating refresh,
-partner access, and checkout returns against that host. Do not point native clients at
-the browser `/api` proxy as a substitute.
+The native host requires `X-DAD-Client: native` and rejects Origin or cookies. Its
+method/path allowlist is generated from the canonical mobile contract by
+`scripts/native-ingress.mjs`, checked by `make check-ingress` and `make check-generated`.
+Staff and browser-only operations are excluded. GET operations also admit HEAD;
+unsupported methods on an admitted path return 405 with Allow. Unknown paths return 404.
+Authentication and authorization remain enforced by the Go API.
+
+Native requests retain bearer and platform headers, while nginx replaces client-address
+headers from its verified peer or Cloudflare identity. Native auth and visitor zones
+have the same limits as their browser equivalents, with the general request and connection
+caps still applied. The API's shared PostgreSQL budgets remain authoritative. Body-limit,
+rate-limit and upstream-outage responses use JSON; transient upstream outages return 503.
+
+DAD-infra declares `api.staging.dynamicaid.org` and `api.dynamicaid.org`, configures nginx,
+and admits only nginx and web to the private API port. Before activating an environment,
+the owner must point the API hostname at its ingress, install a TLS certificate covering
+all configured hosts, and apply the native-host Cloudflare rules. The public website
+origin still owns emailed links and checkout returns; native clients configure their API
+and public origins separately. Verify sign-in, rotating refresh, partner access and
+checkout returns against the deployed host before mobile release acceptance.

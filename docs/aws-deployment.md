@@ -412,3 +412,18 @@ schedule and alarm, and the per-process DB URL query params
 (`default_query_exec_mode=exec`, `sslmode=verify-full`) were confirmed against
 `docker-compose.prod.yml`, `scripts/deploy.sh`, `docs/operations.md`, `docs/edge.md`,
 `.env.database.example`, and DAD-infra's `apps/dad-main`.
+
+## Native API hostname
+
+The environment configuration includes a separate native API origin:
+`https://api.staging.dynamicaid.org` or `https://api.dynamicaid.org`. The nginx service
+receives it as `DONOR_NATIVE_API_ORIGIN` and reaches the private API through Service
+Connect. The network stack permits nginx-to-API traffic on 8002 without publishing that
+port. Browser traffic continues through Next.js.
+
+Provision the API DNS record through the same Cloudflare origin path as the other hosts,
+ensure the ingress certificate covers it, and apply the native-host edge rules. Configure
+the native apps' API origin separately from the public origin used for emailed links,
+referrals and hosted checkout returns. See [native ingress](edge.md#native-api-ingress-prerequisite).
+The offline CDK and nginx checks do not establish that DNS, certificates or an AWS
+rollout have been activated; deployments retain the repository's owner/pipeline boundary.
