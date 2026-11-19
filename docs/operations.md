@@ -1298,7 +1298,8 @@ The web application form uses `POST /donor/partner/applications` with a
 client-generated 32-byte random base64url receipt and a stable idempotency key. The
 receipt and application commit together. Browser and native clients may submit the application.
 A retry must retain both values and the same form. The browser receives an HttpOnly,
-SameSite=Lax cookie lasting 30 days; a native client securely retains its receipt without a cookie. `GET /donor/partner/application-status` also accepts the receipt
+SameSite=Lax cookie lasting 30 days; a native client securely retains its receipt without
+a cookie. `GET /donor/partner/application-status` also accepts the receipt
 as a native bearer credential; native clients must obtain and securely retain that
 separate receipt through an explicit application-submission integration. No receipt is
 implicitly shared from the browser to an app.

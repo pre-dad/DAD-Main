@@ -25,8 +25,8 @@ Their screens and platform interactions are separate from the Go financial domai
 The mobile contract is an integration surface, not a decision to expose every operation
 in the first mobile product. Backend authorization remains authoritative. Native requests
 call the API host directly with `X-DAD-Client: native`, no cookies or Origin, and a bearer
-access token when authenticated. The website checkout and staff operations stay on the web; native recurring checkout
-uses its dedicated operation. Partner applications admit both client types. A deployed
+access token when authenticated. The website checkout and staff operations stay on the
+web; native recurring checkout uses its dedicated operation. Partner applications admit both client types. A deployed
 native API host is a release prerequisite; see [native ingress](edge.md#native-api-ingress-prerequisite).
 
 After checks pass on the release commit, tag it `mobile-foundation-v<version>` (using the

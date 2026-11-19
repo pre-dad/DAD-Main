@@ -1,16 +1,6 @@
-// Package geo resolves a US ZIP code to the donor's IANA time zone, which is
-// what lets day-level streak state and the streak-at-risk reminder land in the
-// donor's own day rather than a single server day (PRD §10). The mapping is by
-// the ZIP's leading three digits (its SCF, the sectional center facility whose
-// region a ZIP belongs to); that is the coarsest key that still names one zone
-// for nearly every ZIP, and it needs no multi-megabyte per-ZIP database.
-//
-// A handful of three-digit regions genuinely straddle a zone boundary (parts of
-// Florida, Michigan's UP, Idaho, Oregon, North Dakota, Nebraska, Kansas,
-// Texas). Those are resolved by the whole five-digit ZIP where it is cheap to
-// be exact and left at the region's majority zone otherwise; a donor can always
-// be corrected from their profile, so the lookup favours a good default over a
-// large table.
+// Package geo estimates a US ZIP's IANA time zone from three-digit regions
+// and full-ZIP exceptions. Border ZIPs without exceptions use the region's
+// majority zone; the donor profile does not expose a time-zone override.
 package geo
 
 import (
