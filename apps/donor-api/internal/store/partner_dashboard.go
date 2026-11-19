@@ -3,7 +3,9 @@ package store
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/bits"
 	"strconv"
@@ -12,6 +14,7 @@ import (
 	"dad/donor-api/internal/store/queries"
 	"github.com/go-pdf/fpdf"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -218,17 +221,38 @@ func (s PartnerDashboardService) Exports(ctx context.Context, token string) ([]P
 	})
 }
 
-// ExportReport renders the branded PDF of the dashboard at this moment and
-// records the export in the history (P-14). Exporting is admin-only (§7.2).
+const (
+	partnerReportLimit   = 1000
+	partnerReportBytes   = 128 << 20
+	partnerReportsPerDay = 20
+)
+
+var ErrPartnerReportStorage = errors.New("report storage limit reached; existing reports remain available")
+
+type PartnerReportDailyLimit struct{ RetryAt time.Time }
+
+func (PartnerReportDailyLimit) Error() string {
+	return "Today's new report limit has been reached. Download an existing report or try again after midnight UTC."
+}
+
 func (s PartnerDashboardService) ExportReport(ctx context.Context, token string) ([]byte, error) {
-	return partnerAdminTransaction(
-		ctx,
-		s.DB,
-		token,
-		pgx.TxOptions{IsoLevel: pgx.RepeatableRead},
+	for attempt := 0; ; attempt++ {
+		pdf, err := s.exportReport(ctx, token)
+		var databaseError *pgconn.PgError
+		retryable := errors.As(err, &databaseError) && (databaseError.Code == "40001" ||
+			(databaseError.Code == "23505" && databaseError.ConstraintName == "donor_partner_reports_snapshot_key"))
+		if !retryable || attempt >= 2 || ctx.Err() != nil {
+			return pdf, err
+		}
+	}
+}
+
+func (s PartnerDashboardService) exportReport(ctx context.Context, token string) ([]byte, error) {
+	// Serializable retries preserve coherent figures and the per-organization quota under concurrent exports.
+	return partnerAdminTransaction(ctx, s.DB, token, pgx.TxOptions{IsoLevel: pgx.Serializable},
 		func(tx pgx.Tx, actor PartnerActor, now time.Time) ([]byte, error) {
 			q := queries.New(tx)
-			t, err := q.PartnerOverviewTotals(ctx, actor.PartnerID)
+			totals, err := q.PartnerOverviewTotals(ctx, actor.PartnerID)
 			if err != nil {
 				return nil, err
 			}
@@ -236,21 +260,54 @@ func (s PartnerDashboardService) ExportReport(ctx context.Context, token string)
 			if err != nil {
 				return nil, err
 			}
-			id, err := NewID()
-			if err != nil {
-				return nil, err
-			}
 			logo, err := q.PartnerLogo(ctx, actor.PartnerID)
 			if err != nil {
 				return nil, err
 			}
-			overview := partnerOverview(actor, t)
-			pdf, err := renderPartnerReport(overview, spend, logo, now)
+			overview := partnerOverview(actor, totals)
+			normalized := overview
+			normalized.UserID, normalized.Role = "", ""
+			day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+			content, err := json.Marshal(struct {
+				Version  int
+				Day      string
+				Overview PartnerOverview
+				Spend    []queries.PartnerSpendByCategoryRow
+				Logo     []byte
+			}{1, day.Format(time.DateOnly), normalized, spend, logo})
+			if err != nil {
+				return nil, err
+			}
+			digest := sha256.Sum256(content)
+			pdf, err := q.PartnerReportSnapshot(
+				ctx,
+				queries.PartnerReportSnapshotParams{PartnerID: actor.PartnerID, SnapshotDigest: digest[:]},
+			)
+			if err == nil {
+				return pdf, nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return nil, err
+			}
+			usage, err := q.PartnerReportUsage(ctx, queries.PartnerReportUsageParams{PartnerID: actor.PartnerID, DayStart: timestamp(day)})
+			if err != nil {
+				return nil, err
+			}
+			if usage.Reports >= partnerReportLimit || usage.Bytes >= partnerReportBytes {
+				return nil, ErrPartnerReportStorage
+			}
+			if usage.Today >= partnerReportsPerDay {
+				return nil, PartnerReportDailyLimit{RetryAt: day.AddDate(0, 0, 1)}
+			}
+			pdf, err = renderPartnerReport(overview, spend, logo, now)
 			if err != nil {
 				return nil, err
 			}
 			if len(pdf) > 2<<20 {
 				return nil, ErrPartnerApplication
+			}
+			if usage.Bytes+int64(len(pdf)) > partnerReportBytes {
+				return nil, ErrPartnerReportStorage
 			}
 			snapshot, err := json.Marshal(struct {
 				Overview PartnerOverview                     `json:"overview"`
@@ -259,20 +316,21 @@ func (s PartnerDashboardService) ExportReport(ctx context.Context, token string)
 			if err != nil {
 				return nil, err
 			}
+			id, err := NewID()
+			if err != nil {
+				return nil, err
+			}
 			if err = q.InsertPartnerReport(ctx, queries.InsertPartnerReportParams{
-				Pdf: pdf, Snapshot: snapshot,
-				ID: id, PartnerID: actor.PartnerID, ExportedBy: actor.UserID,
-				CommittedMinor: t.CommittedMinor, DeployedMinor: t.DeployedMinor,
-				PeopleReached: t.PeopleReached, CreatedAt: timestamp(now),
+				Pdf: pdf, Snapshot: snapshot, SnapshotDigest: digest[:], ID: id, PartnerID: actor.PartnerID, ExportedBy: actor.UserID,
+				CommittedMinor: totals.CommittedMinor, DeployedMinor: totals.DeployedMinor, PeopleReached: totals.PeopleReached, CreatedAt: timestamp(now),
 			}); err != nil {
 				return nil, err
 			}
-			if err := recordServerEvent(ctx, q, pgtype.UUID{}, "partner_report_exported", "partner-report:"+id.String(), now); err != nil {
+			if err = recordServerEvent(ctx, q, pgtype.UUID{}, "partner_report_exported", "partner-report:"+id.String(), now); err != nil {
 				return nil, err
 			}
 			return pdf, nil
-		},
-	)
+		})
 }
 
 func (s PartnerDashboardService) ReportArtifact(ctx context.Context, token string, id pgtype.UUID) ([]byte, error) {

@@ -17,7 +17,7 @@ import (
 
 type problem struct {
 	Detail string                     `json:"detail"`
-	Code   string                     `json:"code,omitempty"`   // set for deliberate configuration states
+	Code   string                     `json:"code,omitempty"`   // stable reason for a refusal
 	Errors []store.PublicationProblem `json:"errors,omitempty"` // set for a refused publication
 }
 

@@ -2141,7 +2141,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download the branded impact report */
+        /**
+         * Download the branded impact report
+         * @description Admin-only. Reuses the immutable PDF for the same organization snapshot and UTC day. New artifacts are limited to 20 per UTC day and 1,000 retained reports or 128 MiB per organization. Existing reports remain downloadable after a limit is reached.
+         */
         get: operations["partnerReport"];
         put?: never;
         post?: never;
@@ -2999,10 +3002,10 @@ export interface components {
             /** @description Human-readable explanation, safe to show to the user. Never contains credentials, donor data, or internal error text. */
             detail: string;
             /**
-             * @description Present on a 503 for a feature this deployment has deliberately not configured (not transient: do not retry; show the feature as unavailable), and on the 422 of POST /donor/me/password when `current_password` is missing or wrong.
+             * @description Present on a 503 for a feature this deployment has deliberately not configured (not transient: do not retry; show the feature as unavailable), and on the 422 of POST /donor/me/password when `current_password` is missing or wrong. Report export refusals use PARTNER_REPORT_DAILY_LIMIT (429, retry at the next UTC day) or PARTNER_REPORT_STORAGE_LIMIT (409, existing reports remain available).
              * @enum {string}
              */
-            code?: "PAYMENTS_UNCONFIGURED" | "EMAIL_UNCONFIGURED" | "SOURCE_STORAGE_UNCONFIGURED" | "PUSH_UNCONFIGURED" | "FOUNDING_CLAIMS_UNCONFIGURED" | "PASSKEYS_UNCONFIGURED" | "CURRENT_PASSWORD_INCORRECT";
+            code?: "PAYMENTS_UNCONFIGURED" | "EMAIL_UNCONFIGURED" | "SOURCE_STORAGE_UNCONFIGURED" | "PUSH_UNCONFIGURED" | "FOUNDING_CLAIMS_UNCONFIGURED" | "PASSKEYS_UNCONFIGURED" | "CURRENT_PASSWORD_INCORRECT" | "PARTNER_REPORT_DAILY_LIMIT" | "PARTNER_REPORT_STORAGE_LIMIT";
             /** @description Present only on a 422 from POST /donor/staff/founding-claims: every problem found, up to 100. */
             errors?: components["schemas"]["PublicationProblem"][];
         };
@@ -8693,7 +8696,26 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            429: components["responses"]["RateLimitedByIngress"];
+            /** @description Report storage is full; existing artifacts remain available. Code PARTNER_REPORT_STORAGE_LIMIT. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The daily new-artifact limit or ingress request limit was reached. PARTNER_REPORT_DAILY_LIMIT identifies the daily quota; Retry-After is seconds until the next UTC day. */
+            429: {
+                headers: {
+                    /** @description Seconds before retrying. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
             503: components["responses"]["Unavailable"];
         };
     };

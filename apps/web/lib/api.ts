@@ -101,7 +101,10 @@ export const UNCONFIGURED_MESSAGE = "This isn’t available in this environment 
 export function failureMessage(cause: unknown, fallback: string): string {
   const failure = classifyFailure(cause);
   if (failure === "offline") return OFFLINE_MESSAGE;
-  if (failure === "rateLimited") return RATE_LIMITED_MESSAGE;
+  if (failure === "rateLimited")
+    return cause instanceof ApiError && cause.code === "PARTNER_REPORT_DAILY_LIMIT"
+      ? cause.message
+      : RATE_LIMITED_MESSAGE;
   if (failure === "unconfigured") return UNCONFIGURED_MESSAGE;
   return cause instanceof ApiError && failure !== "unavailable" ? cause.message : fallback;
 }

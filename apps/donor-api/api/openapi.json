@@ -8412,12 +8412,39 @@
       "$ref": "#/components/responses/Forbidden"
      },
      "429": {
-      "$ref": "#/components/responses/RateLimitedByIngress"
+      "description": "The daily new-artifact limit or ingress request limit was reached. PARTNER_REPORT_DAILY_LIMIT identifies the daily quota; Retry-After is seconds until the next UTC day.",
+      "headers": {
+       "Retry-After": {
+        "schema": {
+         "type": "integer",
+         "minimum": 1
+        },
+        "description": "Seconds before retrying."
+       }
+      },
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
+     },
+     "409": {
+      "description": "Report storage is full; existing artifacts remain available. Code PARTNER_REPORT_STORAGE_LIMIT.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
      }
-    }
+    },
+    "description": "Admin-only. Reuses the immutable PDF for the same organization snapshot and UTC day. New artifacts are limited to 20 per UTC day and 1,000 retained reports or 128 MiB per organization. Existing reports remain downloadable after a limit is reached."
    }
   },
   "/donor/partner/company-code.svg": {
@@ -12312,7 +12339,7 @@
      },
      "code": {
       "type": "string",
-      "description": "Present on a 503 for a feature this deployment has deliberately not configured (not transient: do not retry; show the feature as unavailable), and on the 422 of POST /donor/me/password when `current_password` is missing or wrong.",
+      "description": "Present on a 503 for a feature this deployment has deliberately not configured (not transient: do not retry; show the feature as unavailable), and on the 422 of POST /donor/me/password when `current_password` is missing or wrong. Report export refusals use PARTNER_REPORT_DAILY_LIMIT (429, retry at the next UTC day) or PARTNER_REPORT_STORAGE_LIMIT (409, existing reports remain available).",
       "enum": [
        "PAYMENTS_UNCONFIGURED",
        "EMAIL_UNCONFIGURED",
@@ -12320,7 +12347,9 @@
        "PUSH_UNCONFIGURED",
        "FOUNDING_CLAIMS_UNCONFIGURED",
        "PASSKEYS_UNCONFIGURED",
-       "CURRENT_PASSWORD_INCORRECT"
+       "CURRENT_PASSWORD_INCORRECT",
+       "PARTNER_REPORT_DAILY_LIMIT",
+       "PARTNER_REPORT_STORAGE_LIMIT"
       ]
      },
      "errors": {

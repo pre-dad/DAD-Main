@@ -1389,3 +1389,21 @@ workflow passes its immutable image SHA as `BUILD_REVISION`; `scripts/deploy.sh 
 uses the checkout's current commit, and `make check-images` does the same. A direct
 Docker or Compose build must supply `BUILD_REVISION` to identify its source revision.
 An unstamped build reports `unknown`; image tags alone do not stamp Go binaries.
+
+
+## Partner report storage
+
+An unchanged organization snapshot reuses its immutable PDF for the same UTC day,
+including concurrent requests and requests by different admins. A changed published
+figure, branding or new UTC day creates a new snapshot. Only a new artifact records
+an export analytics event. Retained history is never rewritten or deleted by this
+policy.
+
+Each organization can create 20 new artifacts per UTC day and retain at most 1,000
+reports or 128 MiB. Daily exhaustion returns 429 `PARTNER_REPORT_DAILY_LIMIT` with
+`Retry-After` until midnight UTC; storage exhaustion returns 409
+`PARTNER_REPORT_STORAGE_LIMIT`. Downloads of existing snapshots continue to work.
+Organizations already beyond a limit retain their history but cannot add artifacts.
+Review capacity with the owner before increasing these limits; never purge financial
+report history automatically. Quota checks and artifact creation share a serializable
+transaction, with bounded retries for concurrent exports.

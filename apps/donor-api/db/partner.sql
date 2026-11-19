@@ -168,8 +168,8 @@ WHERE p.id=$1;
 -- name: InsertPartnerReport :exec
 -- P-14: record one dashboard PDF export for the export-history list.
 INSERT INTO donor_partner_reports
-  (id, partner_id, exported_by, committed_minor, deployed_minor, people_reached, created_at, pdf, snapshot)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9);
+  (id, partner_id, exported_by, committed_minor, deployed_minor, people_reached, created_at, pdf, snapshot, snapshot_digest)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10);
 
 -- name: PartnerReports :many
 -- P-14: previous exports for a partner, newest first, with the exporter name.
@@ -362,3 +362,19 @@ WHERE receipt_hash=$1 AND receipt_expires_at>clock_timestamp();
 
 -- name: InitiativePartners :many
 SELECT partner_id,committed_minor FROM donor_initiative_partners WHERE initiative_id=$1 ORDER BY partner_id;
+
+-- name: PartnerReportSnapshot :one
+SELECT pdf FROM donor_partner_reports
+WHERE partner_id=$1 AND snapshot_digest=$2 AND pdf IS NOT NULL;
+
+-- name: PartnerReportUsage :one
+-- Legacy organizations already over quota need only a bounded prefix to refuse growth.
+WITH reports AS MATERIALIZED (
+  SELECT created_at,octet_length(pdf) AS size FROM donor_partner_reports
+  WHERE partner_id=sqlc.arg(partner_id) LIMIT 1001
+)
+SELECT count(*)::bigint AS reports,
+  coalesce(sum(size),0)::bigint AS bytes,
+  count(*) FILTER (WHERE created_at >= sqlc.arg(day_start)::timestamptz
+    AND created_at < sqlc.arg(day_start)::timestamptz + interval '24 hours')::bigint AS today
+FROM reports;

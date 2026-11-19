@@ -120,12 +120,49 @@ func TestPartnerDashboardAndReport(t *testing.T) {
 	}
 
 	// Export: a valid PDF, recorded in history. Admin-only.
-	pdf, err := dash.ExportReport(ctx, adminSession)
-	if err != nil {
-		t.Fatal(err)
+	type result struct {
+		pdf []byte
+		err error
+	}
+	first := make(chan result, 8)
+	start := make(chan struct{})
+	for range 8 {
+		go func() { <-start; pdf, err := dash.ExportReport(ctx, adminSession); first <- result{pdf, err} }()
+	}
+	close(start)
+	var pdf []byte
+	for range 8 {
+		next := <-first
+		if next.err != nil {
+			t.Error(next.err)
+			continue
+		}
+		if pdf == nil {
+			pdf = next.pdf
+		} else if !bytes.Equal(next.pdf, pdf) {
+			t.Error("concurrent first exports produced different artifacts")
+		}
+	}
+	if t.Failed() {
+		t.FailNow()
 	}
 	if !bytes.HasPrefix(pdf, []byte("%PDF-")) || len(pdf) < 500 {
 		t.Fatalf("not a PDF: %d bytes", len(pdf))
+	}
+	results := make(chan error, 8)
+	for range 8 {
+		go func() {
+			repeated, err := dash.ExportReport(ctx, adminSession)
+			if err == nil && !bytes.Equal(repeated, pdf) {
+				err = fmt.Errorf("identical snapshot produced different PDF bytes")
+			}
+			results <- err
+		}()
+	}
+	for range 8 {
+		if err := <-results; err != nil {
+			t.Error(err)
+		}
 	}
 	exports, err := dash.Exports(ctx, adminSession)
 	if err != nil || len(exports) != 1 || exports[0].CommittedMinor != 150000 || !exports[0].Downloadable ||
@@ -136,8 +173,33 @@ func TestPartnerDashboardAndReport(t *testing.T) {
 	if err := reportID.Scan(exports[0].ID); err != nil {
 		t.Fatal(err)
 	}
+	otherAdmin := mustNewID(t)
+	mustExec(
+		t,
+		pool,
+		`INSERT INTO donor_partner_users(id,partner_id,email,name,role) VALUES($1,$2,'second-admin@delta.test','Second admin','ADMIN')`,
+		otherAdmin,
+		partnerID,
+	)
+	otherAdminSession := issueTestPartnerSession(t, pool, otherAdmin.String())
+	mustExec(
+		t,
+		pool,
+		`INSERT INTO donor_partner_reports(id,partner_id,exported_by,committed_minor,deployed_minor,people_reached,created_at,pdf,snapshot)
+ SELECT gen_random_uuid(),$1,$2,0,0,0,now(),$3,'{}'::jsonb FROM generate_series(1,19)`,
+		partnerID,
+		otherAdmin,
+		pdf,
+	)
+	if cached, err := dash.ExportReport(ctx, otherAdminSession); err != nil || !bytes.Equal(cached, pdf) {
+		t.Fatalf("cached report at daily quota, with another admin: %v", err)
+	}
 	if err := dash.SaveProfile(ctx, adminSession, "Delta Updated", "Changed since export"); err != nil {
 		t.Fatal(err)
+	}
+	var daily PartnerReportDailyLimit
+	if _, err := dash.ExportReport(ctx, adminSession); !errors.As(err, &daily) {
+		t.Fatalf("changed report bypassed the daily limit: %v", err)
 	}
 	retained, err := dash.ReportArtifact(ctx, adminSession, reportID)
 	if err != nil || !bytes.Equal(retained, pdf) {
@@ -353,5 +415,61 @@ func TestStaffSetPartnerLogoAtEnrollment(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE target=$1 AND action IN ('partner.logo_set','partner.logo_removed')", partner.String()).Scan(&audits); err != nil ||
 		audits != 2 {
 		t.Fatalf("%d logo audits, err %v; want 2", audits, err)
+	}
+}
+
+func TestPartnerReportStorageIsBounded(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		count, bytes int
+		today        bool
+	}{
+		{"daily", 20, 10, true}, {"history", 1000, 10, false}, {"bytes", 64, 2 << 20, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pool := database(t)
+			ctx := context.Background()
+			partner := approvedPartner(t, pool, "Report bounds", "REPORT-BOUNDS", 0, 0)
+			user := mustNewID(t)
+			t.Cleanup(func() {
+				cleanExec(t, "DELETE FROM donor_partner_reports WHERE partner_id=$1", partner)
+				cleanExec(t, "DELETE FROM donor_partner_sessions WHERE partner_user_id=$1", user)
+				cleanExec(t, "DELETE FROM donor_partner_users WHERE partner_id=$1", partner)
+			})
+			mustExec(
+				t,
+				pool,
+				`INSERT INTO donor_partner_users(id,partner_id,email,name,role) VALUES($1,$2,'bounded@example.org','Admin','ADMIN')`,
+				user,
+				partner,
+			)
+			session := issueTestPartnerSession(t, pool, user.String())
+			date := time.Now().UTC().Add(-48 * time.Hour)
+			if test.today {
+				date = time.Now().UTC()
+			}
+			mustExec(
+				t,
+				pool,
+				`INSERT INTO donor_partner_reports(id,partner_id,exported_by,committed_minor,deployed_minor,people_reached,created_at,pdf,snapshot)
+   SELECT gen_random_uuid(),$1,$2,0,0,0,$3,convert_to(repeat('x',$4::integer),'UTF8'),'{}'::jsonb FROM generate_series(1,$5::integer)`,
+				partner,
+				user,
+				date,
+				test.bytes,
+				test.count,
+			)
+			dash := PartnerDashboardService{PartnerPortalService{DB: as(t, dbroles.API)}}
+			_, err := dash.ExportReport(ctx, session)
+			var daily PartnerReportDailyLimit
+			if (test.today && !errors.As(err, &daily)) || (!test.today && !errors.Is(err, ErrPartnerReportStorage)) {
+				t.Fatalf("wrong quota refusal: %v", err)
+			}
+			var count int
+			if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_partner_reports WHERE partner_id=$1", partner).Scan(&count); err != nil ||
+				count != test.count {
+				t.Fatalf("history count=%d err=%v", count, err)
+			}
+		})
 	}
 }

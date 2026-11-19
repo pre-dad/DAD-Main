@@ -381,8 +381,8 @@ func (q *Queries) InsertPartnerApplication(ctx context.Context, arg InsertPartne
 
 const insertPartnerReport = `-- name: InsertPartnerReport :exec
 INSERT INTO donor_partner_reports
-  (id, partner_id, exported_by, committed_minor, deployed_minor, people_reached, created_at, pdf, snapshot)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+  (id, partner_id, exported_by, committed_minor, deployed_minor, people_reached, created_at, pdf, snapshot, snapshot_digest)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 `
 
 type InsertPartnerReportParams struct {
@@ -395,6 +395,7 @@ type InsertPartnerReportParams struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	Pdf            []byte             `json:"pdf"`
 	Snapshot       []byte             `json:"snapshot"`
+	SnapshotDigest []byte             `json:"snapshot_digest"`
 }
 
 // P-14: record one dashboard PDF export for the export-history list.
@@ -409,6 +410,7 @@ func (q *Queries) InsertPartnerReport(ctx context.Context, arg InsertPartnerRepo
 		arg.CreatedAt,
 		arg.Pdf,
 		arg.Snapshot,
+		arg.SnapshotDigest,
 	)
 	return err
 }
@@ -974,6 +976,54 @@ func (q *Queries) PartnerReportArtifact(ctx context.Context, arg PartnerReportAr
 	var pdf []byte
 	err := row.Scan(&pdf)
 	return pdf, err
+}
+
+const partnerReportSnapshot = `-- name: PartnerReportSnapshot :one
+SELECT pdf FROM donor_partner_reports
+WHERE partner_id=$1 AND snapshot_digest=$2 AND pdf IS NOT NULL
+`
+
+type PartnerReportSnapshotParams struct {
+	PartnerID      pgtype.UUID `json:"partner_id"`
+	SnapshotDigest []byte      `json:"snapshot_digest"`
+}
+
+func (q *Queries) PartnerReportSnapshot(ctx context.Context, arg PartnerReportSnapshotParams) ([]byte, error) {
+	row := q.db.QueryRow(ctx, partnerReportSnapshot, arg.PartnerID, arg.SnapshotDigest)
+	var pdf []byte
+	err := row.Scan(&pdf)
+	return pdf, err
+}
+
+const partnerReportUsage = `-- name: PartnerReportUsage :one
+WITH reports AS MATERIALIZED (
+  SELECT created_at,octet_length(pdf) AS size FROM donor_partner_reports
+  WHERE partner_id=$2 LIMIT 1001
+)
+SELECT count(*)::bigint AS reports,
+  coalesce(sum(size),0)::bigint AS bytes,
+  count(*) FILTER (WHERE created_at >= $1::timestamptz
+    AND created_at < $1::timestamptz + interval '24 hours')::bigint AS today
+FROM reports
+`
+
+type PartnerReportUsageParams struct {
+	DayStart  pgtype.Timestamptz `json:"day_start"`
+	PartnerID pgtype.UUID        `json:"partner_id"`
+}
+
+type PartnerReportUsageRow struct {
+	Reports int64 `json:"reports"`
+	Bytes   int64 `json:"bytes"`
+	Today   int64 `json:"today"`
+}
+
+// Legacy organizations already over quota need only a bounded prefix to refuse growth.
+func (q *Queries) PartnerReportUsage(ctx context.Context, arg PartnerReportUsageParams) (PartnerReportUsageRow, error) {
+	row := q.db.QueryRow(ctx, partnerReportUsage, arg.DayStart, arg.PartnerID)
+	var i PartnerReportUsageRow
+	err := row.Scan(&i.Reports, &i.Bytes, &i.Today)
+	return i, err
 }
 
 const partnerReports = `-- name: PartnerReports :many

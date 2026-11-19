@@ -111,3 +111,8 @@ it("reads the coded 503 shape and per-row CSV errors from the API", async () => 
     errors: [{ row: 3, column: "unit", reason: "unknown unit" }],
   });
 });
+
+it("keeps the report's daily quota explanation instead of promising a one-minute retry", () => {
+  const message = "Today's new report limit has been reached. Try again after midnight UTC.";
+  expect(failureMessage(new ApiError(message, 429, "PARTNER_REPORT_DAILY_LIMIT"), "Unavailable")).toBe(message);
+});

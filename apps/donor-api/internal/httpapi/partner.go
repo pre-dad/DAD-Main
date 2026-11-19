@@ -3,7 +3,9 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -309,6 +311,17 @@ func (a *api) partnerReport(w http.ResponseWriter, r *http.Request, session stri
 	ctx, cancel := withTimeout(r, staffTimeout)
 	defer cancel()
 	pdf, err := a.PartnerPortal.ExportReport(ctx, session)
+	var daily store.PartnerReportDailyLimit
+	if errors.As(err, &daily) {
+		seconds := max(1, int(math.Ceil(time.Until(daily.RetryAt).Seconds())))
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		writeJSON(w, http.StatusTooManyRequests, problem{Detail: daily.Error(), Code: "PARTNER_REPORT_DAILY_LIMIT"})
+		return
+	}
+	if errors.Is(err, store.ErrPartnerReportStorage) {
+		writeJSON(w, http.StatusConflict, problem{Detail: store.ErrPartnerReportStorage.Error(), Code: "PARTNER_REPORT_STORAGE_LIMIT"})
+		return
+	}
 	if err != nil {
 		respond(w, r, nil, err, partnerStatusCode)
 		return
