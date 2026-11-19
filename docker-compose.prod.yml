@@ -7,6 +7,8 @@ x-donor: &donor
   build:
     context: .
     dockerfile: apps/donor-api/Dockerfile
+    args:
+      BUILD_REVISION: ${BUILD_REVISION:-unknown}
   depends_on:
     postgres:
       condition: service_healthy

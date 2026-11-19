@@ -4,14 +4,12 @@ WORKDIR /src
 COPY apps/donor-api/go.mod apps/donor-api/go.sum ./
 RUN go mod download
 COPY apps/donor-api ./
-RUN CGO_ENABLED=0 go build -trimpath -o /out/api ./cmd/api && \
-    CGO_ENABLED=0 go build -trimpath -o /out/worker ./cmd/worker && \
-    CGO_ENABLED=0 go build -trimpath -o /out/migrate ./cmd/migrate && \
-    CGO_ENABLED=0 go build -trimpath -o /out/provision ./cmd/provision && \
-    CGO_ENABLED=0 go build -trimpath -o /out/monitor ./cmd/monitor && \
-    CGO_ENABLED=0 go build -trimpath -o /out/reconcile ./cmd/reconcile && \
-    CGO_ENABLED=0 go build -trimpath -o /out/staff ./cmd/staff && \
-    CGO_ENABLED=0 go build -trimpath -o /out/rekey ./cmd/rekey
+ARG BUILD_REVISION=unknown
+RUN for command in api worker migrate provision monitor reconcile staff rekey; do \
+      CGO_ENABLED=0 go build -trimpath \
+        -ldflags="-X dad/donor-api/internal/buildinfo.commit=${BUILD_REVISION}" \
+        -o "/out/$command" "./cmd/$command" || exit 1; \
+    done
 
 FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 AS runtime
 RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 10001 donor

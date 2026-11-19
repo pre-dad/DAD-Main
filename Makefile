@@ -137,7 +137,7 @@ smoke-ingress:
 
 # The web image is built for the ingress check's hosts so it can be served through nginx.
 check-images:
-	docker build -f apps/donor-api/Dockerfile -t dad/api:check .
+	docker build -f apps/donor-api/Dockerfile -t dad/api:check --build-arg BUILD_REVISION="$(shell git rev-parse HEAD)" .
 	docker run --rm --entrypoint sh dad/api:check -c \
 		'for binary in api worker migrate provision monitor reconcile staff rekey; do command -v "$$binary" >/dev/null || exit 1; done'
 	docker build -f apps/web/Dockerfile -t dad/web:check \

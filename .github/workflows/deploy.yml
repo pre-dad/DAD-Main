@@ -204,7 +204,7 @@ jobs:
             docker build -t "$REGISTRY/dad/$name:$IMAGE_TAG" "$@" -f "$dockerfile" "$context"
             docker push "$REGISTRY/dad/$name:$IMAGE_TAG"
           }
-          build_push api apps/donor-api/Dockerfile .
+          build_push api apps/donor-api/Dockerfile . --build-arg "BUILD_REVISION=$IMAGE_TAG"
           build_push web apps/web/Dockerfile . \
             --build-arg "DONOR_PUBLIC_ORIGIN=$DONOR_PUBLIC_ORIGIN" \
             --build-arg "DONOR_STAFF_ORIGIN=$DONOR_STAFF_ORIGIN"

@@ -38,7 +38,10 @@ workers_enabled() {
 }
 [[ "${1:-help}" =~ ^(help|-h|--help)$ ]] || check_env_files
 case "${1:-help}" in
-  build) compose build api web ;;
+  build)
+    export BUILD_REVISION="${BUILD_REVISION:-$(git rev-parse HEAD)}"
+    compose build api web
+    ;;
   migrate) compose up -d --wait postgres; compose run --rm migrate ;;
   adopt) compose up -d --wait postgres; compose run --rm migrate migrate --adopt-existing ;;
   provision-roles) compose up -d --wait postgres; compose run --rm provision ;;

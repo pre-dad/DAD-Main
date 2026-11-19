@@ -1378,3 +1378,11 @@ remain fixed; staff cannot supply executable rules. Changes are audited and sche
 projection refreshes. Past awards remain permanent. Company month winners use combined
 active giving, matching the displayed leaderboard. Qualifying website-waitlist claims
 have no redemption expiry; only their keyed address hashes are retained.
+
+## Container revision identity
+
+The API health responses report the commit linked into the executable. The deploy
+workflow passes its immutable image SHA as `BUILD_REVISION`; `scripts/deploy.sh build`
+uses the checkout's current commit, and `make check-images` does the same. A direct
+Docker or Compose build must supply `BUILD_REVISION` to identify its source revision.
+An unstamped build reports `unknown`; image tags alone do not stamp Go binaries.
