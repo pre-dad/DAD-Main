@@ -1437,3 +1437,10 @@ zones and JSON null are rejected, and account deletion clears the correction.
 
 An effective zone change marks the donor's financial projection due in the same
 transaction so midnight schedules and recognition refresh under the new zone.
+
+Report rendering embeds Unicode font subsets, including CJK and complex-script
+shaping. Each API process renders one report at a time; report text is capped at 128 KiB and queued requests honor
+cancellation. An export exceeding 1,000 spend categories or a 2 MiB PDF returns
+413 `PARTNER_REPORT_TOO_LARGE` without storing a partial artifact. Previously
+exported reports remain immutable and downloadable. Renderer changes use a new
+snapshot version, so older lossy PDFs are not reused for new exports.

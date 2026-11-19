@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DAD Impact Report — {{.Organization}}</title>
+<style>
+{{.FontCSS}}
+@page {
+  size: A4;
+  margin: 34mm 18mm 30mm;
+  @top-center { content: element(report-header); vertical-align: top; }
+  @bottom-left { content: element(report-footer); vertical-align: middle; }
+  @bottom-right { content: "Page " counter(page); font: 8pt ReportLatin; color: #555; vertical-align: middle; }
+}
+body { font-family: {{.FontFamilies}}; color: #14201f; font-size: 10pt; line-height: 1.45; }
+header { position: running(report-header); background: #10201f; color: white; padding: 5mm; width: 164mm; height: 15mm; }
+header h1 { font-size: 19pt; margin: 1mm 0 0; line-height: 1.4; }
+header img { float: right; }
+footer { position: running(report-footer); border-top: 1px solid #c8c8c8; color: #555; width: 145mm; padding-top: 2mm; font-size: 8pt; line-height: 1.35; }
+h2 { font-size: 15pt; line-height: 1.5; margin: 0 0 2mm; }
+p { margin: 0 0 2mm; }
+.organization, .category { white-space: pre-wrap; overflow-wrap: break-word; }
+.dates { color: #666; font-size: 9pt; margin-bottom: 7mm; }
+.metric { margin-bottom: 4mm; break-inside: avoid; }
+.value { font-size: 16pt; font-weight: bold; }
+.label { color: #666; }
+h3 { font-size: 12pt; margin: 6mm 0 2mm; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+th, td { padding: 2mm 0; border-bottom: 1px solid #e1e6e5; vertical-align: top; }
+th { text-align: left; font-size: 9pt; color: #555; }
+tr { break-inside: avoid; }
+.amount { width: 42mm; text-align: right; padding-left: 4mm; white-space: nowrap; }
+</style>
+</head>
+<body>
+<header>
+{{if .HasLogo}}<img src="https://dad-report.invalid/logo.png" alt="Organization logo" style="width: {{.LogoWidth}}mm; height: {{.LogoHeight}}mm;">{{end}}
+<h1>DAD — Impact Report</h1>
+</header>
+<footer>Sandbox preview. Figures verified by DAD. Only published, verified figures are shown; unverified figures are never estimated.</footer>
+<h2 class="organization" dir="{{direction .Organization}}">{{.Organization}}</h2>
+<div class="dates">
+<p>Exported {{.Exported}}</p>
+{{if .Updated}}<p>Figures last updated {{.Updated}}</p>{{end}}
+</div>
+{{range .Metrics}}<div class="metric"><div class="value">{{.Value}}</div><div class="label">{{.Label}}</div></div>{{end}}
+{{if .Spend}}
+<h3>Spend by category</h3>
+<table>
+<thead><tr><th scope="col">Category</th><th scope="col" class="amount">Amount</th></tr></thead>
+<tbody>{{range .Spend}}<tr><td class="category" dir="{{direction .Category}}">{{.Category}}</td><td class="amount">{{.Amount}}</td></tr>{{end}}</tbody>
+</table>
+{{end}}
+</body>
+</html>

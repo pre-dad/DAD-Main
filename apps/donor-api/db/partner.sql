@@ -129,9 +129,10 @@ UPDATE donor_partner_sessions SET revoked_at=$2,push_token=NULL,push_environment
 SELECT s.category, sum(s.amount_minor)::bigint AS amount_minor
 FROM donor_initiative_spend s
 JOIN donor_initiatives i ON i.id = s.initiative_id
-WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=$1) AND i.publish_state='PUBLISHED'
+WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=sqlc.arg(partner_id)) AND i.publish_state='PUBLISHED'
 GROUP BY s.category
-ORDER BY s.category;
+ORDER BY s.category
+LIMIT sqlc.narg(max_rows)::integer;
 
 -- name: PartnerOverviewTotals :one
 -- P-10 tiles over the partner's published initiatives: committed, deployed

@@ -56,7 +56,9 @@ services:
 
   api:
     <<: *donor
+    mem_limit: 1g
     environment:
+      GOMEMLIMIT: 768MiB
       <<: *mail-queue
       DONOR_PUBLIC_ORIGIN: ${DONOR_PUBLIC_ORIGIN:?set DONOR_PUBLIC_ORIGIN}
       DONOR_NATIVE_RETURN_ORIGIN: ${DONOR_NATIVE_RETURN_ORIGIN-}

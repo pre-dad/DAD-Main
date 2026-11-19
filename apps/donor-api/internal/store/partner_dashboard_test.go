@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -269,13 +272,39 @@ func TestPartnerReportRendersAnyNameAndPaginatesLongSpend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pdf, err := renderPartnerReport(overview, spend, logo, now)
+	pdf, err := renderPartnerReport(context.Background(), overview, spend, logo, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.HasPrefix(pdf, []byte("%PDF-")) || bytes.Count(pdf, []byte("/Type /Page\n")) < 2 {
-		t.Fatalf("report is not a multi-page PDF: %d bytes, %d pages", len(pdf), bytes.Count(pdf, []byte("/Type /Page\n")))
+	path := filepath.Join(t.TempDir(), "report.pdf")
+	if err := os.WriteFile(path, pdf, 0600); err != nil {
+		t.Fatal(err)
 	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	info, err := exec.CommandContext(ctx, "pdfinfo", path).CombinedOutput()
+	if err != nil {
+		t.Fatalf("inspect PDF (install Poppler for PDF tests): %v %s", err, info)
+	}
+	pages := 0
+	for _, line := range strings.Split(string(info), "\n") {
+		if _, err := fmt.Sscanf(line, "Pages: %d", &pages); err == nil {
+			break
+		}
+	}
+	if pages < 2 {
+		t.Fatalf("report has %d pages, want multiple pages", pages)
+	}
+	text, err := exec.CommandContext(ctx, "pdftotext", "-layout", path, "-").CombinedOutput()
+	if err != nil {
+		t.Fatalf("extract PDF text: %v %s", err, text)
+	}
+	for _, expected := range []string{"Ünïcode Fondation 日本語", "Category 59", "Figures verified by DAD"} {
+		if !strings.Contains(string(text), expected) {
+			t.Errorf("report lost expected text %q", expected)
+		}
+	}
+
 }
 
 // TestPartnerProfileEditedByAdminsOnly covers the §7.2 organization profile.
@@ -471,5 +500,44 @@ func TestPartnerReportStorageIsBounded(t *testing.T) {
 				t.Fatalf("history count=%d err=%v", count, err)
 			}
 		})
+	}
+}
+
+func TestOversizedPartnerReportStoresNoArtifact(t *testing.T) {
+	pool := database(t)
+	ctx := t.Context()
+	partner := approvedPartner(t, pool, "Large report", "LARGE-REPORT", 0, 0)
+	user := mustNewID(t)
+	t.Cleanup(func() {
+		cleanExec(t, "DELETE FROM donor_partner_reports WHERE partner_id=$1", partner)
+		cleanExec(t, "DELETE FROM donor_partner_sessions WHERE partner_user_id=$1", user)
+		cleanExec(t, "DELETE FROM donor_partner_users WHERE partner_id=$1", partner)
+	})
+	mustExec(
+		t,
+		pool,
+		`INSERT INTO donor_partner_users(id,partner_id,email,name,role) VALUES($1,$2,'large@example.org','Admin','ADMIN')`,
+		user,
+		partner,
+	)
+	session := issueTestPartnerSession(t, pool, user.String())
+	seedPartnerInitiative(t, pool, partner, "large-report", 100000, 100, 1)
+	mustExec(
+		t,
+		pool,
+		`INSERT INTO donor_initiative_spend(id,initiative_id,category,amount_minor) SELECT gen_random_uuid(),i.id,'Category '||n,100 FROM donor_initiatives i CROSS JOIN generate_series(1,1001) n WHERE i.slug='large-report'`,
+	)
+	dash := PartnerDashboardService{PartnerPortalService{DB: as(t, dbroles.API)}}
+	if pdf, err := dash.ExportReport(ctx, session); !errors.Is(err, ErrPartnerReportTooLarge) || len(pdf) != 0 {
+		t.Fatalf("oversize export bytes=%d err=%v", len(pdf), err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM donor_partner_reports WHERE partner_id=$1`, partner).Scan(&count); err != nil ||
+		count != 0 {
+		t.Fatalf("partial artifacts=%d err=%v", count, err)
+	}
+	rows, err := dash.Spend(ctx, session)
+	if err != nil || len(rows) != 1002 {
+		t.Fatalf("dashboard spend was truncated: rows=%d err=%v", len(rows), err)
 	}
 }

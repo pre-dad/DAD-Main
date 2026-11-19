@@ -1085,7 +1085,13 @@ JOIN donor_initiatives i ON i.id = s.initiative_id
 WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=$1) AND i.publish_state='PUBLISHED'
 GROUP BY s.category
 ORDER BY s.category
+LIMIT $2::integer
 `
+
+type PartnerSpendByCategoryParams struct {
+	PartnerID pgtype.UUID `json:"partner_id"`
+	MaxRows   pgtype.Int4 `json:"max_rows"`
+}
 
 type PartnerSpendByCategoryRow struct {
 	Category    string `json:"category"`
@@ -1093,8 +1099,8 @@ type PartnerSpendByCategoryRow struct {
 }
 
 // P-12: spend by category across a partner's linked initiatives (totals only).
-func (q *Queries) PartnerSpendByCategory(ctx context.Context, partnerID pgtype.UUID) ([]PartnerSpendByCategoryRow, error) {
-	rows, err := q.db.Query(ctx, partnerSpendByCategory, partnerID)
+func (q *Queries) PartnerSpendByCategory(ctx context.Context, arg PartnerSpendByCategoryParams) ([]PartnerSpendByCategoryRow, error) {
+	rows, err := q.db.Query(ctx, partnerSpendByCategory, arg.PartnerID, arg.MaxRows)
 	if err != nil {
 		return nil, err
 	}

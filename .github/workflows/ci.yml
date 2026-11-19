@@ -109,6 +109,7 @@ jobs:
         working-directory: apps/web
       - run: make migrate
       - run: make check-generated
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - run: make test-donor-go
       - run: make lint-go
 

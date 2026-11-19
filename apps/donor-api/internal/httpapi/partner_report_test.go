@@ -26,6 +26,7 @@ func TestPartnerReportQuotaResponses(t *testing.T) {
 		code   string
 	}{
 		{"daily", store.PartnerReportDailyLimit{RetryAt: time.Now().Add(time.Hour)}, 429, "PARTNER_REPORT_DAILY_LIMIT"},
+		{"size", store.ErrPartnerReportTooLarge, 413, "PARTNER_REPORT_TOO_LARGE"},
 		{"storage", store.ErrPartnerReportStorage, 409, "PARTNER_REPORT_STORAGE_LIMIT"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

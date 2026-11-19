@@ -1,7 +1,6 @@
 package store
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -11,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"dad/donor-api/internal/partnerreport"
 	"dad/donor-api/internal/store/queries"
-	"github.com/go-pdf/fpdf"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -190,7 +189,7 @@ func (s PartnerDashboardService) Initiatives(ctx context.Context, token string) 
 // Spend lists spend by category across the partner's initiatives (P-12).
 func (s PartnerDashboardService) Spend(ctx context.Context, token string) ([]PartnerSpendRow, error) {
 	return partnerRead(ctx, s.DB, token, func(q *queries.Queries, actor PartnerActor) ([]PartnerSpendRow, error) {
-		rows, err := q.PartnerSpendByCategory(ctx, actor.PartnerID)
+		rows, err := q.PartnerSpendByCategory(ctx, queries.PartnerSpendByCategoryParams{PartnerID: actor.PartnerID})
 		if err != nil {
 			return nil, err
 		}
@@ -256,9 +255,18 @@ func (s PartnerDashboardService) exportReport(ctx context.Context, token string)
 			if err != nil {
 				return nil, err
 			}
-			spend, err := q.PartnerSpendByCategory(ctx, actor.PartnerID)
+			spend, err := q.PartnerSpendByCategory(
+				ctx,
+				queries.PartnerSpendByCategoryParams{
+					PartnerID: actor.PartnerID,
+					MaxRows:   pgtype.Int4{Int32: partnerreport.MaxSpendRows + 1, Valid: true},
+				},
+			)
 			if err != nil {
 				return nil, err
+			}
+			if len(spend) > partnerreport.MaxSpendRows {
+				return nil, ErrPartnerReportTooLarge
 			}
 			logo, err := q.PartnerLogo(ctx, actor.PartnerID)
 			if err != nil {
@@ -274,7 +282,7 @@ func (s PartnerDashboardService) exportReport(ctx context.Context, token string)
 				Overview PartnerOverview
 				Spend    []queries.PartnerSpendByCategoryRow
 				Logo     []byte
-			}{1, day.Format(time.DateOnly), normalized, spend, logo})
+			}{partnerreport.Version, day.Format(time.DateOnly), normalized, spend, logo})
 			if err != nil {
 				return nil, err
 			}
@@ -299,12 +307,12 @@ func (s PartnerDashboardService) exportReport(ctx context.Context, token string)
 			if usage.Today >= partnerReportsPerDay {
 				return nil, PartnerReportDailyLimit{RetryAt: day.AddDate(0, 0, 1)}
 			}
-			pdf, err = renderPartnerReport(overview, spend, logo, now)
+			pdf, err = renderPartnerReport(ctx, overview, spend, logo, now)
 			if err != nil {
 				return nil, err
 			}
 			if len(pdf) > 2<<20 {
-				return nil, ErrPartnerApplication
+				return nil, ErrPartnerReportTooLarge
 			}
 			if usage.Bytes+int64(len(pdf)) > partnerReportBytes {
 				return nil, ErrPartnerReportStorage
@@ -339,85 +347,18 @@ func (s PartnerDashboardService) ReportArtifact(ctx context.Context, token strin
 	})
 }
 
-// renderPartnerReport builds the branded PDF: the DAD header band,
-// the partner organization, the dashboard figures, spend by category, the
-// export time, and the "Figures verified by DAD" statement (P-14). The core
-// fonts are cp1252, so every string is translated rather than written as UTF-8.
-func renderPartnerReport(o PartnerOverview, spend []queries.PartnerSpendByCategoryRow, logo []byte, now time.Time) ([]byte, error) {
-	pdf := fpdf.New("P", "mm", "A4", "")
-	pdf.SetCreationDate(now.UTC())
-	pdf.SetModificationDate(now.UTC())
-	tr := pdf.UnicodeTranslatorFromDescriptor("")
-	pdf.SetMargins(18, 32, 18)
-	pdf.SetAutoPageBreak(true, 30)
-	pdf.SetHeaderFunc(func() {
-		pdf.SetFillColor(16, 32, 31)
-		pdf.Rect(0, 0, 210, 26, "F")
-		pdf.SetY(8)
-		pdf.SetFont("Helvetica", "B", 20)
-		pdf.SetTextColor(255, 255, 255)
-		pdf.CellFormat(0, 10, tr("DAD — Impact Report"), "", 1, "L", false, 0, "")
-		if len(logo) > 0 {
-			pdf.RegisterImageOptionsReader("partner-logo", fpdf.ImageOptions{ImageType: "PNG"}, bytes.NewReader(logo))
-			image := pdf.GetImageInfo("partner-logo")
-			if image != nil {
-				width, height := image.Extent()
-				scale := min(30/width, 15/height)
-				pdf.ImageOptions(
-					"partner-logo",
-					192-width*scale,
-					6+(15-height*scale)/2,
-					width*scale,
-					height*scale,
-					false,
-					fpdf.ImageOptions{ImageType: "PNG"},
-					0,
-					"",
-				)
-			}
-		}
-		pdf.SetY(32)
-	})
-	pdf.SetFooterFunc(func() {
-		pdf.SetY(-24)
-		pdf.SetDrawColor(200, 200, 200)
-		pdf.Line(18, pdf.GetY(), 192, pdf.GetY())
-		pdf.Ln(3)
-		pdf.SetFont("Helvetica", "I", 9)
-		pdf.SetTextColor(90, 90, 90)
-		pdf.MultiCell(
-			0,
-			5,
-			"Sandbox preview. Figures verified by DAD. Only published, verified figures are shown; unverified figures are never estimated.",
-			"",
-			"L",
-			false,
-		)
-		pdf.CellFormat(0, 4, fmt.Sprintf("Page %d", pdf.PageNo()), "", 0, "R", false, 0, "")
-	})
-	pdf.AddPage()
+var ErrPartnerReportTooLarge = partnerreport.ErrTooLarge
 
-	pdf.SetTextColor(20, 20, 20)
-	pdf.Ln(10)
-	pdf.SetFont("Helvetica", "B", 15)
-	pdf.MultiCell(0, 8, tr(o.Organization), "", "L", false)
-	pdf.SetFont("Helvetica", "", 10)
-	pdf.SetTextColor(90, 90, 90)
-	pdf.CellFormat(0, 6, "Exported "+now.UTC().Format("2 January 2006, 15:04 UTC"), "", 1, "L", false, 0, "")
-	if o.UpdatedAt != nil {
-		pdf.CellFormat(0, 6, "Figures last updated "+o.UpdatedAt.UTC().Format("2 January 2006, 15:04 UTC"), "", 1, "L", false, 0, "")
-	}
-	pdf.Ln(6)
-
-	pdf.SetTextColor(20, 20, 20)
+func renderPartnerReport(
+	ctx context.Context,
+	o PartnerOverview,
+	spend []queries.PartnerSpendByCategoryRow,
+	logo []byte,
+	now time.Time,
+) ([]byte, error) {
+	data := partnerreport.Data{Organization: o.Organization, ExportedAt: now, UpdatedAt: o.UpdatedAt, Logo: logo}
 	tile := func(value, label string) {
-		pdf.SetFont("Helvetica", "B", 16)
-		pdf.CellFormat(0, 8, tr(value), "", 1, "L", false, 0, "")
-		pdf.SetFont("Helvetica", "", 10)
-		pdf.SetTextColor(90, 90, 90)
-		pdf.CellFormat(0, 6, tr(label), "", 1, "L", false, 0, "")
-		pdf.SetTextColor(20, 20, 20)
-		pdf.Ln(3)
+		data.Metrics = append(data.Metrics, partnerreport.Metric{Label: label, Value: value})
 	}
 	if o.CommittedVerified {
 		tile(money(o.CommittedMinor), "Committed")
@@ -435,30 +376,8 @@ func renderPartnerReport(o PartnerOverview, spend []queries.PartnerSpendByCatego
 		}
 		tile(enrolled, "Employees enrolled")
 	}
-
-	if len(spend) > 0 {
-		pdf.Ln(4)
-		pdf.SetFont("Helvetica", "B", 12)
-		pdf.CellFormat(0, 8, "Spend by category", "", 1, "L", false, 0, "")
-		pdf.SetFont("Helvetica", "", 10)
-		for _, row := range spend {
-			height := 6 * float64(len(pdf.SplitLines([]byte(tr(row.Category)), 120)))
-			if pdf.GetY()+height > 267 {
-				pdf.AddPage()
-				pdf.SetFont("Helvetica", "", 10)
-				pdf.SetTextColor(20, 20, 20)
-			}
-			y := pdf.GetY()
-			pdf.MultiCell(120, 6, tr(row.Category), "", "L", false)
-			pdf.SetXY(138, y)
-			pdf.CellFormat(54, height, money(row.AmountMinor), "", 0, "R", false, 0, "")
-			pdf.SetXY(18, y+height)
-		}
+	for _, row := range spend {
+		data.Spend = append(data.Spend, partnerreport.Spend{Category: row.Category, Amount: money(row.AmountMinor)})
 	}
-
-	var buf bytes.Buffer
-	if err := pdf.Output(&buf); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	return partnerreport.Render(ctx, data)
 }

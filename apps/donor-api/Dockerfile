@@ -14,6 +14,8 @@ RUN for command in api worker migrate provision monitor reconcile staff rekey; d
 FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 AS runtime
 RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 10001 donor
 COPY --from=build /out/ /usr/local/bin/
+COPY apps/donor-api/internal/partnerreport/fonts/OFL-*.txt /usr/share/licenses/dad-report-fonts/
+COPY apps/donor-api/internal/partnerreport/THIRD_PARTY_LICENSES.txt /usr/share/licenses/dad-report-renderer/
 USER donor
 ENV DONOR_GO_LISTEN=0.0.0.0:8002
 EXPOSE 8002

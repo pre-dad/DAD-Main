@@ -318,6 +318,14 @@ func (a *api) partnerReport(w http.ResponseWriter, r *http.Request, session stri
 		writeJSON(w, http.StatusTooManyRequests, problem{Detail: daily.Error(), Code: "PARTNER_REPORT_DAILY_LIMIT"})
 		return
 	}
+	if errors.Is(err, store.ErrPartnerReportTooLarge) {
+		writeJSON(
+			w,
+			http.StatusRequestEntityTooLarge,
+			problem{Detail: store.ErrPartnerReportTooLarge.Error(), Code: "PARTNER_REPORT_TOO_LARGE"},
+		)
+		return
+	}
 	if errors.Is(err, store.ErrPartnerReportStorage) {
 		writeJSON(w, http.StatusConflict, problem{Detail: store.ErrPartnerReportStorage.Error(), Code: "PARTNER_REPORT_STORAGE_LIMIT"})
 		return

@@ -3002,10 +3002,10 @@ export interface components {
             /** @description Human-readable explanation, safe to show to the user. Never contains credentials, donor data, or internal error text. */
             detail: string;
             /**
-             * @description Present on a 503 for a feature this deployment has deliberately not configured (not transient: do not retry; show the feature as unavailable), and on the 422 of POST /donor/me/password when `current_password` is missing or wrong. Report export refusals use PARTNER_REPORT_DAILY_LIMIT (429, retry at the next UTC day) or PARTNER_REPORT_STORAGE_LIMIT (409, existing reports remain available).
+             * @description Present on a 503 for a feature this deployment has deliberately not configured (not transient: do not retry; show the feature as unavailable), and on the 422 of POST /donor/me/password when `current_password` is missing or wrong. Report export refusals use PARTNER_REPORT_DAILY_LIMIT (429, retry at the next UTC day) PARTNER_REPORT_STORAGE_LIMIT (409), or PARTNER_REPORT_TOO_LARGE (413). Existing reports remain available.
              * @enum {string}
              */
-            code?: "PAYMENTS_UNCONFIGURED" | "EMAIL_UNCONFIGURED" | "SOURCE_STORAGE_UNCONFIGURED" | "PUSH_UNCONFIGURED" | "FOUNDING_CLAIMS_UNCONFIGURED" | "PASSKEYS_UNCONFIGURED" | "CURRENT_PASSWORD_INCORRECT" | "PARTNER_REPORT_DAILY_LIMIT" | "PARTNER_REPORT_STORAGE_LIMIT";
+            code?: "PAYMENTS_UNCONFIGURED" | "EMAIL_UNCONFIGURED" | "SOURCE_STORAGE_UNCONFIGURED" | "PUSH_UNCONFIGURED" | "FOUNDING_CLAIMS_UNCONFIGURED" | "PASSKEYS_UNCONFIGURED" | "CURRENT_PASSWORD_INCORRECT" | "PARTNER_REPORT_DAILY_LIMIT" | "PARTNER_REPORT_STORAGE_LIMIT" | "PARTNER_REPORT_TOO_LARGE";
             /** @description Present only on a 422 from POST /donor/staff/founding-claims: every problem found, up to 100. */
             errors?: components["schemas"]["PublicationProblem"][];
         };
@@ -8707,6 +8707,15 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description Report storage is full; existing artifacts remain available. Code PARTNER_REPORT_STORAGE_LIMIT. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Report exceeds 1,000 spend categories or the 2 MiB PDF limit. Code PARTNER_REPORT_TOO_LARGE. Existing reports remain available. */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

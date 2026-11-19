@@ -224,3 +224,8 @@ enables workers or deletes database volumes implicitly. Test-only readiness is n
 - `docs`: product rules, architecture, operations, and security guidance.
 
 [Contributing](CONTRIBUTING.md) · [Architecture](docs/architecture.md) · [MIT license](LICENSE)
+
+PDF regression tests require Poppler (`brew install poppler` on macOS or
+`apt-get install poppler-utils` on Debian/Ubuntu). CI installs it before the Go
+suite. The deployed API uses embedded, licensed fonts and pure-Go rendering; it
+does not require Poppler, a browser, Python, or network font downloads.
