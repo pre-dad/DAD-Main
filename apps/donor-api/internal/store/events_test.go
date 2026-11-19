@@ -1008,7 +1008,7 @@ func TestEventTimeZone(t *testing.T) {
 		if err != nil || view.TimeZone != want[slug] {
 			t.Fatalf("%s: zone %q, want %q (%v)", slug, view.TimeZone, want[slug], err)
 		}
-		staff, err := s.Detail(ctx, adminToken, id)
+		staff, err := s.Detail(ctx, adminToken, id, 0)
 		if err != nil || staff.TimeZone != want[slug] {
 			t.Fatalf("%s staff detail: zone %q (%v)", slug, staff.TimeZone, err)
 		}

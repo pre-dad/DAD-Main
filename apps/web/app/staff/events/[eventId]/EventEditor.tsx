@@ -80,7 +80,8 @@ export function eventInput(form: FormData): Input | string {
 export default function EventEditor({ event }: { event: string | null }) {
   const router = useRouter();
   const id = event && encodeURIComponent(event);
-  const { resource, data, reload } = useApiResource<Detail>(id && `/donor/staff/events/${id}`);
+  const [offset, setOffset] = useState(0);
+  const { resource, data, reload } = useApiResource<Detail>(id && `/donor/staff/events/${id}?offset=${offset}`);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -352,8 +353,20 @@ export default function EventEditor({ event }: { event: string | null }) {
                   ))}
                 </ol>
               ) : (
-                <p>No one has reserved yet.</p>
+                <p>{offset > 0 ? "No RSVPs on this page." : "No one has reserved yet."}</p>
               )}
+              <nav aria-label="RSVP pages">
+                {offset > 0 && (
+                  <button type="button" className="secondary" onClick={() => setOffset(Math.max(0, offset - 50))}>
+                    Previous RSVPs
+                  </button>
+                )}
+                {detail.next_offset != null && (
+                  <button type="button" className="secondary" onClick={() => setOffset(detail.next_offset ?? 0)}>
+                    Next RSVPs
+                  </button>
+                )}
+              </nav>
             </>
           )}
         </>

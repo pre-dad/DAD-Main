@@ -39,16 +39,31 @@ SELECT r.donor_id, r.status, r.reserved_at, r.checked_in_at, d.email, d.public_n
 FROM donor_event_reservations r
 JOIN donors d ON d.id = r.donor_id
 WHERE r.event_id = $1 AND r.status IN ('RESERVED', 'WAITLISTED')
-ORDER BY r.status = 'WAITLISTED', r.reserved_at, r.id;
+ORDER BY r.status = 'WAITLISTED', r.reserved_at, r.id
+LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
 
 -- name: CancelEvent :execrows
 UPDATE donor_events SET cancelled_at=$2, updated_at=$2 WHERE id=$1 AND cancelled_at IS NULL;
 
--- name: ReleaseEventReservations :many
--- Cancels every live reservation of a cancelled event, returning who held one.
-UPDATE donor_event_reservations SET status='CANCELLED', updated_at=$2
-WHERE event_id=$1 AND status IN ('RESERVED', 'WAITLISTED')
-RETURNING donor_id;
+-- name: CancelEventReservationsAndNotify :one
+WITH released AS (
+  UPDATE donor_event_reservations SET status='CANCELLED', updated_at=sqlc.arg(as_of)::timestamptz
+  WHERE event_id=sqlc.arg(event_id)::uuid AND status IN ('RESERVED', 'WAITLISTED')
+  RETURNING donor_id
+), pushes AS (
+  INSERT INTO donor_push_notifications (id,donor_id,category,dedup_key,context,available_at,expires_at)
+  SELECT gen_random_uuid(),donor_id,'EVENT_CANCELLED',
+    'push:event-cancelled:'||sqlc.arg(event_id)::text||':'||donor_id::text,
+    json_build_object('event_id',sqlc.arg(event_id)::text),sqlc.arg(as_of)::timestamptz,sqlc.arg(expires_at)::timestamptz
+  FROM released ON CONFLICT (dedup_key) DO NOTHING
+), messages AS (
+  INSERT INTO donor_messages (id,donor_id,kind,dedup_key,context,available_at)
+  SELECT gen_random_uuid(),donor_id,'EVENT_CANCELLED',
+    'message:event-cancelled:'||sqlc.arg(event_id)::text||':'||donor_id::text,
+    json_build_object('event_id',sqlc.arg(event_id)::text),sqlc.arg(as_of)::timestamptz
+  FROM released ON CONFLICT (dedup_key) DO NOTHING
+)
+SELECT count(*)::bigint FROM released;
 
 -- name: UpcomingEventsNearDonor :many
 -- E-2: published events in and near the donor's city (same city label OR same

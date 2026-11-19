@@ -4411,6 +4411,11 @@ export interface components {
              */
             checked_in: number;
             attendees: components["schemas"]["EventAttendee"][];
+            /**
+             * Format: int64
+             * @description Next roster page offset, or null on the last page. Totals describe the whole event.
+             */
+            next_offset: number | null;
         };
         /** @description The donor's own impact totals (I-1, I-3). */
         ImpactSummary: {
@@ -7868,7 +7873,10 @@ export interface operations {
     };
     staffEvent: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Rows to skip. Pages hold up to 50 rows; pass the previous page's `next_offset` until it is null. */
+                offset?: components["parameters"]["Offset"];
+            };
             header?: never;
             path: {
                 event_id: string;

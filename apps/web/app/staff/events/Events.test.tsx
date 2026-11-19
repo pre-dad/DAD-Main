@@ -37,10 +37,11 @@ function stubApi() {
   const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (init?.method === "POST") return Promise.resolve(Response.json({ cancelled: true }));
-    if (url.includes("?offset=")) return Promise.resolve(Response.json({ events: [event], next_offset: null }));
+    if (url.includes("/events?offset=")) return Promise.resolve(Response.json({ events: [event], next_offset: null }));
     return Promise.resolve(
       Response.json({
         ...event,
+        next_offset: null,
         attendees: [
           {
             donor_id: "d-1",
@@ -120,4 +121,37 @@ it("checks an attendee in by hand and cancels the event", async () => {
     "src",
     "/api/donor/staff/events/e-1/check-in.svg",
   );
+});
+
+it("pages the RSVP roster while retaining full event totals", async () => {
+  const fetch = vi.fn((input: RequestInfo | URL) => {
+    const second = String(input).endsWith("?offset=50");
+    return Promise.resolve(
+      Response.json({
+        ...event,
+        reserved: 75,
+        waitlisted: 35,
+        next_offset: second ? null : 50,
+        attendees: [
+          {
+            donor_id: second ? "later" : "first",
+            email: second ? "later@example.org" : "first@example.org",
+            public_name: "",
+            status: "RESERVED",
+            reserved_at: "2026-10-20T12:00:00Z",
+            checked_in_at: null,
+          },
+        ],
+      }),
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<EventEditor event="e-1" />);
+  expect(await screen.findByRole("link", { name: "first@example.org" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Next RSVPs" }));
+  expect(await screen.findByRole("link", { name: "later@example.org" })).toBeInTheDocument();
+  expect(screen.getByText("75 of 20 reserved · 35 waitlisted · 0 checked in")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Next RSVPs" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Previous RSVPs" }));
+  expect(await screen.findByRole("link", { name: "first@example.org" })).toBeInTheDocument();
 });

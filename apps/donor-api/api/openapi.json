@@ -6605,6 +6605,9 @@
        "type": "string",
        "format": "uuid"
       }
+     },
+     {
+      "$ref": "#/components/parameters/Offset"
      }
     ],
     "responses": {
@@ -16493,6 +16496,14 @@
       "items": {
        "$ref": "#/components/schemas/EventAttendee"
       }
+     },
+     "next_offset": {
+      "type": [
+       "integer",
+       "null"
+      ],
+      "format": "int64",
+      "description": "Next roster page offset, or null on the last page. Totals describe the whole event."
      }
     },
     "additionalProperties": false,
@@ -16518,7 +16529,8 @@
      "reserved",
      "waitlisted",
      "checked_in",
-     "attendees"
+     "attendees",
+     "next_offset"
     ]
    },
    "ImpactSummary": {
