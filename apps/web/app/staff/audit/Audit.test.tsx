@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import Audit from "./Audit";
 
@@ -29,10 +29,10 @@ it("pages the audit history by cursor, newest first, returning focus to the head
   expect(await screen.findByText(/action\.older/)).toBeVisible();
   expect(fetch).toHaveBeenLastCalledWith("/api/donor/staff/audit?cursor=c%2B2", expect.anything());
   expect(screen.queryByRole("button", { name: "Older events" })).not.toBeInTheDocument();
-  expect(screen.getByRole("heading", { level: 1, name: "Staff audit history" })).toHaveFocus();
+  await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "Staff audit history" })).toHaveFocus());
   fireEvent.click(screen.getByRole("button", { name: "Newer events" }));
   expect(await screen.findByText(/action\.newer/)).toBeVisible();
-  expect(screen.getByRole("heading", { level: 1, name: "Staff audit history" })).toHaveFocus();
+  await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "Staff audit history" })).toHaveFocus());
 });
 
 it("says when no events are recorded and when the history cannot load", async () => {
