@@ -208,7 +208,8 @@ func seed(ctx context.Context, pool *pgxpool.Pool, o options, now time.Time) (po
 	// suppress it however refreshing ends, interrupted included.
 	defer func() {
 		var suppressErr error
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		// Large populations queue years of history; allow cleanup to finish after cancellation.
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancel()
 		r.SuppressedMessages, suppressErr = suppressHistory(cleanup, pool)
 		err = errors.Join(err, suppressErr)
