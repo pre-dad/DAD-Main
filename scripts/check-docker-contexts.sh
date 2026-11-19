@@ -81,7 +81,7 @@ done < <(
 )
 
 # `build_push <name> <dockerfile> <context>` call sites in the deploy workflow.
-while read -r _ name dockerfile context; do
+while read -r _ name dockerfile context _args; do
   check "deploy.yml build_push $name" "$dockerfile" "$context"
 done < <(grep -E '^[[:space:]]+build_push [a-z]+ [^ ]+ [^ ]+' .github/workflows/deploy.yml | sed -E 's/^[[:space:]]+//; s/ \\$//')
 
