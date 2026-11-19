@@ -155,6 +155,17 @@ func (s DonorInitiativeService) Today(ctx context.Context, token string) (TodayI
 			if err != nil {
 				return TodayInitiative{}, err
 			}
+			rules, err := badgeRules(ctx, q)
+			if err != nil {
+				return TodayInitiative{}, err
+			}
+			for _, rule := range rules {
+				if rule.Signal == "initiatives" && shown >= rule.Threshold {
+					if err := earnBadge(ctx, q, donor.ID, rule.Code, pgtype.Text{}, now); err != nil {
+						return TodayInitiative{}, err
+					}
+				}
+			}
 			metrics, err := q.PublishedInitiativeMetrics(ctx, chosen.ID)
 			if err != nil {
 				return TodayInitiative{}, err

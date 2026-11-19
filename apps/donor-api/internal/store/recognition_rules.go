@@ -54,8 +54,8 @@ var defaultBadgeRules = map[string]BadgeRule{
 	"WT":     {Signal: "monthly_winner", Threshold: 1},
 }
 
-func recognitionRules(ctx context.Context, q *queries.Queries) (RecognitionRules, error) {
-	out := RecognitionRules{Milestones: slices.Clone(recognition.LadderMilestones), Badges: make([]BadgeRule, 0, len(badges.Catalog))}
+func badgeRules(ctx context.Context, q *queries.Queries) ([]BadgeRule, error) {
+	out := make([]BadgeRule, 0, len(badges.Catalog))
 	rows, err := q.BadgeRules(ctx)
 	if err != nil {
 		return out, err
@@ -71,7 +71,16 @@ func recognitionRules(ctx context.Context, q *queries.Queries) (RecognitionRules
 		if c, ok := custom[b.Code]; ok {
 			rule = c
 		}
-		out.Badges = append(out.Badges, rule)
+		out = append(out, rule)
+	}
+	return out, nil
+}
+
+func recognitionRules(ctx context.Context, q *queries.Queries) (RecognitionRules, error) {
+	out := RecognitionRules{Milestones: slices.Clone(recognition.LadderMilestones)}
+	var err error
+	if out.Badges, err = badgeRules(ctx, q); err != nil {
+		return out, err
 	}
 	ms, err := q.MilestoneRules(ctx)
 	if err != nil {

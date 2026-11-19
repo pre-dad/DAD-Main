@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -474,4 +475,50 @@ func TestInitiativePartnerMustBeApproved(t *testing.T) {
 	if err := s.Update(ctx, adminToken, id, withPartner("wells-run", partner)); err != nil {
 		t.Fatalf("editing an initiative of an approved partner: %v", err)
 	}
+}
+
+func TestInitiativeExposureAwardsBadgeWithoutReadingBadges(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanInitiatives(t, pool)
+	_, token := staffFixture(t, pool, "SUPER_ADMIN")
+	staff := InitiativeService{Staff: &StaffService{DB: api}}
+	for i := range 7 {
+		id, err := staff.Create(ctx, token, withBoardApproval(t, pool, validInitiative(fmt.Sprintf("earn-initiative-%d", i))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := staff.Publish(ctx, token, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	id, session := signedInDonor(t, pool)
+	appDevice(t, pool, id, "IOS", HashToken("initiative-badge-test-device"), time.Now().Add(time.Hour))
+	pushCleanup(t, pool, id)
+	service := DonorInitiativeService{DB: api}
+	first, err := service.Today(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, pool, "DELETE FROM donor_initiative_exposures WHERE donor_id=$1", id)
+	mustExec(t, pool, `INSERT INTO donor_initiative_exposures(donor_id,initiative_id,first_shown_on,last_shown_on)
+  SELECT $1,id,current_date-1,current_date-1 FROM donor_initiatives WHERE id<>$2 AND publish_state='PUBLISHED'`, id, first.InitiativeID)
+	for range 2 {
+		got, err := service.Today(ctx, session)
+		if err != nil || got.DistinctShown != 7 {
+			t.Fatalf("seventh exposure: %+v %v", got, err)
+		}
+	}
+	var earned int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_badges WHERE donor_id=$1 AND code='INIT7' AND revoked_at IS NULL", id).Scan(&earned); err != nil ||
+		earned != 1 {
+		t.Fatalf("badge must be awarded by exposure, without a badge-page read: count=%d error=%v", earned, err)
+	}
+	var notices int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_push_notifications WHERE donor_id=$1 AND category='BADGE_EARNED' AND context->>'code'='INIT7'", id).Scan(&notices); err != nil ||
+		notices != 1 {
+		t.Fatalf("badge push must be queued once by exposure: count=%d error=%v", notices, err)
+	}
+
 }

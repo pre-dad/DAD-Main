@@ -237,7 +237,7 @@ type projection struct {
 
 // projectionRules versions the recognition rules. Raising it queues every
 // projection computed under an earlier version for recomputation.
-const projectionRules = 12
+const projectionRules = 13
 
 // currentRulesVersion is the version a projection computed now must carry:
 // the code's projectionRules plus the staff recognition-rules epoch. Both only
