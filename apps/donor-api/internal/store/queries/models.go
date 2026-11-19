@@ -9,20 +9,21 @@ import (
 )
 
 type Donor struct {
-	Email        string             `json:"email"`
-	ClaimedAt    pgtype.Timestamptz `json:"claimed_at"`
-	Disabled     bool               `json:"disabled"`
-	PublicName   pgtype.Text        `json:"public_name"`
-	ReferralCode pgtype.Text        `json:"referral_code"`
-	ID           pgtype.UUID        `json:"id"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	AccountRole  string             `json:"account_role"`
-	Zip          pgtype.Text        `json:"zip"`
-	City         pgtype.Text        `json:"city"`
-	Timezone     pgtype.Text        `json:"timezone"`
-	Phone        pgtype.Text        `json:"phone"`
-	CompanyCode  pgtype.Text        `json:"company_code"`
-	FullName     pgtype.Text        `json:"full_name"`
+	Email            string             `json:"email"`
+	ClaimedAt        pgtype.Timestamptz `json:"claimed_at"`
+	Disabled         bool               `json:"disabled"`
+	PublicName       pgtype.Text        `json:"public_name"`
+	ReferralCode     pgtype.Text        `json:"referral_code"`
+	ID               pgtype.UUID        `json:"id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	AccountRole      string             `json:"account_role"`
+	Zip              pgtype.Text        `json:"zip"`
+	City             pgtype.Text        `json:"city"`
+	Timezone         pgtype.Text        `json:"timezone"`
+	Phone            pgtype.Text        `json:"phone"`
+	CompanyCode      pgtype.Text        `json:"company_code"`
+	FullName         pgtype.Text        `json:"full_name"`
+	TimezoneOverride pgtype.Text        `json:"timezone_override"`
 }
 
 type DonorAmountChange struct {

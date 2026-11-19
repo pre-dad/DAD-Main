@@ -1,6 +1,6 @@
 // Package geo estimates a US ZIP's IANA time zone from three-digit regions
 // and full-ZIP exceptions. Border ZIPs without exceptions use the region's
-// majority zone; the donor profile does not expose a time-zone override.
+// majority zone; a donor can correct that suggestion in their profile.
 package geo
 
 import (
@@ -76,4 +76,24 @@ func Timezone(zip string) (string, error) {
 		return name, nil
 	}
 	return "", ErrZip
+}
+
+// ValidTimezoneOverride restricts profile corrections to the supported US civil time zones.
+func ValidTimezoneOverride(zone string) bool {
+	switch zone {
+	case "America/New_York",
+		"America/Chicago",
+		"America/Denver",
+		"America/Phoenix",
+		"America/Los_Angeles",
+		"America/Anchorage",
+		"America/Adak",
+		"Pacific/Honolulu",
+		"America/Puerto_Rico",
+		"Pacific/Guam",
+		"Pacific/Pago_Pago":
+		return true
+	default:
+		return false
+	}
 }

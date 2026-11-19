@@ -1423,3 +1423,17 @@ is pending; recorded volunteer hours remain available.
 The monthly winner job leaves a month open while any eligible team's figures are
 unverified. A subsequent worker pass can close it after projections recover;
 checks, standings and badge awards share one consistent transaction snapshot.
+
+
+## Donor time zone corrections
+
+A ZIP suggests the donor's IANA time zone using the bundled region table; border
+ZIPs can be approximate. A donor may choose a supported US civil time zone in
+Profile. This choice controls local streak-day boundaries. It can be saved without
+publishing a ZIP. Profile updates that omit `timezone_override` preserve the saved
+correction, including updates from older clients; an empty string explicitly resets
+to the ZIP suggestion. Clearing the ZIP keeps an explicit correction. Unsupported
+zones and JSON null are rejected, and account deletion clears the correction.
+
+An effective zone change marks the donor's financial projection due in the same
+transaction so midnight schedules and recognition refresh under the new zone.

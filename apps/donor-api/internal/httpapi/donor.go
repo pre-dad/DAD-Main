@@ -69,6 +69,8 @@ func donorStatus(err error) (int, string) {
 		return http.StatusUnprocessableEntity, "Choose a public first name or nickname of 1 to 80 characters"
 	case errors.Is(err, store.ErrZip):
 		return http.StatusUnprocessableEntity, "Enter a valid US ZIP code"
+	case errors.Is(err, store.ErrTimezone):
+		return http.StatusUnprocessableEntity, "Choose a supported US time zone"
 	case errors.Is(err, store.ErrCity):
 		return http.StatusUnprocessableEntity, "Enter a city of 1 to 80 characters"
 	case errors.Is(err, store.ErrPhone):
@@ -107,14 +109,24 @@ func (a *api) profile(w http.ResponseWriter, r *http.Request, session string) {
 
 func (a *api) saveProfile(w http.ResponseWriter, r *http.Request, session string) {
 	var body struct {
-		Zip   *string `json:"zip"`
-		City  *string `json:"city"`
-		Phone *string `json:"phone"`
+		Zip              *string         `json:"zip"`
+		City             *string         `json:"city"`
+		Phone            *string         `json:"phone"`
+		TimezoneOverride json.RawMessage `json:"timezone_override"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
 	update := store.ProfileUpdate{}
+	if body.TimezoneOverride != nil {
+		zone, ok := optional(body.TimezoneOverride, "")
+		if !ok {
+			invalidFields(w, r)
+			return
+		}
+		update.TimezoneOverride = &zone
+	}
+
 	if body.Zip != nil {
 		update.Zip = *body.Zip
 	}

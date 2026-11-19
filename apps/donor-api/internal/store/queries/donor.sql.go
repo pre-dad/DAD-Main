@@ -20,6 +20,7 @@ UPDATE donors SET
 	zip = NULL,
 	city = NULL,
 	timezone = NULL,
+ timezone_override = NULL,
 	phone = NULL,
 	company_code = NULL,
 	disabled = true
@@ -138,7 +139,7 @@ func (q *Queries) DeletePhoneCode(ctx context.Context, phone string) error {
 }
 
 const donorByPhone = `-- name: DonorByPhone :one
-SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name FROM donors WHERE phone=$1 AND disabled=false
+SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name, timezone_override FROM donors WHERE phone=$1 AND disabled=false
 `
 
 func (q *Queries) DonorByPhone(ctx context.Context, phone pgtype.Text) (Donor, error) {
@@ -159,6 +160,7 @@ func (q *Queries) DonorByPhone(ctx context.Context, phone pgtype.Text) (Donor, e
 		&i.Phone,
 		&i.CompanyCode,
 		&i.FullName,
+		&i.TimezoneOverride,
 	)
 	return i, err
 }
@@ -249,6 +251,21 @@ func (q *Queries) InsertOIDCIdentity(ctx context.Context, arg InsertOIDCIdentity
 		arg.Subject,
 		arg.LastUsedAt,
 	)
+	return err
+}
+
+const invalidateDonorProjection = `-- name: InvalidateDonorProjection :exec
+UPDATE donor_metric_projections SET next_refresh_at=least(next_refresh_at,$1::timestamptz)
+WHERE donor_id=$2::uuid
+`
+
+type InvalidateDonorProjectionParams struct {
+	AsOf    pgtype.Timestamptz `json:"as_of"`
+	DonorID pgtype.UUID        `json:"donor_id"`
+}
+
+func (q *Queries) InvalidateDonorProjection(ctx context.Context, arg InvalidateDonorProjectionParams) error {
+	_, err := q.db.Exec(ctx, invalidateDonorProjection, arg.AsOf, arg.DonorID)
 	return err
 }
 
@@ -492,7 +509,7 @@ func (q *Queries) ReferralTouchByToken(ctx context.Context, tokenHash string) (D
 }
 
 const referrerByCode = `-- name: ReferrerByCode :one
-SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name FROM donors WHERE referral_code=$1 AND claimed_at IS NOT NULL AND public_name IS NOT NULL AND disabled=false
+SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name, timezone_override FROM donors WHERE referral_code=$1 AND claimed_at IS NOT NULL AND public_name IS NOT NULL AND disabled=false
 `
 
 func (q *Queries) ReferrerByCode(ctx context.Context, referralCode pgtype.Text) (Donor, error) {
@@ -513,6 +530,7 @@ func (q *Queries) ReferrerByCode(ctx context.Context, referralCode pgtype.Text) 
 		&i.Phone,
 		&i.CompanyCode,
 		&i.FullName,
+		&i.TimezoneOverride,
 	)
 	return i, err
 }
@@ -578,7 +596,7 @@ func (q *Queries) SavePreference(ctx context.Context, arg SavePreferenceParams) 
 }
 
 const saveSharing = `-- name: SaveSharing :one
-UPDATE donors SET public_name=$2,referral_code=$3 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name
+UPDATE donors SET public_name=$2,referral_code=$3 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name, timezone_override
 `
 
 type SaveSharingParams struct {
@@ -605,12 +623,13 @@ func (q *Queries) SaveSharing(ctx context.Context, arg SaveSharingParams) (Donor
 		&i.Phone,
 		&i.CompanyCode,
 		&i.FullName,
+		&i.TimezoneOverride,
 	)
 	return i, err
 }
 
 const saveSignupProfile = `-- name: SaveSignupProfile :exec
-UPDATE donors SET full_name=$2,zip=$3,city=$4,timezone=$5 WHERE id=$1
+UPDATE donors SET full_name=$2,zip=$3,city=$4,timezone=coalesce(timezone_override,$5) WHERE id=$1
 `
 
 type SaveSignupProfileParams struct {
@@ -685,15 +704,16 @@ func (q *Queries) TouchOIDCIdentity(ctx context.Context, arg TouchOIDCIdentityPa
 }
 
 const updateDonorProfile = `-- name: UpdateDonorProfile :one
-UPDATE donors SET zip=$2, city=$3, timezone=$4, phone=$5 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name
+UPDATE donors SET zip=$2, city=$3, timezone=$4, phone=$5, timezone_override=$6 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name, timezone_override
 `
 
 type UpdateDonorProfileParams struct {
-	ID       pgtype.UUID `json:"id"`
-	Zip      pgtype.Text `json:"zip"`
-	City     pgtype.Text `json:"city"`
-	Timezone pgtype.Text `json:"timezone"`
-	Phone    pgtype.Text `json:"phone"`
+	ID               pgtype.UUID `json:"id"`
+	Zip              pgtype.Text `json:"zip"`
+	City             pgtype.Text `json:"city"`
+	Timezone         pgtype.Text `json:"timezone"`
+	Phone            pgtype.Text `json:"phone"`
+	TimezoneOverride pgtype.Text `json:"timezone_override"`
 }
 
 // Replace the donor's self-service identity fields. account_role is deliberately
@@ -705,6 +725,7 @@ func (q *Queries) UpdateDonorProfile(ctx context.Context, arg UpdateDonorProfile
 		arg.City,
 		arg.Timezone,
 		arg.Phone,
+		arg.TimezoneOverride,
 	)
 	var i Donor
 	err := row.Scan(
@@ -722,6 +743,7 @@ func (q *Queries) UpdateDonorProfile(ctx context.Context, arg UpdateDonorProfile
 		&i.Phone,
 		&i.CompanyCode,
 		&i.FullName,
+		&i.TimezoneOverride,
 	)
 	return i, err
 }

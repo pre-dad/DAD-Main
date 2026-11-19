@@ -71,7 +71,7 @@ SELECT touched_at,id FROM deleted ORDER BY touched_at,id;
 -- name: UpdateDonorProfile :one
 -- Replace the donor's self-service identity fields. account_role is deliberately
 -- never written here: a role is fixed at row creation and immutable (PRD §3).
-UPDATE donors SET zip=$2, city=$3, timezone=$4, phone=$5 WHERE id=$1 RETURNING *;
+UPDATE donors SET zip=$2, city=$3, timezone=$4, phone=$5, timezone_override=$6 WHERE id=$1 RETURNING *;
 
 
 -- name: UpsertPhoneCode :exec
@@ -144,6 +144,7 @@ UPDATE donors SET
 	zip = NULL,
 	city = NULL,
 	timezone = NULL,
+ timezone_override = NULL,
 	phone = NULL,
 	company_code = NULL,
 	disabled = true
@@ -180,9 +181,13 @@ ON CONFLICT(donor_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,updated
 -- name: DeleteDonorPassword :exec
 DELETE FROM donor_passwords WHERE donor_id=$1;
 -- name: SaveSignupProfile :exec
-UPDATE donors SET full_name=$2,zip=$3,city=$4,timezone=$5 WHERE id=$1;
+UPDATE donors SET full_name=$2,zip=$3,city=$4,timezone=coalesce(timezone_override,$5) WHERE id=$1;
 
 -- name: MarkPasswordReauthenticated :exec
 UPDATE donor_sessions SET password_verified_at=$2 WHERE token_hash=$1;
 -- name: PasswordReauthentication :one
 SELECT EXISTS(SELECT 1 FROM donor_sessions WHERE token_hash=$1 AND password_verified_at>sqlc.arg(as_of)::timestamptz-interval '15 minutes');
+
+-- name: InvalidateDonorProjection :exec
+UPDATE donor_metric_projections SET next_refresh_at=least(next_refresh_at,sqlc.arg(as_of)::timestamptz)
+WHERE donor_id=sqlc.arg(donor_id)::uuid;

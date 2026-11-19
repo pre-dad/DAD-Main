@@ -386,7 +386,7 @@ export interface paths {
         put?: never;
         /**
          * Save identity profile fields
-         * @description Replaces the donor's self-service identity fields. `timezone` is derived from `zip` (US ZIP to IANA zone) and is never accepted from the client; `account_role` is immutable and cannot be set here. A field sent empty clears its stored value; a blank `zip` clears the derived `timezone` with it. 422 for an invalid ZIP, phone, or city.
+         * @description Replaces ZIP, city and phone. The ZIP suggests the IANA time zone. Optional timezone_override corrects that suggestion: omit it to preserve the saved choice, send an empty string to restore ZIP-based time, or choose a supported US zone. A blank ZIP clears only an automatically derived zone; a manual correction remains. account_role is immutable. 422 for invalid ZIP, phone, city or zone.
          */
         post: operations["saveProfile"];
         delete?: never;
@@ -3155,6 +3155,8 @@ export interface components {
             consent_version: string;
             /** @description App notification when a verified gift is processed. Starts on. */
             push_gift_processed: boolean;
+            /** @description The saved manual IANA zone correction. Omitted while using the ZIP suggestion. */
+            timezone_override?: string;
         };
         /** @description The calling session's push registration. */
         PushRegistration: {
@@ -5415,12 +5417,17 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description US ZIP (`12345` or `12345-6789`). Empty clears the ZIP and derived timezone. */
+                    /** @description US ZIP or ZIP+4. Empty clears the ZIP and its automatic zone; a manual time zone remains. */
                     zip?: string;
                     /** @description Display city. Empty clears it. */
                     city?: string;
                     /** @description E.164 phone, e.g. `+14155550123`. Empty clears it. */
                     phone?: string;
+                    /**
+                     * @description Omit to preserve the manual correction. Empty restores the ZIP suggestion. Controls the local midnight used by the streak.
+                     * @enum {string}
+                     */
+                    timezone_override?: "" | "America/New_York" | "America/Chicago" | "America/Denver" | "America/Phoenix" | "America/Los_Angeles" | "America/Anchorage" | "America/Adak" | "Pacific/Honolulu" | "America/Puerto_Rico" | "Pacific/Guam" | "Pacific/Pago_Pago";
                 };
             };
         };

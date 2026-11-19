@@ -12,6 +12,21 @@ import { Passkeys } from "./Passkeys";
 import { Sessions } from "./Sessions";
 import { VolunteerInterests } from "./VolunteerInterests";
 
+const timezones = [
+  ["", "Use ZIP suggestion"],
+  ["America/New_York", "Eastern — New York"],
+  ["America/Chicago", "Central — Chicago"],
+  ["America/Denver", "Mountain — Denver"],
+  ["America/Phoenix", "Arizona — no daylight saving"],
+  ["America/Los_Angeles", "Pacific — Los Angeles"],
+  ["America/Anchorage", "Alaska — Anchorage"],
+  ["America/Adak", "Aleutian — Adak"],
+  ["Pacific/Honolulu", "Hawaii — no daylight saving"],
+  ["America/Puerto_Rico", "Atlantic — Puerto Rico / US Virgin Islands"],
+  ["Pacific/Guam", "Guam / Northern Mariana Islands"],
+  ["Pacific/Pago_Pago", "American Samoa"],
+] as const;
+
 const field = (form: FormData, name: string) => String(form.get(name) ?? "").trim();
 
 export default function Profile() {
@@ -84,6 +99,9 @@ export default function Profile() {
             zip: field(form, "zip"),
             city: field(form, "city"),
             phone: field(form, "phone"),
+            timezone_override: field(form, "timezone_override") as NonNullable<
+              RequestBody<"/donor/me/profile", "post">["timezone_override"]
+            >,
           } satisfies RequestBody<"/donor/me/profile", "post">),
         }),
       );
@@ -178,12 +196,33 @@ export default function Profile() {
                       defaultValue={data.phone ?? ""}
                     />
                   </label>
+                  <label>
+                    Time zone
+                    <select
+                      name="timezone_override"
+                      defaultValue={data.timezone_override ?? ""}
+                      aria-describedby="timezone-help"
+                    >
+                      {timezones.map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="note" id="timezone-help">
+                    Your streak rolls over at midnight in this zone. ZIP suggestions can be approximate near time zone
+                    borders.
+                  </p>
                   <button className="secondary" type="submit">
                     Save details
                   </button>
                 </fieldset>
               </form>
-              <p className="note">Your ZIP code sets your city for events and rankings, and your time zone.</p>
+              <p className="note">
+                Your city helps place you in city rankings and find nearby events. Your ZIP suggests your time zone
+                unless you choose one.
+              </p>
               <form onSubmit={save}>
                 <fieldset disabled={busy}>
                   <legend>Optional email notifications</legend>

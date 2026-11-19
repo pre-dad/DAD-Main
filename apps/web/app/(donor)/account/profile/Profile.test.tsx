@@ -175,7 +175,12 @@ it("saves ZIP, city and phone", async () => {
   fireEvent.change(details.getByRole("textbox", { name: "Phone" }), { target: { value: "+12125550123" } });
   fireEvent.click(details.getByRole("button", { name: "Save details" }));
   expect(await screen.findByText("Your details were saved.")).toBeVisible();
-  expect(sent(fetch, "/api/donor/me/profile")).toEqual({ zip: "10001", city: "New York", phone: "+12125550123" });
+  expect(sent(fetch, "/api/donor/me/profile")).toEqual({
+    zip: "10001",
+    city: "New York",
+    phone: "+12125550123",
+    timezone_override: "",
+  });
   expect(screen.getByRole("textbox", { name: "City" })).toHaveValue("New York");
 });
 
@@ -243,4 +248,19 @@ it("saves the gift-processed push choice independently of financial email", asyn
   fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
   expect(await screen.findByText("Preferences saved.")).toBeVisible();
   expect(sent(fetch, "/api/donor/me/preferences")).toMatchObject({ push_gift_processed: false });
+});
+
+it("loads a saved time zone correction and explicitly resets to the ZIP suggestion", async () => {
+  const fetch = stubFetch({
+    "GET /api/donor/me/profile": () => json({ ...profile, timezone_override: "America/New_York" }),
+    "POST /api/donor/me/profile": (init) => json({ ...profile, ...JSON.parse(String(init?.body)) }),
+  });
+  render(<Profile />);
+  const zones = await screen.findByRole("combobox", { name: "Time zone" });
+  expect(zones).toHaveValue("America/New_York");
+  expect(zones).toHaveAccessibleDescription(/ZIP suggestions can be approximate/);
+  fireEvent.change(zones, { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save details" }));
+  expect(await screen.findByText("Your details were saved.")).toBeVisible();
+  expect(sent(fetch, "/api/donor/me/profile").timezone_override).toBe("");
 });

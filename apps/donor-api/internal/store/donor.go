@@ -63,14 +63,15 @@ type DonorService struct {
 }
 
 type Profile struct {
-	Email          string  `json:"email"`
-	PublicName     *string `json:"public_name"`
-	AccountRole    string  `json:"account_role"`
-	Zip            *string `json:"zip"`
-	City           *string `json:"city"`
-	Timezone       *string `json:"timezone"`
-	Phone          *string `json:"phone"`
-	ConsentVersion string  `json:"consent_version"`
+	Email            string  `json:"email"`
+	PublicName       *string `json:"public_name"`
+	AccountRole      string  `json:"account_role"`
+	Zip              *string `json:"zip"`
+	City             *string `json:"city"`
+	Timezone         *string `json:"timezone"`
+	TimezoneOverride *string `json:"timezone_override,omitempty"`
+	Phone            *string `json:"phone"`
+	ConsentVersion   string  `json:"consent_version"`
 	Preferences
 }
 
@@ -155,7 +156,9 @@ func readProfile(ctx context.Context, q *queries.Queries, donor queries.Donor) (
 	return Profile{
 		Email: donor.Email, PublicName: textPointer(donor.PublicName), AccountRole: donor.AccountRole,
 		Zip: textPointer(donor.Zip), City: textPointer(donor.City), Timezone: textPointer(donor.Timezone),
-		Phone: textPointer(donor.Phone), ConsentVersion: consentVersion, Preferences: pref,
+		TimezoneOverride: textPointer(
+			donor.TimezoneOverride,
+		), Phone: textPointer(donor.Phone), ConsentVersion: consentVersion, Preferences: pref,
 	}, err
 }
 
@@ -298,22 +301,22 @@ var (
 // phonePattern mirrors the ck_donor_phone database constraint (E.164).
 var phonePattern = regexp.MustCompile(`^\+[1-9][0-9]{1,14}$`)
 
-// ProfileUpdate is the donor's self-service identity input. Every field is
-// optional and clears the stored value when empty, except that timezone is
-// never taken from the client: it is always derived from zip so the two cannot
-// disagree. account_role is absent by design — it is immutable (PRD §3).
+// An omitted correction preserves the donor's choice; empty explicitly restores ZIP suggestions.
 type ProfileUpdate struct {
-	Zip   string
-	City  string
-	Phone string
+	Zip              string
+	City             string
+	Phone            string
+	TimezoneOverride *string
 }
 
-// SaveProfile validates the donor's identity input, derives the IANA timezone
-// from the ZIP, and replaces zip/city/timezone/phone. A blank ZIP clears both
-// zip and the derived timezone together.
+var ErrTimezone = errors.New("choose a supported US time zone")
+
 func (s DonorService) SaveProfile(ctx context.Context, token string, in ProfileUpdate) (Profile, error) {
 	zip, city, phone := strings.TrimSpace(in.Zip), strings.TrimSpace(in.City), strings.TrimSpace(in.Phone)
 
+	if in.TimezoneOverride != nil && *in.TimezoneOverride != "" && !geo.ValidTimezoneOverride(*in.TimezoneOverride) {
+		return Profile{}, ErrTimezone
+	}
 	var zipCol, tzCol pgtype.Text
 	if zip != "" {
 		normalized, err := geo.NormalizeZip(zip)
@@ -343,21 +346,36 @@ func (s DonorService) SaveProfile(ctx context.Context, token string, in ProfileU
 		phoneCol = text(phone)
 	}
 
-	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, _ time.Time) (Profile, error) {
+	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (Profile, error) {
 		q := queries.New(tx)
+		override := d.TimezoneOverride
+		if in.TimezoneOverride != nil {
+			override = text(*in.TimezoneOverride)
+			if *in.TimezoneOverride == "" {
+				override = pgtype.Text{}
+			}
+		}
+		if override.Valid {
+			tzCol = override
+		}
 		if d.Phone.Valid && d.Phone != phoneCol {
 			if err := q.DeletePhoneCode(ctx, d.Phone.String); err != nil {
 				return Profile{}, err
 			}
 		}
 		updated, err := q.UpdateDonorProfile(ctx, queries.UpdateDonorProfileParams{
-			ID: d.ID, Zip: zipCol, City: cityCol, Timezone: tzCol, Phone: phoneCol,
+			ID: d.ID, Zip: zipCol, City: cityCol, Timezone: tzCol, Phone: phoneCol, TimezoneOverride: override,
 		})
 		if err != nil {
 			if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation {
 				return Profile{}, ErrPhone
 			}
 			return Profile{}, err
+		}
+		if d.Timezone != updated.Timezone {
+			if err := q.InvalidateDonorProjection(ctx, queries.InvalidateDonorProjectionParams{DonorID: d.ID, AsOf: timestamp(now)}); err != nil {
+				return Profile{}, err
+			}
 		}
 		return readProfile(ctx, q, updated)
 	})

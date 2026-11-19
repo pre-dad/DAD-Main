@@ -1493,7 +1493,7 @@
    "post": {
     "operationId": "saveProfile",
     "summary": "Save identity profile fields",
-    "description": "Replaces the donor's self-service identity fields. `timezone` is derived from `zip` (US ZIP to IANA zone) and is never accepted from the client; `account_role` is immutable and cannot be set here. A field sent empty clears its stored value; a blank `zip` clears the derived `timezone` with it. 422 for an invalid ZIP, phone, or city.",
+    "description": "Replaces ZIP, city and phone. The ZIP suggests the IANA time zone. Optional timezone_override corrects that suggestion: omit it to preserve the saved choice, send an empty string to restore ZIP-based time, or choose a supported US zone. A blank ZIP clears only an automatically derived zone; a manual correction remains. account_role is immutable. 422 for invalid ZIP, phone, city or zone.",
     "tags": [
      "Donor"
     ],
@@ -1519,7 +1519,7 @@
         "properties": {
          "zip": {
           "type": "string",
-          "description": "US ZIP (`12345` or `12345-6789`). Empty clears the ZIP and derived timezone.",
+          "description": "US ZIP or ZIP+4. Empty clears the ZIP and its automatic zone; a manual time zone remains.",
           "pattern": "^$|^[0-9]{5}(-[0-9]{4})?$"
          },
          "city": {
@@ -1531,6 +1531,24 @@
           "type": "string",
           "description": "E.164 phone, e.g. `+14155550123`. Empty clears it.",
           "pattern": "^$|^\\+[1-9][0-9]{1,14}$"
+         },
+         "timezone_override": {
+          "type": "string",
+          "enum": [
+           "",
+           "America/New_York",
+           "America/Chicago",
+           "America/Denver",
+           "America/Phoenix",
+           "America/Los_Angeles",
+           "America/Anchorage",
+           "America/Adak",
+           "Pacific/Honolulu",
+           "America/Puerto_Rico",
+           "Pacific/Guam",
+           "Pacific/Pago_Pago"
+          ],
+          "description": "Omit to preserve the manual correction. Empty restores the ZIP suggestion. Controls the local midnight used by the streak."
          }
         },
         "additionalProperties": false
@@ -12736,6 +12754,11 @@
      "push_gift_processed": {
       "type": "boolean",
       "description": "App notification when a verified gift is processed. Starts on."
+     },
+     "timezone_override": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "The saved manual IANA zone correction. Omitted while using the ZIP suggestion."
      }
     },
     "required": [

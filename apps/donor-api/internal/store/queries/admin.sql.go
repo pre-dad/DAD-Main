@@ -204,7 +204,7 @@ func (q *Queries) StaffAuditPage(ctx context.Context, arg StaffAuditPageParams) 
 }
 
 const staffDonorByID = `-- name: StaffDonorByID :one
-SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name FROM donors WHERE id=$1
+SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name, timezone_override FROM donors WHERE id=$1
 `
 
 func (q *Queries) StaffDonorByID(ctx context.Context, id pgtype.UUID) (Donor, error) {
@@ -225,6 +225,7 @@ func (q *Queries) StaffDonorByID(ctx context.Context, id pgtype.UUID) (Donor, er
 		&i.Phone,
 		&i.CompanyCode,
 		&i.FullName,
+		&i.TimezoneOverride,
 	)
 	return i, err
 }
