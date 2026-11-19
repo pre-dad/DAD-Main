@@ -32,8 +32,8 @@ mobile, and tablet layouts, automated WCAG 2.2 checks, keyboard confirmation, an
 or failed data recovery. Automated checks do not establish full assistive-technology
 conformance.
 
-Manual assistive-technology acceptance is deferred by product agreement, alongside
-browser analytics. The future pass covers VoiceOver with iPhone/Safari, TalkBack with
+Manual assistive-technology acceptance is deferred by product agreement.
+Consented browser analytics is implemented separately ([analytics](analytics.md)). The future pass covers VoiceOver with iPhone/Safari, TalkBack with
 Android/Chrome, and desktop keyboard-only navigation through giving, account claim and
 sign-in, dashboard, preferences, recurring-gift changes, and critical staff tasks. Check
 control names and reading order, focus movement and restoration, dialogs, validation,

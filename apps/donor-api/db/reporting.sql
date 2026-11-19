@@ -1,11 +1,8 @@
 -- R1 staff reporting (PRD §4 success metrics / docs/analytics.md).
 --
--- Every metric here is computed from COMMITTED SERVER FACTS — gifts, billing
--- periods, refunds, and the donor metric projection — never from the browser
--- analytics_events stream, which docs/analytics.md marks deferred by product
--- agreement ("metrics requiring it must be marked unavailable, never displayed
--- as fabricated zeros"). The one browser-only metric (seven-day share rate) has
--- no query here; the service reports it unavailable.
+-- These queries use committed financial facts. Consented journey and share
+-- observations are queried separately in analytics.sql; missing observations
+-- are unavailable, never fabricated zeros.
 --
 -- Attribution is the FROZEN source on the donor's own projection row
 -- (referrer_id / referral_kind, set at the earliest verified payment), not the

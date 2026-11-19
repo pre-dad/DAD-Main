@@ -116,7 +116,7 @@ before each costs a signature check.
 | Class | Paths (POST unless noted) | Cloudflare per IP | nginx per IP | API per client |
 | --- | --- | --- | --- | --- |
 | Auth | `/api/donor/login`, `/claim`, `/email-change/confirm`, `/passkeys/sign-in`, `/phone/sign-in`, `/oidc/{provider}/sign-in`, `/partner/sign-in`, `/partner/accept-invite`; `/api/donor/staff/sign-in`, `/activate`; and each sign-in and activation's `/options` | 30/min, block 10 min | 20/min, burst 20 | 10/min |
-| Visitor | `/api/donor/checkouts`, `/api/donor/referrals/{code}`, `/api/donor/company/{code}`, `/api/donor/public/partner-apply`, `/api/donor/partner/applications` | 240/min, block 1 min | 120/min, burst 60 | 60/min |
+| Visitor | `/api/donor/checkouts`, `/api/donor/referrals/{code}`, `/api/donor/company/{code}`, `/api/donor/public/partner-apply`, `/api/donor/partner/applications` | 240/min, block 1 min | 120/min, burst 60 | visitor writes 60/min; authenticated checkout 30/min |
 | General | pages, assets, other API calls | 1,200/min uncached, challenge | 30/s, burst 300 | account writes 30/min, analytics 120/min, staff writes 60/min |
 | Stripe webhook | `/api/donor/stripe/webhook` | skipped | 20/s, burst 500 | signature verified |
 
@@ -281,3 +281,18 @@ as well as the API. In order of what limits an origin:
   budget in PostgreSQL (`donor_rate_limits`), so neither more tasks nor more origins raise
   it. Cloudflare's rate limiting rules, applied before any origin, stay the first shared
   limit; they are approximate.
+
+## Native API ingress prerequisite
+
+Native clients call API paths directly with bearer credentials and `X-DAD-Client: native`.
+The browser ingress described above does not provide this route: it forwards to the web
+service, whose browser proxy does not forward native authorization headers. Compose
+publishes the API only on loopback, and the current ECS topology admits it internally
+through Service Connect. A publicly reachable native API host must therefore be
+provisioned in DAD-infra before mobile release acceptance.
+
+Use a dedicated TLS API host with explicit native-operation routing, client-address
+trust, shared rate limits, and verification that staff and browser-only operations
+remain inaccessible to bearer credentials. Test native sign-in, rotating refresh,
+partner access, and checkout returns against that host. Do not point native clients at
+the browser `/api` proxy as a substitute.

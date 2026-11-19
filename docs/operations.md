@@ -119,12 +119,13 @@ with it ([edge](edge.md#client-address)). Setting `DONOR_CLIENT_IP_HEADER` empty
 visitors share the proxy's quota. Edit the Compose networks if `172.30.42.0/24` or
 `172.30.43.0/24` clashes on the host.
 
-The API's in-process limiter keeps a token bucket per client and per class, so a burst
-on one surface cannot starve another for visitors sharing an address; the classes and
-the limits at each layer are in [edge](edge.md#rate-limits). Rejections carry an exact
-`Retry-After`. It tracks at most 65,536 buckets and evicts an existing bucket rather than refusing new
-clients when full. It is the per-instance last line behind the nginx and Cloudflare
-limits. Capacity must still be validated against the agreed launch spike.
+The API keeps bounded local token buckets and also enforces each client's shared
+budget in PostgreSQL, so replicas cannot multiply the allowance. Classes have separate
+budgets so activity on one surface cannot starve another for visitors sharing an
+address; [edge](edge.md#rate-limits) lists each layer. Rejections carry `Retry-After`.
+The local limiter tracks at most 65,536 buckets and evicts an existing bucket when full.
+If the shared check cannot complete within two seconds, the API fails closed with 503.
+Capacity must still be validated against the agreed launch spike.
 
 `/health/live` checks process availability. `/health/ready` checks the migration history
 through PostgreSQL with a deadline. It can be ready while Stripe or SMTP is intentionally
@@ -1295,8 +1296,9 @@ image checks. Direct API deployments retain the original key-loading configurati
 
 The web application form uses `POST /donor/partner/applications` with a
 client-generated 32-byte random base64url receipt and a stable idempotency key. The
-receipt and application commit together. Application submission remains browser-only. A retry must retain both values and the same
-form. The browser receives an HttpOnly, SameSite=Lax cookie lasting 30 days. `GET /donor/partner/application-status` also accepts the receipt
+receipt and application commit together. Browser and native clients may submit the application.
+A retry must retain both values and the same form. The browser receives an HttpOnly,
+SameSite=Lax cookie lasting 30 days; a native client securely retains its receipt without a cookie. `GET /donor/partner/application-status` also accepts the receipt
 as a native bearer credential; native clients must obtain and securely retain that
 separate receipt through an explicit application-submission integration. No receipt is
 implicitly shared from the browser to an app.
