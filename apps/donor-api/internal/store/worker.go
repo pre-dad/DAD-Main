@@ -45,7 +45,7 @@ type eventApply func(ctx context.Context, q *queries.Queries) (pgtype.UUID, erro
 // retried with backoff, rather than returned: only a failure to record the
 // outcome stops the worker. It reports whether it found an event.
 func (w EventWorker) ProcessNext(ctx context.Context) (bool, error) {
-	event, found, err := w.claim(ctx, time.Now().UTC())
+	event, found, err := w.claim(ctx)
 	if err != nil || !found {
 		return false, err
 	}
@@ -55,10 +55,8 @@ func (w EventWorker) ProcessNext(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-func (w EventWorker) claim(ctx context.Context, now time.Time) (queries.DonorStripeEvent, bool, error) {
-	event, err := queries.New(w.DB).ClaimStripeEvent(ctx, queries.ClaimStripeEventParams{
-		LeaseUntil: timestamp(now.Add(eventLease)), AsOf: timestamp(now),
-	})
+func (w EventWorker) claim(ctx context.Context) (queries.DonorStripeEvent, bool, error) {
+	event, err := queries.New(w.DB).ClaimStripeEvent(ctx, int32(eventLease/time.Second))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return event, false, nil
 	}

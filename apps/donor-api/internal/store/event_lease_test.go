@@ -167,7 +167,7 @@ func TestConcurrentWorkersApplyAnEventOnce(t *testing.T) {
 func TestCrashBetweenClaimAndApplyRetriesAfterLeaseExpiry(t *testing.T) {
 	f, event := queuedRefund(t)
 	ctx := context.Background()
-	if _, found, err := f.worker.claim(ctx, time.Now().UTC()); err != nil || !found {
+	if _, found, err := f.worker.claim(ctx); err != nil || !found {
 		t.Fatal("claim failed", found, err)
 	}
 	// The claiming worker dies here: nothing else was written.

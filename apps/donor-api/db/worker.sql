@@ -3,15 +3,18 @@
 -- is not due again until lease_until, so a crashed worker's event is retried
 -- after the lease expires. The returned attempts and available_at identify the
 -- attempt in the statements below.
-UPDATE donor_stripe_events e SET attempts = e.attempts + 1, available_at = sqlc.arg(lease_until)::timestamptz
+WITH clock AS MATERIALIZED (SELECT clock_timestamp() AS now)
+UPDATE donor_stripe_events e SET attempts = e.attempts + 1,
+    available_at = clock.now + sqlc.arg(lease_seconds)::integer * interval '1 second'
+FROM clock
 WHERE e.id = (
     SELECT due.id FROM donor_stripe_events due
-    WHERE due.processed_at IS NULL AND due.attempts < 10 AND due.available_at <= sqlc.arg(as_of)::timestamptz
+    WHERE due.processed_at IS NULL AND due.attempts < 10 AND due.available_at <= clock.now
     ORDER BY due.available_at, due.id
     FOR UPDATE SKIP LOCKED
     LIMIT 1
 )
-RETURNING *;
+RETURNING e.*;
 
 -- name: LockClaimedStripeEvent :one
 -- Fails with no rows when the attempt no longer owns the event: another worker

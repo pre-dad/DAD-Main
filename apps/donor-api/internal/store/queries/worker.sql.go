@@ -176,28 +176,26 @@ func (q *Queries) ClaimDeletedAccountReversal(ctx context.Context, arg ClaimDele
 }
 
 const claimStripeEvent = `-- name: ClaimStripeEvent :one
-UPDATE donor_stripe_events e SET attempts = e.attempts + 1, available_at = $1::timestamptz
+WITH clock AS MATERIALIZED (SELECT clock_timestamp() AS now)
+UPDATE donor_stripe_events e SET attempts = e.attempts + 1,
+    available_at = clock.now + $1::integer * interval '1 second'
+FROM clock
 WHERE e.id = (
     SELECT due.id FROM donor_stripe_events due
-    WHERE due.processed_at IS NULL AND due.attempts < 10 AND due.available_at <= $2::timestamptz
+    WHERE due.processed_at IS NULL AND due.attempts < 10 AND due.available_at <= clock.now
     ORDER BY due.available_at, due.id
     FOR UPDATE SKIP LOCKED
     LIMIT 1
 )
-RETURNING stripe_event_id, event_type, occurred_at, data, processed_at, attempts, last_error, id, created_at, available_at
+RETURNING e.stripe_event_id, e.event_type, e.occurred_at, e.data, e.processed_at, e.attempts, e.last_error, e.id, e.created_at, e.available_at
 `
-
-type ClaimStripeEventParams struct {
-	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
-	AsOf       pgtype.Timestamptz `json:"as_of"`
-}
 
 // Leases the next due event to one attempt: the attempt is counted and the event
 // is not due again until lease_until, so a crashed worker's event is retried
 // after the lease expires. The returned attempts and available_at identify the
 // attempt in the statements below.
-func (q *Queries) ClaimStripeEvent(ctx context.Context, arg ClaimStripeEventParams) (DonorStripeEvent, error) {
-	row := q.db.QueryRow(ctx, claimStripeEvent, arg.LeaseUntil, arg.AsOf)
+func (q *Queries) ClaimStripeEvent(ctx context.Context, leaseSeconds int32) (DonorStripeEvent, error) {
+	row := q.db.QueryRow(ctx, claimStripeEvent, leaseSeconds)
 	var i DonorStripeEvent
 	err := row.Scan(
 		&i.StripeEventID,
