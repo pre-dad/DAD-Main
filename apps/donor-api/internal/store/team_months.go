@@ -24,7 +24,7 @@ func (s TeamMonthService) CloseDue(ctx context.Context, now time.Time) (int, err
 	local := now.In(recognition.NewYork)
 	month := pgtype.Date{Time: time.Date(local.Year(), local.Month()-1, 1, 0, 0, 0, 0, time.UTC), Valid: true}
 	closed := 0
-	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{IsoLevel: pgx.RepeatableRead}, func(tx pgx.Tx) error {
 		q := queries.New(tx)
 		partners, err := q.PartnersDueTeamMonth(ctx, queries.PartnersDueTeamMonthParams{Month: month, Batch: teamMonthBatch})
 		if err != nil {
@@ -47,6 +47,17 @@ func (s TeamMonthService) CloseDue(ctx context.Context, now time.Time) (int, err
 // closeTeamMonth records one partner's standings. It reports false when
 // another worker closed the month first.
 func closeTeamMonth(ctx context.Context, q *queries.Queries, partner pgtype.UUID, month pgtype.Date, now time.Time) (bool, error) {
+	version, err := currentRulesVersion(ctx, q)
+	if err != nil {
+		return false, err
+	}
+	verified, err := q.PartnerTeamMetricsVerified(
+		ctx,
+		queries.PartnerTeamMetricsVerifiedParams{PartnerID: partner, AsOf: timestamp(now), Minimum: minimumGroup, RulesVersion: version},
+	)
+	if err != nil || !verified {
+		return false, err
+	}
 	inserted, err := q.CloseTeamMonth(ctx, queries.CloseTeamMonthParams{PartnerID: partner, Month: month, ClosedAt: timestamp(now)})
 	if err != nil || inserted == 0 {
 		return false, err

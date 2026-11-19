@@ -124,7 +124,7 @@ export default function Employer() {
               <section aria-labelledby="leaderboard-heading">
                 <h2 id="leaderboard-heading">{data.organization} team leaderboard</h2>
                 {data.leaderboard.length > 0 ? (
-                  <TeamLeaderboard teams={data.leaderboard} />
+                  <TeamLeaderboard teams={data.leaderboard} onRefresh={reload} />
                 ) : (
                   <p className="note">
                     Teams appear here once they have at least 5 members. Invite colleagues to join yours.

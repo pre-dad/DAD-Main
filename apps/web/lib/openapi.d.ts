@@ -4180,6 +4180,8 @@ export interface components {
             avg_streak_days: number;
             /** Format: int64 */
             volunteer_minutes: number;
+            /** @description Giving and streak fields are current under the active recognition rules for every member. Hide those fields and rankings while false; volunteer minutes are independent. */
+            metrics_verified: boolean;
         };
         StaffPartner: {
             /** Format: uuid */
@@ -9133,6 +9135,8 @@ export interface operations {
                         /** Format: int64 */
                         teams: number;
                         suppressed: boolean;
+                        /** @description The average streak is current for every linked employee. Hide the average streak while false; other totals come from recorded facts. */
+                        streak_verified: boolean;
                     };
                 };
             };

@@ -9410,6 +9410,10 @@
           },
           "suppressed": {
            "type": "boolean"
+          },
+          "streak_verified": {
+           "type": "boolean",
+           "description": "The average streak is current for every linked employee. Hide the average streak while false; other totals come from recorded facts."
           }
          },
          "required": [
@@ -9420,7 +9424,8 @@
           "avg_streak_days",
           "volunteer_minutes",
           "teams",
-          "suppressed"
+          "suppressed",
+          "streak_verified"
          ],
          "additionalProperties": false
         }
@@ -15701,6 +15706,10 @@
      "volunteer_minutes": {
       "type": "integer",
       "format": "int64"
+     },
+     "metrics_verified": {
+      "type": "boolean",
+      "description": "Giving and streak fields are current under the active recognition rules for every member. Hide those fields and rankings while false; volunteer minutes are independent."
      }
     },
     "required": [
@@ -15709,7 +15718,8 @@
      "active_givers",
      "annualized_minor",
      "avg_streak_days",
-     "volunteer_minutes"
+     "volunteer_minutes",
+     "metrics_verified"
     ],
     "additionalProperties": false
    },

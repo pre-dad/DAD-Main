@@ -18,9 +18,13 @@ const teamViews = {
 } as const;
 
 /** The company team leaderboard; the partner sees it in Our People and employees see it in their account. */
-export function TeamLeaderboard({ teams }: { teams: Team[] }) {
+export function TeamLeaderboard({ teams, onRefresh }: { teams: Team[]; onRefresh?: () => void }) {
   const [view, setView] = useState<keyof typeof teamViews>("giving");
-  const ranked = [...teams].sort((a, b) => teamViews[view].sort(b) - teamViews[view].sort(a));
+  const incomplete = teams.some((team) => !team.metrics_verified);
+  const ranked = [...teams].sort((a, b) => {
+    if (view !== "volunteer" && a.metrics_verified !== b.metrics_verified) return a.metrics_verified ? -1 : 1;
+    return teamViews[view].sort(b) - teamViews[view].sort(a) || a.name.localeCompare(b.name);
+  });
   return (
     <>
       <label>
@@ -56,17 +60,29 @@ export function TeamLeaderboard({ teams }: { teams: Team[] }) {
           <tbody>
             {ranked.map((t, index) => (
               <tr key={t.team_id}>
-                <td>{index + 1}</td>
+                <td>{incomplete && view !== "volunteer" ? "—" : index + 1}</td>
                 <td>{t.name}</td>
-                <td className="numeric">{formatMoney(t.annualized_minor)}</td>
-                <td className="numeric">{t.avg_streak_days} days</td>
+                <td className="numeric">
+                  {t.metrics_verified ? formatMoney(t.annualized_minor) : "Awaiting verification"}
+                </td>
+                <td className="numeric">
+                  {t.metrics_verified ? `${t.avg_streak_days} days` : "Awaiting verification"}
+                </td>
                 <td className="numeric">{hours(t.volunteer_minutes)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </section>
-      <p className="note">Teams with fewer than 5 members are not shown.</p>
+      <p className="note">
+        Teams with fewer than 5 members are not shown.
+        {incomplete && " Giving and streak rankings await verified figures for every team."}
+      </p>
+      {incomplete && onRefresh && (
+        <button type="button" className="secondary" onClick={onRefresh}>
+          Refresh team figures
+        </button>
+      )}
     </>
   );
 }

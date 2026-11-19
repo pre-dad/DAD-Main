@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -15,6 +16,10 @@ import (
 func TestWinningTeamByCombinedActiveGiving(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
+	version, err := currentRulesVersion(ctx, queries.New(pool))
+	if err != nil {
+		t.Fatal(err)
+	}
 	partner := approvedPartner(t, pool, "Team Org", "TEAMMONTH", 0, 0)
 	team := func(name string, members, active int) (pgtype.UUID, []pgtype.UUID) {
 		id := testID(t)
@@ -26,11 +31,12 @@ func TestWinningTeamByCombinedActiveGiving(t *testing.T) {
 			mustExec(
 				t,
 				pool,
-				`INSERT INTO donor_metric_projections(id,donor_id,current_streak,best_streak,computed_at,next_refresh_at,active,current_monthly_minor)
-VALUES($1,$2,1,1,now(),now(),$3,3000)`,
+				`INSERT INTO donor_metric_projections(id,donor_id,current_streak,best_streak,computed_at,next_refresh_at,active,current_monthly_minor,rules_version)
+VALUES($1,$2,1,1,'2026-10-31','2026-11-02',$3,3000,$4)`,
 				testID(t),
 				donorID,
 				i < active,
+				version,
 			)
 			donors = append(donors, donorID)
 		}
@@ -78,4 +84,46 @@ FROM donor_team_months WHERE partner_id=$1 AND month='2026-10-01'`, partner).Sca
 	if got := earned(small); got != 0 {
 		t.Fatalf("%d members of the smaller, lower-total team earned Winning Team", got)
 	}
+}
+
+func TestTeamMonthWaitsForVerifiedMetrics(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	partner := approvedPartner(t, pool, "Pending Team", "PENDING-TEAM", 0, 0)
+	team := mustNewID(t)
+	mustExec(t, pool, "INSERT INTO donor_partner_teams(id,partner_id,name) VALUES($1,$2,'Pending')", team, partner)
+	var first pgtype.UUID
+	for range 5 {
+		id := linkDonorWithGift(t, pool, partner, 3000, time.Now().UTC(), 1)
+		first = id
+		mustExec(t, pool, "UPDATE donor_partner_employees SET team_id=$2 WHERE donor_id=$1", id, team)
+		mustExec(t, pool, "UPDATE donor_metric_projections SET active=true,current_monthly_minor=3000 WHERE donor_id=$1", id)
+	}
+	t.Cleanup(func() {
+		cleanExec(
+			t,
+			"DELETE FROM donor_badges WHERE code='WT' AND donor_id IN (SELECT donor_id FROM donor_partner_employees WHERE partner_id=$1)",
+			partner,
+		)
+	})
+	mustExec(t, pool, "UPDATE donor_metric_projections SET refresh_error='InvalidFacts' WHERE donor_id=$1", first)
+	months := TeamMonthService{DB: as(t, dbroles.ProjectionWorker)}
+	now := time.Now().UTC()
+	if _, err := months.CloseDue(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	var closed int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_team_months WHERE partner_id=$1", partner).Scan(&closed); err != nil ||
+		closed != 0 {
+		t.Fatalf("closed %d months with unverified metrics: %v", closed, err)
+	}
+	mustExec(t, pool, "UPDATE donor_metric_projections SET refresh_error=NULL WHERE donor_id=$1", first)
+	if _, err := months.CloseDue(ctx, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_team_months WHERE partner_id=$1 AND winner_team_id=$2", partner, team).Scan(&closed); err != nil ||
+		closed != 1 {
+		t.Fatalf("verified winner: closed=%d err=%v", closed, err)
+	}
+
 }

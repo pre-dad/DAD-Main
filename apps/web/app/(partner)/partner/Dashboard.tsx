@@ -245,19 +245,21 @@ function PeopleSection({ companyCode }: { companyCode: string }) {
             <Tile
               label="Teams"
               value={p.teams.toLocaleString("en-US")}
-              detail={`Average streak ${p.avg_streak_days} days`}
+              detail={
+                p.streak_verified ? `Average streak ${p.avg_streak_days} days` : "Average streak awaiting verification"
+              }
             />
           </div>
         ))}
       {teams.data && teams.data.teams.length > 0 && (
         <>
           <h3>Team leaderboard</h3>
-          <TeamLeaderboard teams={teams.data.teams} />
+          <TeamLeaderboard teams={teams.data.teams} onRefresh={teams.reload} />
         </>
       )}
-      {people.failed && (
+      {(people.failed || (people.data && !people.data.suppressed && !people.data.streak_verified)) && (
         <button type="button" className="secondary" onClick={people.reload}>
-          Retry employee figures
+          {people.failed ? "Retry employee figures" : "Refresh employee figures"}
         </button>
       )}
       {teams.failed && (

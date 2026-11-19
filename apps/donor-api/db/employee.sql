@@ -48,9 +48,16 @@ SELECT
   coalesce((SELECT sum(net_minor) FROM gifts), 0)::bigint AS given_minor,
   coalesce((SELECT sum(net_minor) FROM gifts
             WHERE paid_at >= sqlc.arg(year_start)::timestamptz AND paid_at < sqlc.arg(year_end)::timestamptz), 0)::bigint AS year_given_minor,
-  coalesce((SELECT round(avg(extract(epoch FROM sqlc.arg(as_of)::timestamptz - m.streak_since) / 86400))
-            FROM donor_metric_projections m
-            WHERE m.donor_id IN (SELECT donor_id FROM linked) AND m.streak_since IS NOT NULL), 0)::bigint AS avg_streak_days,
+  coalesce((SELECT round(avg(greatest(0,
+              (sqlc.arg(as_of)::timestamptz AT TIME ZONE coalesce(d.timezone,'America/New_York'))::date
+              - (m.streak_since AT TIME ZONE coalesce(d.timezone,'America/New_York'))::date)))
+            FROM linked l JOIN donors d ON d.id=l.donor_id
+            JOIN donor_metric_projections m ON m.donor_id=l.donor_id
+            WHERE m.streak_since IS NOT NULL),0)::bigint AS avg_streak_days,
+  coalesce(NOT EXISTS(SELECT 1 FROM linked l LEFT JOIN donor_metric_projections m ON m.donor_id=l.donor_id
+    WHERE CASE WHEN m.donor_id IS NULL THEN EXISTS(SELECT 1 FROM donor_gifts g WHERE g.donor_id=l.donor_id)
+      ELSE m.next_refresh_at<=sqlc.arg(as_of)::timestamptz OR m.refresh_error IS NOT NULL
+        OR m.rules_version<sqlc.arg(rules_version)::integer END),false)::boolean AS streak_verified,
   coalesce((SELECT sum(extract(epoch FROM ev.ends_at - ev.starts_at) / 60)
             FROM donor_event_reservations r JOIN donor_events ev ON ev.id = r.event_id
             WHERE r.donor_id IN (SELECT donor_id FROM linked) AND r.checked_in_at IS NOT NULL), 0)::bigint AS volunteer_minutes,
@@ -78,16 +85,22 @@ WITH members AS (
 SELECT t.id AS team_id, t.name,
   (count(*) FILTER (WHERE m.active))::bigint AS active_givers,
   (coalesce(sum(m.current_monthly_minor) FILTER (WHERE m.active), 0) * 12)::bigint AS annualized_minor,
-  coalesce(round(avg(extract(epoch FROM sqlc.arg(as_of)::timestamptz - m.streak_since) / 86400)
-                 FILTER (WHERE m.streak_since IS NOT NULL)), 0)::bigint AS avg_streak_days,
+  coalesce(round(avg(greatest(0,
+    (sqlc.arg(as_of)::timestamptz AT TIME ZONE coalesce(d.timezone,'America/New_York'))::date
+    - (m.streak_since AT TIME ZONE coalesce(d.timezone,'America/New_York'))::date))
+    FILTER (WHERE m.streak_since IS NOT NULL)),0)::bigint AS avg_streak_days,
+  bool_and(CASE WHEN m.donor_id IS NULL THEN NOT EXISTS(SELECT 1 FROM donor_gifts g WHERE g.donor_id=mem.donor_id)
+    ELSE m.next_refresh_at>sqlc.arg(as_of)::timestamptz AND m.refresh_error IS NULL
+      AND m.rules_version>=sqlc.arg(rules_version)::integer END)::boolean AS metrics_verified,
   coalesce(sum(v.minutes), 0)::bigint AS volunteer_minutes
 FROM members mem
+JOIN donors d ON d.id=mem.donor_id
 JOIN donor_partner_teams t ON t.id = mem.team_id
 LEFT JOIN donor_metric_projections m ON m.donor_id = mem.donor_id
 LEFT JOIN volunteer v ON v.donor_id = mem.donor_id
 GROUP BY t.id, t.name
 HAVING count(*) >= sqlc.arg(minimum)::int
-ORDER BY annualized_minor DESC, active_givers DESC, t.name;
+ORDER BY metrics_verified DESC, annualized_minor DESC, active_givers DESC, t.name, t.id;
 
 -- name: PartnerMatchTerms :one
 SELECT match_rate_bp, match_cap_minor FROM donor_partner_signups WHERE id = $1 AND approved_at IS NOT NULL;
@@ -166,3 +179,16 @@ UPDATE donor_team_months SET winner_team_id = $3 WHERE partner_id = $1 AND month
 
 -- name: TeamMembers :many
 SELECT donor_id FROM donor_partner_employees WHERE team_id = $1 ORDER BY donor_id;
+
+-- name: PartnerTeamMetricsVerified :one
+WITH eligible AS (
+ SELECT team_id FROM donor_partner_employees
+ WHERE partner_id=sqlc.arg(partner_id)::uuid AND team_id IS NOT NULL
+ GROUP BY team_id HAVING count(*)>=sqlc.arg(minimum)::integer
+)
+SELECT coalesce(bool_and(CASE WHEN m.donor_id IS NULL
+  THEN NOT EXISTS(SELECT 1 FROM donor_gifts g WHERE g.donor_id=e.donor_id)
+  ELSE m.next_refresh_at>sqlc.arg(as_of)::timestamptz AND m.refresh_error IS NULL
+    AND m.rules_version>=sqlc.arg(rules_version)::integer END),true)::boolean
+FROM donor_partner_employees e JOIN eligible t ON t.team_id=e.team_id
+LEFT JOIN donor_metric_projections m ON m.donor_id=e.donor_id;

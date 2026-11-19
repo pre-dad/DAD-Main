@@ -27,6 +27,7 @@ const team = (name: string, annualized: number, streak: number, minutes: number)
   team_id: name,
   name,
   active_givers: 5,
+  metrics_verified: true,
   annualized_minor: annualized,
   avg_streak_days: streak,
   volunteer_minutes: minutes,

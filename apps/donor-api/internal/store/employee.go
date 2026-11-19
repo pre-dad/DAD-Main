@@ -37,6 +37,7 @@ type EmployeeService struct {
 // minimumGroup employees are linked every figure is zero and Suppressed is set
 // (EM-3). MatchedMinor is this calendar year's match owed (EM-6, EM-7).
 type PartnerOurPeople struct {
+	StreakVerified   bool  `json:"streak_verified"`
 	Enrolled         int64 `json:"enrolled"`
 	WorkforceSize    int32 `json:"workforce_size"`
 	GivenMinor       int64 `json:"given_minor"`
@@ -50,6 +51,7 @@ type PartnerOurPeople struct {
 // EmployeeTeamRow is one team on the company leaderboard (EM-5).
 // AnnualizedMinor is the combined active giving it is ranked by.
 type EmployeeTeamRow struct {
+	MetricsVerified  bool   `json:"metrics_verified"`
 	TeamID           string `json:"team_id"`
 	Name             string `json:"name"`
 	ActiveGivers     int64  `json:"active_givers"`
@@ -223,8 +225,13 @@ func (s EmployeeService) OurPeople(ctx context.Context, token string) (PartnerOu
 	return partnerRead(ctx, s.DB, token, func(q *queries.Queries, actor PartnerActor) (PartnerOurPeople, error) {
 		now := time.Now().UTC()
 		start, end := calendarYear(now.In(recognition.NewYork).Year())
+		version, err := currentRulesVersion(ctx, q)
+		if err != nil {
+			return PartnerOurPeople{}, err
+		}
 		row, err := q.PartnerOurPeople(ctx, queries.PartnerOurPeopleParams{
-			PartnerID: actor.PartnerID, YearStart: timestamp(start), YearEnd: timestamp(end), AsOf: timestamp(now),
+			RulesVersion: version,
+			PartnerID:    actor.PartnerID, YearStart: timestamp(start), YearEnd: timestamp(end), AsOf: timestamp(now),
 		})
 		if err != nil {
 			return PartnerOurPeople{}, err
@@ -238,21 +245,28 @@ func (s EmployeeService) OurPeople(ctx context.Context, token string) (PartnerOu
 		}
 		return PartnerOurPeople{
 			Enrolled: row.Enrolled, WorkforceSize: row.WorkforceSize, GivenMinor: row.GivenMinor,
-			MatchedMinor:  matched,
-			AvgStreakDays: row.AvgStreakDays, VolunteerMinutes: row.VolunteerMinutes, Teams: row.Teams,
+			MatchedMinor:   matched,
+			StreakVerified: row.StreakVerified, AvgStreakDays: row.AvgStreakDays, VolunteerMinutes: row.VolunteerMinutes, Teams: row.Teams,
 		}, nil
 	})
 }
 
 func teamLeaderboard(ctx context.Context, q *queries.Queries, partnerID pgtype.UUID, now time.Time) ([]EmployeeTeamRow, error) {
-	rows, err := q.TeamLeaderboard(ctx, queries.TeamLeaderboardParams{PartnerID: partnerID, AsOf: timestamp(now), Minimum: minimumGroup})
+	version, err := currentRulesVersion(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.TeamLeaderboard(
+		ctx,
+		queries.TeamLeaderboardParams{PartnerID: partnerID, AsOf: timestamp(now), Minimum: minimumGroup, RulesVersion: version},
+	)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]EmployeeTeamRow, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, EmployeeTeamRow{
-			TeamID: r.TeamID.String(), Name: r.Name, ActiveGivers: r.ActiveGivers, AnnualizedMinor: r.AnnualizedMinor,
+			MetricsVerified: r.MetricsVerified, TeamID: r.TeamID.String(), Name: r.Name, ActiveGivers: r.ActiveGivers, AnnualizedMinor: r.AnnualizedMinor,
 			AvgStreakDays: r.AvgStreakDays, VolunteerMinutes: r.VolunteerMinutes,
 		})
 	}

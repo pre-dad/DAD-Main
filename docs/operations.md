@@ -1407,3 +1407,19 @@ Organizations already beyond a limit retain their history but cannot add artifac
 Review capacity with the owner before increasing these limits; never purge financial
 report history automatically. Quota checks and artifact creation share a serializable
 transaction, with bounded retries for concurrent exports.
+
+
+## Employee projection freshness
+
+Employee streak averages use calendar-date differences in each donor's IANA time
+zone, clamped at zero. A team’s giving and streak figures are verified only when
+every member's projection has not reached its refresh boundary, has no refresh
+error, and meets the active recognition-rules version. A missing projection is
+known zero only for a donor with no recorded gifts. Partners receive the same
+freshness boundary for the employee streak average. Clients show unavailable
+figures as awaiting verification and withhold giving/streak ranks when any team
+is pending; recorded volunteer hours remain available.
+
+The monthly winner job leaves a month open while any eligible team's figures are
+unverified. A subsequent worker pass can close it after projections recover;
+checks, standings and badge awards share one consistent transaction snapshot.
