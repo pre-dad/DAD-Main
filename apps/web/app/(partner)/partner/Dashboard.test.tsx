@@ -283,3 +283,27 @@ it("leaves the workforce size alone when only the profile changes", async () => 
   expect(await organization.findByText("Organization profile saved.")).toBeInTheDocument();
   expect(calls.some((c) => c.url.endsWith("/workforce"))).toBe(false);
 });
+
+it.each([
+  ["exports", "report history", "Reports"],
+  ["users", "users", "Users"],
+  ["teams", "teams", "Our People"],
+])("shows and retries a failed %s read independently", async (endpoint, label, section) => {
+  stub();
+  const base = vi.mocked(fetch).getMockImplementation();
+  let failed = false;
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith(`/${endpoint}`) && !failed) {
+      failed = true;
+      return Promise.resolve(Response.json({ detail: "Unavailable" }, { status: 503 }));
+    }
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  const region = within(await screen.findByRole("region", { name: section }));
+  fireEvent.click(await region.findByRole("button", { name: `Retry ${label}` }));
+  await waitFor(() => expect(region.queryByRole("button", { name: `Retry ${label}` })).not.toBeInTheDocument());
+  expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith(`/${endpoint}`))).toHaveLength(2);
+  expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method)).toBe(true);
+});

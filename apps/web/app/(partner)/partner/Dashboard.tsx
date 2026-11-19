@@ -136,7 +136,7 @@ function InitiativeCard({ item }: { item: Initiative }) {
 }
 
 function InitiativesSection() {
-  const { resource, data } = useApiResource<Initiatives>("/donor/partner/initiatives");
+  const { resource, data, failed, reload } = useApiResource<Initiatives>("/donor/partner/initiatives");
   const messages = resourceMessages(resource, {
     loading: "Loading initiatives…",
     failure: "Your initiatives could not be loaded right now.",
@@ -154,13 +154,18 @@ function InitiativesSection() {
         ) : (
           <p>No published initiatives are linked to your organization yet. DAD links them when they launch.</p>
         ))}
+      {failed && (
+        <button type="button" className="secondary" onClick={reload}>
+          Retry initiatives
+        </button>
+      )}
       <Announcer status={messages.status} alert={messages.alert} />
     </section>
   );
 }
 
 function SpendSection() {
-  const { resource, data } = useApiResource<Spend>("/donor/partner/spend");
+  const { resource, data, failed, reload } = useApiResource<Spend>("/donor/partner/spend");
   const messages = resourceMessages(resource, {
     loading: "Loading spend…",
     failure: "Spend by category could not be loaded right now.",
@@ -177,6 +182,11 @@ function SpendSection() {
         ) : (
           <p>No spend has been recorded for your initiatives yet.</p>
         ))}
+      {failed && (
+        <button type="button" className="secondary" onClick={reload}>
+          Retry spend
+        </button>
+      )}
       <Announcer status={messages.status} alert={messages.alert} />
     </section>
   );
@@ -188,6 +198,10 @@ function PeopleSection({ companyCode }: { companyCode: string }) {
   const messages = resourceMessages(people.resource, {
     loading: "Loading Our People…",
     failure: "Employee figures could not be loaded right now.",
+  });
+  const teamMessages = resourceMessages(teams.resource, {
+    loading: "Loading teams…",
+    failure: "Your team leaderboard could not be loaded right now.",
   });
   const p = people.data;
   return (
@@ -241,13 +255,28 @@ function PeopleSection({ companyCode }: { companyCode: string }) {
           <TeamLeaderboard teams={teams.data.teams} />
         </>
       )}
+      {people.failed && (
+        <button type="button" className="secondary" onClick={people.reload}>
+          Retry employee figures
+        </button>
+      )}
+      {teams.failed && (
+        <button type="button" className="secondary" onClick={teams.reload}>
+          Retry teams
+        </button>
+      )}
       <Announcer status={messages.status} alert={messages.alert} />
+      <Announcer status={teamMessages.status} alert={teamMessages.alert} />
     </section>
   );
 }
 
 function ReportsSection({ admin }: { admin: boolean }) {
   const exports = useApiResource<Exports>("/donor/partner/exports");
+  const messages = resourceMessages(exports.resource, {
+    loading: "Loading report history…",
+    failure: "Your report history could not be loaded right now.",
+  });
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -318,13 +347,22 @@ function ReportsSection({ admin }: { admin: boolean }) {
         ) : (
           <p className="note">No reports have been exported yet.</p>
         ))}
-      <Announcer status={status} alert={error} />
+      {exports.failed && (
+        <button type="button" className="secondary" onClick={exports.reload}>
+          Retry report history
+        </button>
+      )}
+      <Announcer status={status || messages.status} alert={error || messages.alert} />
     </section>
   );
 }
 
 function UsersSection({ self }: { self: string }) {
   const users = useApiResource<Users>("/donor/partner/users");
+  const messages = resourceMessages(users.resource, {
+    loading: "Loading users…",
+    failure: "Your users could not be loaded right now.",
+  });
   const [invite, setInvite] = useState({ email: "", name: "", role: "VIEWER" });
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -422,7 +460,12 @@ function UsersSection({ self }: { self: string }) {
           {busy ? "Sending…" : "Email invitation"}
         </button>
       </form>
-      <Announcer status={status} alert={error} />
+      {users.failed && (
+        <button type="button" className="secondary" onClick={users.reload}>
+          Retry users
+        </button>
+      )}
+      <Announcer status={status || messages.status} alert={error || messages.alert} />
     </section>
   );
 }
@@ -604,6 +647,11 @@ export default function Dashboard() {
             </button>
           </p>
         </>
+      )}
+      {overview.failed && (
+        <button type="button" className="secondary" onClick={overview.reload}>
+          Retry dashboard
+        </button>
       )}
       <Announcer status={messages.status} alert={signOutError || messages.alert} />
     </Page>

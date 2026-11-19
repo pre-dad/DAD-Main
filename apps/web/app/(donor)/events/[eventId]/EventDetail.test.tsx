@@ -103,3 +103,16 @@ it("waits for booking to open, except for a Team Captain's early window", async 
   expect(await screen.findByText(/As a Team Captain, you can reserve now/)).toBeVisible();
   expect(screen.getByRole("button", { name: "Reserve a spot" })).toBeEnabled();
 });
+
+it("recovers from a failed event read without repeating a reservation", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ detail: "Unavailable" }, { status: 503 }))
+    .mockResolvedValueOnce(Response.json(event));
+  vi.stubGlobal("fetch", fetch);
+  render(<EventDetail event="e-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Retry event" }));
+  expect(await screen.findByRole("button", { name: "Join the waitlist" })).toBeVisible();
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch.mock.calls.every(([, init]) => !init.method)).toBe(true);
+});

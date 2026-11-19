@@ -18,7 +18,7 @@ type Loaded = { event: Event; signedIn: boolean };
  */
 export default function EventDetail({ event: id }: { event: string }) {
   const path = encodeURIComponent(id);
-  const { resource, data, reload } = useApiResource<Loaded>(`/events/${path}`, {
+  const { resource, data, reload, failed } = useApiResource<Loaded>(`/events/${path}`, {
     load: async (signal) => {
       try {
         return { event: await api<Event>(`/donor/me/events/${path}`, { signal }), signedIn: true };
@@ -124,6 +124,11 @@ export default function EventDetail({ event: id }: { event: string }) {
             {data.signedIn && <a href="/account/events">All events near you</a>}
           </p>
         </>
+      )}
+      {failed && (
+        <button type="button" className="secondary" onClick={reload}>
+          Retry event
+        </button>
       )}
       <Announcer status={status || messages.status} alert={error || messages.alert} />
     </Page>
