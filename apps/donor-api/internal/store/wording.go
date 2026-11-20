@@ -227,17 +227,17 @@ func defaultBadgeWording(ctx context.Context, q *queries.Queries) ([]badges.Badg
 
 func tunedBadgeRule(r BadgeRule, fallback string) string {
 	switch r.Signal {
-	case "referrals":
+	case signalReferrals:
 		return fmt.Sprintf("Bring in %d %s", r.Threshold, plural(r.Threshold, "person who completes a gift", "people who complete a gift"))
-	case "streak_days":
+	case signalStreakDays:
 		return fmt.Sprintf("Reach a %d-day streak", r.Threshold)
-	case "checkins":
+	case signalCheckins:
 		return fmt.Sprintf("Check in at %d %s", r.Threshold, plural(r.Threshold, "event", "events"))
-	case "initiatives":
-		return fmt.Sprintf("Fund %d distinct %s", r.Threshold, plural(r.Threshold, "initiative", "initiatives"))
-	case "city_rank":
+	case signalInitiatives:
+		return fmt.Sprintf("Fund %d distinct %s", r.Threshold, plural(r.Threshold, "initiative", signalInitiatives))
+	case signalCityRank:
 		return fmt.Sprintf("Rank in the top %d in your city", r.Threshold)
-	case "national_percentile":
+	case signalNationalPercentile:
 		return fmt.Sprintf("Rank in the top %d%% nationally", r.Threshold)
 	}
 	return fallback
