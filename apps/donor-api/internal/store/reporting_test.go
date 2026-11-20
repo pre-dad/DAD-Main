@@ -199,6 +199,12 @@ func TestReportNumbersMatchSeededFacts(t *testing.T) {
 		cleanExec(t, "DELETE FROM donor_refunds WHERE gift_id IN (SELECT id FROM donor_gifts WHERE stripe_object_id=$1)", bFirst)
 	})
 
+	// Referred donor C: the gift row still names the referrer, but recognition
+	// withheld the referral, so the projection is DIRECT and C counts for no one.
+	withheld, _ := donor(t, pool)
+	cFirst := seedGift(t, pool, withheld, "pi_rep_c_first", 1500, "MONTHLY", repAt, &referrer, "LINK")
+	repSeedProjection(t, pool, withheld, nil, "", cFirst, 1500, nil, 1, 1, &repAt)
+
 	// A DIRECT donor (no referrer), MONTHLY first gift 4000, reached m3 but lapsed.
 	direct, _ := donor(t, pool)
 	directFirst := seedGift(t, pool, direct, "pi_rep_direct_first", 4000, "MONTHLY", repAt, nil, "")
@@ -226,14 +232,14 @@ func TestReportNumbersMatchSeededFacts(t *testing.T) {
 		t.Errorf("founding donors: got %d, want 1", report.FoundingDonors)
 	}
 
-	// First-gift by source (all MONTHLY in R1): DIRECT=2 (referrer + direct),
-	// LINK=1 (A), IRL=1 (B). gross_minor: DIRECT/MONTHLY=9000 (5000+4000).
+	// First-gift by source (all MONTHLY in R1): DIRECT=3 (referrer, withheld C,
+	// direct), LINK=1 (A), IRL=1 (B). gross_minor: DIRECT/MONTHLY=10500.
 	bySource := map[string]SourceConversions{}
 	for _, s := range report.FirstGiftBySource {
 		bySource[s.Source+"/"+s.Frequency] = s
 	}
-	if got := bySource["DIRECT/MONTHLY"]; got.Donors != 2 || got.GrossMinor != 9000 {
-		t.Errorf("DIRECT/MONTHLY: got donors=%d gross=%d, want 2/9000", got.Donors, got.GrossMinor)
+	if got := bySource["DIRECT/MONTHLY"]; got.Donors != 3 || got.GrossMinor != 10500 {
+		t.Errorf("DIRECT/MONTHLY: got donors=%d gross=%d, want 3/10500", got.Donors, got.GrossMinor)
 	}
 	if got := bySource["LINK/MONTHLY"]; got.Donors != 1 || got.GrossMinor != 3000 {
 		t.Errorf("LINK/MONTHLY: got donors=%d gross=%d, want 1/3000", got.Donors, got.GrossMinor)
@@ -243,24 +249,24 @@ func TestReportNumbersMatchSeededFacts(t *testing.T) {
 	}
 
 	// Gift mix (R1 is MONTHLY-only). In-window MONTHLY gifts: referrer 5000,
-	// A 3000, B 2000, direct-first 4000, direct-second 4000, plus the churn
-	// recovery gift 2500 = 6 gifts / 20500. No ONE_TIME exists.
+	// A 3000, B 2000, C 1500, direct-first 4000, direct-second 4000, plus the
+	// churn recovery gift 2500 = 7 gifts / 22000. No ONE_TIME exists.
 	mix := map[string]GiftMix{}
 	for _, m := range report.GiftMix {
 		mix[m.Frequency] = m
 	}
-	if got := mix["MONTHLY"]; got.Gifts != 6 || got.CollectedMinor != 20500 {
-		t.Errorf("MONTHLY mix: got gifts=%d collected=%d, want 6/20500", got.Gifts, got.CollectedMinor)
+	if got := mix["MONTHLY"]; got.Gifts != 7 || got.CollectedMinor != 22000 {
+		t.Errorf("MONTHLY mix: got gifts=%d collected=%d, want 7/22000", got.Gifts, got.CollectedMinor)
 	}
 	if _, ok := mix["ONE_TIME"]; ok {
 		t.Errorf("ONE_TIME must not appear in R1 gift mix, got %+v", mix["ONE_TIME"])
 	}
 
 	// Viral: cohort = 1 referrer; gross = 2 (A + B have first_gift_id);
-	// qualified = 1 (only A has net>0).
+	// qualified = 1 (only A has net>0); withheld C is not a conversion.
 	v := report.ViralCoefficient
-	if v.Cohort != 5 || v.GrossConversions != 2 || v.QualifiedConversions != 1 {
-		t.Errorf("viral: got cohort=%d gross=%d qualified=%d, want 5/2/1", v.Cohort, v.GrossConversions, v.QualifiedConversions)
+	if v.Cohort != 6 || v.GrossConversions != 2 || v.QualifiedConversions != 1 {
+		t.Errorf("viral: got cohort=%d gross=%d qualified=%d, want 6/2/1", v.Cohort, v.GrossConversions, v.QualifiedConversions)
 	}
 
 	// Referral dollars: LINK = 3000 (A), IRL = 0 (B refunded to net 0).

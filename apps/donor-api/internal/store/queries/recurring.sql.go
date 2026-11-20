@@ -176,7 +176,7 @@ func (q *Queries) InsertPaymentUpdate(ctx context.Context, arg InsertPaymentUpda
 }
 
 const latestConfirmedAmount = `-- name: LatestConfirmedAmount :one
-SELECT amount_minor FROM donor_amount_changes WHERE checkout_id=$1 AND confirmed_at IS NOT NULL ORDER BY created_at DESC LIMIT 1
+SELECT amount_minor FROM donor_amount_changes WHERE checkout_id=$1 AND confirmed_at IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1
 `
 
 func (q *Queries) LatestConfirmedAmount(ctx context.Context, checkoutID pgtype.UUID) (int64, error) {
@@ -307,7 +307,7 @@ func (q *Queries) SubscriptionObservedAt(ctx context.Context, attemptID pgtype.U
 }
 
 const unfinishedPaymentUpdate = `-- name: UnfinishedPaymentUpdate :one
-SELECT donor_id, attempt_id, customer_id, request_params, stripe_session_id, hosted_url, status, completed_at, id, created_at FROM donor_payment_updates WHERE donor_id=$1 AND status NOT IN ('APPLIED','EXPIRED','CANCELLED') LIMIT 1
+SELECT donor_id, attempt_id, customer_id, request_params, stripe_session_id, hosted_url, status, completed_at, id, created_at FROM donor_payment_updates WHERE donor_id=$1 AND status NOT IN ('APPLIED','EXPIRED','CANCELLED') ORDER BY created_at DESC,id DESC LIMIT 1
 `
 
 func (q *Queries) UnfinishedPaymentUpdate(ctx context.Context, donorID pgtype.UUID) (DonorPaymentUpdate, error) {
