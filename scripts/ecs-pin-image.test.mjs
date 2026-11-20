@@ -191,7 +191,8 @@ test("refuses an image reference that has no tag", () => {
 test("rejects an image tag that is not a valid Docker tag", () => {
   for (const bad of ["bad tag", "a/b", "-leading", "x:y", "", "a".repeat(129)]) {
     const r = run([bad, "dad-api"], { "dad-api": definition("dad-api", `${REGISTRY}/dad/api:latest`) });
-    assert.equal(r.status === 2 || r.status === 1, true, `tag '${bad}' should be rejected`);
+    assert.equal(r.status, 2, `tag '${bad}' should be rejected`);
+    assert.match(r.stderr, /invalid image tag/);
     assert.equal(r.registered.length, 0);
   }
 });

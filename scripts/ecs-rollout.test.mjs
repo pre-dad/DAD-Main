@@ -68,7 +68,9 @@ function run(args, env = {}) {
     let calls = "";
     try {
       calls = readFileSync(path.join(dir, "calls.log"), "utf8");
-    } catch {}
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
     return { status: result.status, stdout: result.stdout, stderr: result.stderr, calls };
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -92,6 +94,18 @@ test("keeps polling while IN_PROGRESS or not yet listed, then succeeds", () => {
   const r = run(["dad-staging", "api"], { STATES_api: "None,IN_PROGRESS,IN_PROGRESS,COMPLETED" });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /api: deployment dep-api COMPLETED/);
+});
+
+test("fails fast when a listed deployment disappears", () => {
+  const r = run(["dad-staging", "api"], { STATES_api: "IN_PROGRESS,None", ROLLOUT_TIMEOUT_SECONDS: "600" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /api: deployment dep-api is no longer listed; another deployment superseded it/);
+});
+
+test("fails when the task definitions file cannot be read", () => {
+  const r = run(["dad-staging", "api"], { DAD_TASKDEFS_FILE: "/nonexistent/taskdefs" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /cannot read \/nonexistent\/taskdefs/);
 });
 
 test("fails when OUR deployment ends FAILED, even though a rollback deployment exists", () => {
