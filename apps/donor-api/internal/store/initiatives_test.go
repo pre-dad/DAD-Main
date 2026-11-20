@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -521,4 +522,32 @@ func TestInitiativeExposureAwardsBadgeWithoutReadingBadges(t *testing.T) {
 		t.Fatalf("badge push must be queued once by exposure: count=%d error=%v", notices, err)
 	}
 
+}
+
+func TestInitiativeMetricAndSpendInputLimits(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	cleanInitiatives(t, pool)
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	s := InitiativeService{Staff: &StaffService{DB: as(t, dbroles.API)}}
+	id, err := s.Create(ctx, adminToken, withBoardApproval(t, pool, validInitiative("limits-demo")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	metric := MetricInput{Position: 0, Label: "People served", Value: -1, Unit: "PEOPLE"}
+	if err = s.SetMetric(ctx, adminToken, id, metric); !errors.Is(err, ErrStaffInput) {
+		t.Fatalf("negative metric value: %v", err)
+	}
+	metric.Value = 0
+	if err = s.SetMetric(ctx, adminToken, id, metric); err != nil {
+		t.Fatalf("zero metric value: %v", err)
+	}
+	multibyte := strings.Repeat("é", 1500)
+	if err = s.SetSpend(ctx, adminToken, id, SpendInput{Category: "Direct aid", AmountMinor: 100, VerificationNote: multibyte}); err != nil {
+		t.Fatalf("1500 characters counted as bytes: %v", err)
+	}
+	tooLong := strings.Repeat("é", 2001)
+	if err = s.SetSpend(ctx, adminToken, id, SpendInput{Category: "Direct aid", AmountMinor: 100, VerificationNote: tooLong}); !errors.Is(err, ErrStaffInput) {
+		t.Fatalf("2001 characters accepted: %v", err)
+	}
 }
