@@ -112,8 +112,8 @@ func (s RecurringService) ChangeAmount(ctx context.Context, token string, r Amou
 
 // amountChangeable reports whether a change effective at the subscription's
 // next renewal can still be sent: the processor needs a minute's margin.
-func amountChangeable(schedule queries.DonorSubscription, effective, now time.Time) bool {
-	return schedule.Status == "active" && !schedule.StopsAt.Valid && schedule.PeriodEnd.Time.Equal(effective) &&
+func amountChangeable(sub queries.DonorSubscription, effective, now time.Time) bool {
+	return sub.Status == "active" && !sub.StopsAt.Valid && sub.PeriodEnd.Time.Equal(effective) &&
 		now.Before(effective.Add(-time.Minute))
 }
 
@@ -123,7 +123,7 @@ func insertAmountChange(
 	ctx context.Context,
 	q *queries.Queries,
 	donor, checkout pgtype.UUID,
-	schedule queries.DonorSubscription,
+	sub queries.DonorSubscription,
 	remote payments.Object,
 	r AmountRequest,
 	now time.Time,
@@ -143,7 +143,7 @@ func insertAmountChange(
 	if err != nil {
 		return err
 	}
-	if !amountChangeable(schedule, r.EffectiveAt, now) || previous != r.Previous || r.Amount == r.Previous {
+	if !amountChangeable(sub, r.EffectiveAt, now) || previous != r.Previous || r.Amount == r.Previous {
 		return ErrSubscriptionConflict
 	}
 	itemID, product, err := amountChangeItem(remote)

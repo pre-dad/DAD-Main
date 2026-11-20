@@ -69,6 +69,7 @@ type DeviceSession struct {
 	Current    bool        `json:"current"`
 }
 
+// Sessions is the donor's signed-in devices.
 type Sessions struct {
 	Sessions []DeviceSession `json:"sessions"`
 }

@@ -21,6 +21,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// ErrDenied reports a credential that grants no access: unknown, expired,
+// already used, or belonging to a disabled donor.
 var ErrDenied = errors.New("donor access denied")
 
 // uniqueViolation is PostgreSQL's SQLSTATE for a duplicate key.
@@ -146,7 +148,10 @@ func authenticate(ctx context.Context, q *queries.Queries, token string, now tim
 	if errors.Is(err, pgx.ErrNoRows) {
 		return signedIn{}, ErrDenied
 	}
-	return signedIn{row.Donor, row.SessionID, row.LastUsedAt.Time}, err
+	if err != nil {
+		return signedIn{}, err
+	}
+	return signedIn{row.Donor, row.SessionID, row.LastUsedAt.Time}, nil
 }
 
 // touch records the session's use, at most once per touchInterval, so that

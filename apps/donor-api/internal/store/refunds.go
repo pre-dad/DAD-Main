@@ -10,7 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// The caller holds the donor then gift lock, and current was read from the
+// recordRefund stores current as one of gift's refunds, caused by exactly one of
+// eventID (a webhook) or actionID (a staff action). The caller holds the donor then gift lock, and current was read from the
 // processor after the gift's latest recorded refund state; webhook timestamps
 // cannot order competing refund states reliably.
 func recordRefund(
