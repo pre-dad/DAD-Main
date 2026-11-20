@@ -308,3 +308,10 @@ it("counts the Founding days left in New York time, on the last day and after", 
     "The Founding window has closed.",
   );
 });
+
+it("says '1 day' rather than '1 days' on the streak card and the next step", async () => {
+  respond({ ...data, streak: { ...data.streak, ladder: { ...data.streak.ladder, days_to_next: 1 } } });
+  render(<DashboardPage />);
+  expect(await screen.findAllByText("1 day to your 30-day milestone.")).toHaveLength(2);
+  expect(screen.queryByText(/1 days/)).not.toBeInTheDocument();
+});

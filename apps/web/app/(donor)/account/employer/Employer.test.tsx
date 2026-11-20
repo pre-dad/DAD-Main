@@ -18,9 +18,8 @@ it("enrolls an unlinked donor with a company code", async () => {
   fireEvent.change(screen.getByLabelText("Company code"), { target: { value: "DELTA" } });
   fireEvent.click(screen.getByRole("button", { name: "Link my employer" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("linked to Delta Inc"));
-  expect(fetch.mock.calls.some(([u, i]) => String(u).endsWith("/donor/me/employer") && i?.method === "POST")).toBe(
-    true,
-  );
+  const post = fetch.mock.calls.find(([u, i]) => String(u).endsWith("/donor/me/employer") && i?.method === "POST");
+  expect(JSON.parse(String(post?.[1]?.body))).toEqual({ company_code: "DELTA" });
 });
 
 const team = (name: string, annualized: number, streak: number, minutes: number) => ({
@@ -97,4 +96,22 @@ it("offers a retry when the employer details cannot load", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("could not be loaded");
   fireEvent.click(screen.getByRole("button", { name: "Retry loading" }));
   expect(await screen.findByLabelText("Company code")).toBeInTheDocument();
+});
+
+it("joins a team with the trimmed name, then reloads the employer", async () => {
+  const linked = { partner_id: "p1", organization: "Delta Inc", team_name: null, leaderboard: [] };
+  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+    String(input).endsWith("/donor/me/team") && init?.method === "POST"
+      ? Response.json({})
+      : Response.json(fetch.mock.calls.length > 2 ? { ...linked, team_name: "Platform" } : linked),
+  );
+  vi.stubGlobal("fetch", fetch);
+  render(<Employer />);
+  fireEvent.change(await screen.findByLabelText("Join a team"), { target: { value: "  Platform  " } });
+  fireEvent.click(screen.getByRole("button", { name: "Join team" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("You’ve joined the Platform team.");
+  const post = fetch.mock.calls.find(([, init]) => init?.method === "POST");
+  expect(JSON.parse(String(post?.[1]?.body))).toEqual({ name: "Platform" });
+  expect(await screen.findByRole("button", { name: "Change team" })).toBeVisible();
+  expect(screen.getByLabelText("Change team")).toHaveValue("");
 });
