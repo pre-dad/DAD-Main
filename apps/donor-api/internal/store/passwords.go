@@ -123,7 +123,10 @@ func (s PasswordService) Set(ctx context.Context, token, current, password strin
 			return err
 		}
 		// A changed password ends every other sign-in, in case it was set because the old one leaked.
-		return q.RevokeOtherSessions(ctx, queries.RevokeOtherSessionsParams{DonorID: u.ID, TokenHash: HashToken(token), RevokedAt: timestamp(now)})
+		return q.RevokeOtherSessions(
+			ctx,
+			queries.RevokeOtherSessionsParams{DonorID: u.ID, TokenHash: HashToken(token), RevokedAt: timestamp(now)},
+		)
 	})
 }
 

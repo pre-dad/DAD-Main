@@ -295,13 +295,15 @@ VALUES($1,$2,$3,'REFUND',$4,100,'Duplicate gift reported',$5)`, a, actor, id, te
 		t.Fatal("actions of an unknown donor", err)
 	}
 	var listed int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE actor_id=$1 AND action='action.list'", actor).Scan(&listed); err != nil || listed != 0 {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE actor_id=$1 AND action='action.list'", actor).Scan(&listed); err != nil ||
+		listed != 0 {
 		t.Fatalf("unknown donor read was audited: %d %v", listed, err)
 	}
 	if _, err := s.DonorActions(ctx, token, id, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE actor_id=$1 AND action='action.list' AND target=$2", actor, id.String()).Scan(&listed); err != nil || listed != 1 {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE actor_id=$1 AND action='action.list' AND target=$2", actor, id.String()).Scan(&listed); err != nil ||
+		listed != 1 {
 		t.Fatalf("action history read audited %d times: %v", listed, err)
 	}
 	if _, err := s.DonorMessages(ctx, growth, id, ""); !errors.Is(err, ErrStaffForbidden) {

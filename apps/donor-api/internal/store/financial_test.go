@@ -292,7 +292,8 @@ func TestRecordGiftEventsBatchesRecentGiftsAndIsIdempotent(t *testing.T) {
 		}
 	}
 	var stored int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM analytics_events WHERE donor_id=$1 AND name='gift_completed' AND source='SERVER'", id).Scan(&stored); err != nil || stored != 2 {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM analytics_events WHERE donor_id=$1 AND name='gift_completed' AND source='SERVER'", id).Scan(&stored); err != nil ||
+		stored != 2 {
 		t.Fatalf("%d gift events stored after two refreshes, want the 2 inside the window: %v", stored, err)
 	}
 	if err := recordGiftEvents(ctx, q, id, nil, now); err != nil {

@@ -68,7 +68,8 @@ func TestOneEmailOneRole(t *testing.T) {
 		t.Fatalf("moving a donor account to a staff address: %v; want the same answer as any other address", err)
 	}
 	var started int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_email_changes WHERE new_email=$1", staffEmail).Scan(&started); err != nil || started != 0 {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_email_changes WHERE new_email=$1", staffEmail).Scan(&started); err != nil ||
+		started != 0 {
 		t.Fatalf("%d email changes started for a staff address, err %v", started, err)
 	}
 }

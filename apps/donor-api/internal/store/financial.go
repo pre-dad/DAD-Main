@@ -445,7 +445,16 @@ func recordGiftEvents(ctx context.Context, q *queries.Queries, donor pgtype.UUID
 		if err != nil {
 			return err
 		}
-		batch.Ids, batch.DedupKeys, batch.OccurredAt = append(batch.Ids, id), append(batch.DedupKeys, "gift:"+g.ID), append(batch.OccurredAt, timestamp(g.PaidAt))
+		batch.Ids, batch.DedupKeys, batch.OccurredAt = append(
+			batch.Ids,
+			id,
+		), append(
+			batch.DedupKeys,
+			"gift:"+g.ID,
+		), append(
+			batch.OccurredAt,
+			timestamp(g.PaidAt),
+		)
 	}
 	if len(batch.Ids) == 0 {
 		return nil

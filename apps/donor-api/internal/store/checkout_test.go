@@ -400,7 +400,10 @@ func TestHeldCheckoutReportsDatabaseFailureNotConflict(t *testing.T) {
 	accountCleanup(t, pool, id)
 	q := queries.New(pool)
 	held := queries.Donor{ID: id}
-	if err := heldCheckout(context.Background(), q, held, payments.CheckoutRequest{}, pgtype.UUID{}, time.Now()); !errors.Is(err, payments.ErrCheckoutConflict) {
+	if err := heldCheckout(context.Background(), q, held, payments.CheckoutRequest{}, pgtype.UUID{}, time.Now()); !errors.Is(
+		err,
+		payments.ErrCheckoutConflict,
+	) {
 		t.Fatalf("no holder: %v, want a conflict", err)
 	}
 	cancelled, cancel := context.WithCancel(context.Background())

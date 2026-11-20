@@ -210,10 +210,12 @@ func TestPasswordRequiresProofAndCurrentSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	var live int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_sessions WHERE donor_id=$1 AND revoked_at IS NULL AND token_hash=$2", id, HashToken(token)).Scan(&live); err != nil || live != 0 {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_sessions WHERE donor_id=$1 AND revoked_at IS NULL AND token_hash=$2", id, HashToken(token)).Scan(&live); err != nil ||
+		live != 0 {
 		t.Fatalf("another session survived the password change: %d %v", live, err)
 	}
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_sessions WHERE donor_id=$1 AND revoked_at IS NULL AND token_hash=$2", id, HashToken(tokens.Access)).Scan(&live); err != nil || live != 1 {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_sessions WHERE donor_id=$1 AND revoked_at IS NULL AND token_hash=$2", id, HashToken(tokens.Access)).Scan(&live); err != nil ||
+		live != 1 {
 		t.Fatalf("the changing session was revoked: %d %v", live, err)
 	}
 	if _, err := s.SignIn(ctx, email, password, Client{}); !errors.Is(err, ErrSignInCode) {

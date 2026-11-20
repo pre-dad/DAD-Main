@@ -547,7 +547,10 @@ func TestInitiativeMetricAndSpendInputLimits(t *testing.T) {
 		t.Fatalf("1500 characters counted as bytes: %v", err)
 	}
 	tooLong := strings.Repeat("é", 2001)
-	if err = s.SetSpend(ctx, adminToken, id, SpendInput{Category: "Direct aid", AmountMinor: 100, VerificationNote: tooLong}); !errors.Is(err, ErrStaffInput) {
+	if err = s.SetSpend(ctx, adminToken, id, SpendInput{Category: "Direct aid", AmountMinor: 100, VerificationNote: tooLong}); !errors.Is(
+		err,
+		ErrStaffInput,
+	) {
 		t.Fatalf("2001 characters accepted: %v", err)
 	}
 }

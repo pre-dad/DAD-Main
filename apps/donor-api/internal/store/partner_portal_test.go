@@ -255,7 +255,8 @@ func TestPartnerLinkUnreadableCiphertextParksAfterFiveTries(t *testing.T) {
 		}
 	}
 	var attempts int
-	if err := pool.QueryRow(ctx, "SELECT attempts FROM donor_partner_login_emails WHERE completed_at IS NULL").Scan(&attempts); err != nil || attempts != 5 {
+	if err := pool.QueryRow(ctx, "SELECT attempts FROM donor_partner_login_emails WHERE completed_at IS NULL").Scan(&attempts); err != nil ||
+		attempts != 5 {
 		t.Fatalf("unreadable link was tried %d times, want it parked at 5: %v", attempts, err)
 	}
 	if len(transport.messages) != 0 {
