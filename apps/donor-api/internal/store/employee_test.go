@@ -419,6 +419,28 @@ func TestJoinTeamValidatesReusesAndMovesBetweenTeams(t *testing.T) {
 	}
 }
 
+func TestJoinTeamRefusesNewTeamsBeyondThePartnerCap(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	emp := EmployeeService{DB: pool}
+	partner := approvedPartner(t, pool, "Cap Co", "CAPCO", 0, 0)
+	id, token := signedInDonor(t, pool)
+	mustExec(t, pool, "INSERT INTO donor_partner_employees (donor_id, partner_id, enrolled_at) VALUES ($1,$2,now())", id, partner)
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_partner_teams(id,partner_id,name) SELECT gen_random_uuid(),$1,'Team '||n FROM generate_series(1,$2::int) n",
+		partner,
+		maxTeamsPerPartner,
+	)
+	if _, err := emp.JoinTeam(ctx, token, "One too many"); !errors.Is(err, ErrTeam) {
+		t.Fatalf("created a team past the cap: %v", err)
+	}
+	if _, err := emp.JoinTeam(ctx, token, "Team 7"); err != nil {
+		t.Fatalf("joining an existing team at the cap: %v", err)
+	}
+}
+
 func TestSetWorkforceIsAdminOnlyAndNonNegative(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()

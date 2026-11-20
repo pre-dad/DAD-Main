@@ -30,6 +30,17 @@ func (q *Queries) CloseTeamMonth(ctx context.Context, arg CloseTeamMonthParams) 
 	return result.RowsAffected(), nil
 }
 
+const countPartnerTeams = `-- name: CountPartnerTeams :one
+SELECT count(*) FROM donor_partner_teams WHERE partner_id = $1
+`
+
+func (q *Queries) CountPartnerTeams(ctx context.Context, partnerID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countPartnerTeams, partnerID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const employeeLink = `-- name: EmployeeLink :one
 SELECT donor_id, partner_id, team_id, enrolled_at FROM donor_partner_employees WHERE donor_id = $1
 `

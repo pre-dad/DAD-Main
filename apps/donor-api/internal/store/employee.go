@@ -177,8 +177,25 @@ func (s EmployeeService) JoinTeam(ctx context.Context, token, name string) (stri
 	})
 }
 
+// maxTeamsPerPartner bounds the teams employees can create for one company.
+const maxTeamsPerPartner = 500
+
 // teamByName finds a partner's team by name or creates it, returning its id.
 func teamByName(ctx context.Context, q *queries.Queries, partnerID pgtype.UUID, name string) (pgtype.UUID, error) {
+	existing, err := q.TeamIDByName(ctx, queries.TeamIDByNameParams{PartnerID: partnerID, Name: name})
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return pgtype.UUID{}, err
+	}
+	teams, err := q.CountPartnerTeams(ctx, partnerID)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	if teams >= maxTeamsPerPartner {
+		return pgtype.UUID{}, ErrTeam
+	}
 	newID, err := NewID()
 	if err != nil {
 		return pgtype.UUID{}, err
