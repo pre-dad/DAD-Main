@@ -1,8 +1,8 @@
 // Command provision creates or updates the database login of every process
 // from that process's database URL: the user it names, its password, and a
-// connection limit of its pool size times the replicas it may run. It runs as the schema owner
-// after migrations, which create the roles the logins join, and can be run
-// again at any time, such as after changing a password.
+// connection limit of its pool size times the replicas it may run. It runs as
+// the schema owner after migrations, which create the roles the logins join,
+// and can be run again at any time, such as after changing a password.
 package main
 
 import (

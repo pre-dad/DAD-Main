@@ -9,7 +9,6 @@ import (
 	"math"
 	"math/rand/v2"
 	"slices"
-	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -47,10 +46,9 @@ const (
 	influenceCeiling     = 3000
 )
 
-// Engagement layer: partners, employees, teams, events and initiatives (Phases
-// 4–6). These exercise the leaderboard/rollup, near-city event and rotation
-// reads under load (PRD §13 risk #6 / dev-plan 7.3). They are sized as small
-// fixed sets scaled to the population so a 50k seed carries a realistic
+// Engagement layer: partners, employees, teams, events and initiatives. They
+// exercise the leaderboard rollup, near-city event and rotation reads under
+// load, and are small fixed sets so a 50k seed carries a realistic
 // employer/event population without a second heavy generator.
 const (
 	partnerCount     = 40   // approved partner orgs
@@ -301,7 +299,7 @@ func generate(n, offset int, seed uint64, now time.Time) *population {
 		u := g.r.Float64()
 		ages[i] = max(time.Hour, time.Duration(u*u*float64(history)).Truncate(time.Second))
 	}
-	slices.SortFunc(ages, func(a, b time.Duration) int { return int(b - a) })
+	slices.SortFunc(ages, func(a, b time.Duration) int { return cmp.Compare(b, a) })
 	sharers := &sharerPool{}
 	for i, age := range ages {
 		d := &donor{index: offset + i, id: g.uuid(), createdAt: now.Add(-age)}
@@ -335,14 +333,13 @@ func (g *generator) join(d *donor, sharers *sharerPool) {
 		}
 	}
 	d.checkouts = append(d.checkouts, c)
-	switch x := g.r.Float64(); {
-	case x < abandonedShare:
-		c.amount, c.frequency, c.status = g.amount(monthlyAmounts), "MONTHLY", "EXPIRED"
+	abandoned := g.r.Float64() < abandonedShare
+	c.amount, c.frequency, c.status = g.amount(monthlyAmounts), "MONTHLY", "COMPLETE"
+	if abandoned {
+		c.status = "EXPIRED"
 		return
-	default:
-		c.amount, c.frequency, c.status = g.amount(monthlyAmounts), "MONTHLY", "COMPLETE"
-		g.monthly(c)
 	}
+	g.monthly(c)
 	first := c.gifts[0].paidAt
 	if g.r.Float64() < claimShare {
 		if at := first.Add(g.seconds(min(7*day, time.Duration(g.r.ExpFloat64()*float64(6*time.Hour))))); at.Before(g.now) {
@@ -551,9 +548,10 @@ func (g *generator) expectReferrals() {
 }
 
 // engagement builds the partners, teams, employees, initiatives, events and
-// reservations that the event, partner and employee reads serve. It runs after donors are known
-// so links point at real claimed donors; everything is drawn from the same
-// deterministic generator, so a seed reproduces the whole population.
+// reservations that the event, partner and employee reads serve. It runs after
+// donors are known so links point at real claimed donors; everything is drawn
+// from the same deterministic generator, so a seed reproduces the whole
+// population.
 func (g *generator) engagement() {
 	g.locateDonors()
 	g.makePartners()
@@ -607,7 +605,7 @@ var cities = []struct{ city, zip, tz string }{
 
 func (g *generator) makePartners() {
 	for i := range partnerCount {
-		n := g.offset + i // unique across appended populations, like donor indices
+		n := g.offset*partnerCount + i // each append offset owns a distinct block of numbers
 		p := &partner{
 			id:          g.uuid(),
 			index:       i,
@@ -631,7 +629,7 @@ func (g *generator) makePartners() {
 func (g *generator) makeInitiatives() {
 	units := []string{"PEOPLE", "USD_CENTS", "INITIATIVES", "PARTNERS"}
 	for i := range initiativeCount {
-		n := g.offset + i
+		n := g.offset*initiativeCount + i
 		in := &initiative{
 			id:        g.uuid(),
 			index:     i,
@@ -643,7 +641,7 @@ func (g *generator) makeInitiatives() {
 		if g.r.IntN(3) != 0 {
 			in.partner = g.pop.partners[g.r.IntN(len(g.pop.partners))]
 		}
-		for pos := range 2 + g.r.IntN(4) { // 2–5 published metrics
+		for pos := range 2 + g.r.IntN(4) {
 			in.metrics = append(in.metrics, initiativeMetric{
 				id:    g.uuid(),
 				pos:   pos,
@@ -658,7 +656,7 @@ func (g *generator) makeInitiatives() {
 
 func (g *generator) makeEvents() {
 	for i := range eventCount {
-		n := g.offset + i
+		n := g.offset*eventCount + i
 		loc := cities[i%len(cities)]
 		duration := eventDurationMin + g.seconds(eventDurationMax-eventDurationMin)
 		var starts time.Time
@@ -721,7 +719,7 @@ func (g *generator) reserveEvents() {
 			continue
 		}
 		seen := map[pgtype.UUID]bool{}
-		for n := 1 + g.r.IntN(3); n > 0; n-- { // 1–3 reservations
+		for n := 1 + g.r.IntN(3); n > 0; n-- {
 			ev := g.pop.events[g.r.IntN(len(g.pop.events))]
 			if seen[ev.id] {
 				continue
@@ -864,7 +862,8 @@ func (p *sharerPool) pick(r *rand.Rand, at time.Time) *donor {
 		if len(p.active) == 0 {
 			return nil
 		}
-		d := p.active[sort.SearchFloat64s(p.totals, r.Float64()*p.totals[len(p.totals)-1])]
+		index, _ := slices.BinarySearch(p.totals, r.Float64()*p.totals[len(p.totals)-1])
+		d := p.active[index]
 		if d.sharingAt.Before(at) {
 			return d
 		}

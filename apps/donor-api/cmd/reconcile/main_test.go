@@ -121,7 +121,6 @@ func TestReconcileWindowAgainstSyntheticDB(t *testing.T) {
 	noon := time.Date(2027, 3, 1, 12, 0, 0, 0, reconcile.NewYork).Unix()
 
 	t.Run("clean day has no discrepancies", func(t *testing.T) {
-		// No seeded gifts in the window and no Stripe objects: a clean day.
 		report, err := reconcileWindow(context.Background(), win, fakeGateway{}, q)
 		if err != nil {
 			t.Fatal(err)

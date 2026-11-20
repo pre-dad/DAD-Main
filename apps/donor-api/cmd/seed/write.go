@@ -578,7 +578,8 @@ func refreshProjections(ctx context.Context, pool *pgxpool.Pool, workers int) er
 			}
 		})
 	}
-	if wg.Wait(); failure != nil {
+	wg.Wait()
+	if failure != nil {
 		return failure
 	}
 	var parked int64

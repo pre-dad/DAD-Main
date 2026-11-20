@@ -77,9 +77,8 @@ type fixture struct {
 }
 
 // defaultMix approximates a referral spike: most traffic lands on referral
-// links, and a minority of donors check their recognition. The event-day and
-// engagement scenarios are opt-in at 0 so the referral-spike shape stays the
-// same; they are listed so -mix accepts them.
+// links, and a minority of donors check their recognition. Scenarios at 0 are
+// opt-in; they are listed so -mix accepts them.
 var defaultMix = map[string]int{
 	"referral-lookup": 30, "referral-capture": 12, "referral-missing": 3, "spend": 15,
 	"dashboard": 18, "gifts": 7, "sharing": 5, "profile": 4, "recurring": 4, "annual-summary": 2,
