@@ -1,8 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Passkeys } from "./Passkeys";
 
+beforeEach(() => {
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+});
+
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   Reflect.deleteProperty(navigator, "credentials");
 });
@@ -200,4 +205,15 @@ it("lists and removes passkeys in a browser that cannot add one", async () => {
   expect(await screen.findByText(/This browser can’t use passkeys/)).toBeVisible();
   expect(screen.queryByRole("button", { name: "Add a passkey" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: /^Remove Work laptop/ })).toBeVisible();
+});
+
+it("leaves the passkey alone when removal is not confirmed", async () => {
+  browser();
+  vi.spyOn(window, "confirm").mockReturnValue(false);
+  const fetch = serve({ "GET /api/donor/me/passkeys": () => json({ passkeys: [laptop] }) });
+  render(<Passkeys onSignedOut={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^Remove Work laptop/ }));
+  expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("Work laptop"));
+  expect(fetch.mock.calls.some(([url]) => String(url).endsWith("/delete"))).toBe(false);
+  expect(screen.getByText("Work laptop")).toBeVisible();
 });
