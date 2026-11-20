@@ -14,6 +14,7 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -328,7 +329,7 @@ func (s *DonorPasskeyService) FinishRegister(
 			UserVerified: passkey.Flags.UserVerified, BackupEligible: passkey.Flags.BackupEligible,
 			BackupState: passkey.Flags.BackupState, Name: nameText,
 		}); err != nil {
-			return err
+			return duplicateCredential(err)
 		}
 		// The notice carries its facts, so removing the passkey cannot withdraw it.
 		if err = queueMessage(ctx, q, user.donor.ID, "PASSKEY_ADDED", "passkey-added:"+id.String(),
@@ -339,6 +340,15 @@ func (s *DonorPasskeyService) FinishRegister(
 		return err
 	})
 	return list, err
+}
+
+// duplicateCredential reports a concurrent registration of the same credential
+// id as a denial, like the ownership check that precedes the insert.
+func duplicateCredential(err error) error {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation {
+		return ErrPasskeyDenied
+	}
+	return err
 }
 
 func (s *DonorPasskeyService) ListPasskeys(ctx context.Context, token string) (PasskeyList, error) {
