@@ -78,8 +78,11 @@ func decodeCursor(value string) (cursor, bool, error) {
 	if value == "" {
 		return cursor{}, false, nil
 	}
+	if len(value) > 200 {
+		return cursor{}, false, ErrStaffInput
+	}
 	raw, err := base64.RawURLEncoding.DecodeString(value)
-	if err != nil || len(value) > 200 {
+	if err != nil {
 		return cursor{}, false, ErrStaffInput
 	}
 	var c cursor
@@ -169,11 +172,9 @@ func (s *StaffService) FailedPayments(ctx context.Context, token, state, after s
 			return FailedPaymentPage{}, err
 		}
 		out := FailedPaymentPage{Payments: make([]FailedPayment, 0, min(len(rows), pageSize))}
-		if len(rows) > pageSize {
-			rows = rows[:pageSize]
-			last := rows[len(rows)-1]
-			out.NextCursor = encodeCursor(last.DueAt.Time, last.PeriodID)
-		}
+		rows, out.NextCursor = keysetPage(rows, func(row queries.StaffFailedPaymentsRow) *string {
+			return encodeCursor(row.DueAt.Time, row.PeriodID)
+		})
 		for _, row := range rows {
 			item := FailedPayment{
 				DonorID:     row.DonorID,
@@ -218,11 +219,9 @@ func (s *StaffService) AccountDeletions(ctx context.Context, token, after string
 			return AccountDeletionPage{}, err
 		}
 		out := AccountDeletionPage{Deletions: make([]AccountDeletion, 0, min(len(rows), pageSize))}
-		if len(rows) > pageSize {
-			rows = rows[:pageSize]
-			last := rows[len(rows)-1]
-			out.NextCursor = encodeCursor(last.DeletedAt.Time, last.DonorID)
-		}
+		rows, out.NextCursor = keysetPage(rows, func(row queries.StaffAccountDeletionsRow) *string {
+			return encodeCursor(row.DeletedAt.Time, row.DonorID)
+		})
 		for _, row := range rows {
 			out.Deletions = append(
 				out.Deletions,
