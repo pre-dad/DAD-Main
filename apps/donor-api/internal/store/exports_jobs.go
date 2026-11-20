@@ -145,13 +145,16 @@ func (s *StaffService) ExportJob(ctx context.Context, token string, id pgtype.UU
 func (s *StaffService) ExportJobs(ctx context.Context, token string) (ExportJobs, error) {
 	return staffRead(ctx, s, token, "", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (ExportJobs, error) {
 		jobs, err := queries.New(tx).ListExportJobs(ctx, queries.ListExportJobsParams{ActorID: actor.ID, AsOf: timestamp(now)})
+		if err != nil {
+			return ExportJobs{}, err
+		}
 		result := ExportJobs{Jobs: []ExportJob{}}
 		for _, job := range jobs {
 			if permitted(actor.Role, job.Dataset) {
 				result.Jobs = append(result.Jobs, exportJobView(job))
 			}
 		}
-		return result, err
+		return result, nil
 	})
 }
 
