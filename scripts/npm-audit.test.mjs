@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { problems } from "./npm-audit.mjs";
+import { problems, validateExceptions } from "./npm-audit.mjs";
 
 const url = "https://github.com/advisories/GHSA-test";
 const report = (...vias) => ({ vulnerabilities: { pkg: { via: vias } } });
@@ -53,4 +53,15 @@ test("rejects missing or error audit reports instead of passing a failed registr
       );
     }
   }
+});
+
+test("rejects exception records without an advisory, packages, or an ISO expiry", () => {
+  assert.doesNotThrow(() => validateExceptions([exception]));
+  for (const bad of [
+    { ...exception, packages: undefined },
+    { ...exception, expires: undefined },
+    { ...exception, expires: "next year" },
+    { ...exception, advisory: undefined },
+  ])
+    assert.throws(() => validateExceptions([bad]), /Invalid npm audit exception/);
 });

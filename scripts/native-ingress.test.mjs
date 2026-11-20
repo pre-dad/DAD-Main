@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { nativeRules } from "./native-ingress.mjs";
+import { nativeRules, render } from "./native-ingress.mjs";
 
 const source = JSON.parse(await readFile(new URL("../apps/donor-api/api/openapi.json", import.meta.url)));
 const rules = nativeRules(source);
@@ -39,4 +39,24 @@ test("native path parameters cannot cross a path segment or regex boundary", () 
 test("native HEAD inherits the admitted GET operation", () => {
   assert.equal(permits("HEAD", "/health/live"), true);
   assert.equal(permits("HEAD", "/donor/staff/me"), false);
+});
+
+test("render emits parameterised operations, HEAD entries and allowed methods", () => {
+  const out = render(source);
+  assert.match(out, /map "\$request_method:\$uri" \$native_operation_class \{/);
+  assert.ok(out.includes('"~^POST:/donor/referrals/[^/]+$" visitor;'));
+  assert.ok(out.includes('"~^HEAD:/health/live$" read;'));
+  assert.ok(out.includes('"~^/health/live$" "GET, HEAD";'));
+  assert.ok(out.includes('"~^/donor/login$" "POST";'));
+});
+
+const synthetic = (path, operation) => ({
+  paths: { [path]: { get: { "x-clients": ["native"], responses: {}, ...operation } } },
+  servers: [{ url: "https://native.test" }],
+  components: { securitySchemes: {} },
+});
+
+test("native ingress refuses staff paths and unsupported rate-limit classes", () => {
+  assert.throws(() => nativeRules(synthetic("/donor/staff/me", {})), /Staff operations/);
+  assert.throws(() => nativeRules(synthetic("/donor/x", { "x-rate-limit": "bogus" })), /Unsupported native rate-limit/);
 });

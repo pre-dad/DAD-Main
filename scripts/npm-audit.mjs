@@ -30,19 +30,35 @@ export function advisories(report) {
   return found;
 }
 
+/** Throws unless every exception names an advisory, the packages it covers, and an ISO expiry date. */
+export function validateExceptions(exceptions) {
+  if (!Array.isArray(exceptions)) throw new Error("npm-audit-exceptions.json must be an array");
+  for (const e of exceptions) {
+    const valid =
+      e &&
+      typeof e.advisory === "string" &&
+      Array.isArray(e.packages) &&
+      e.packages.every((name) => typeof name === "string") &&
+      typeof e.expires === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(e.expires);
+    if (!valid) throw new Error(`Invalid npm audit exception: ${JSON.stringify(e)}`);
+  }
+}
+
 /** The reasons the audit fails; none means it passes. */
 export function problems({ full, production, exceptions, today }) {
   const out = [];
   const shipped = advisories(production);
+  const present = advisories(full);
   const excepted = new Map(exceptions.map((e) => [e.advisory, e]));
-  for (const [url, title] of advisories(full)) {
+  for (const [url, title] of present) {
     const exception = excepted.get(url);
     if (shipped.has(url)) out.push(`${url} (${title}) reaches production dependencies; it cannot be excepted`);
     else if (!exception) out.push(`${url} (${title})`);
     else if (exception.expires < today) out.push(`${url} (${title}): its exception expired on ${exception.expires}`);
   }
   for (const exception of exceptions) {
-    if (!advisories(full).has(exception.advisory))
+    if (!present.has(exception.advisory))
       out.push(`${exception.advisory} no longer appears; remove its exception`);
   }
   return out;
@@ -50,7 +66,7 @@ export function problems({ full, production, exceptions, today }) {
 
 function audit(...args) {
   try {
-    return JSON.parse(execFileSync("npm", ["audit", "--json", ...args], { encoding: "utf8" }));
+    return JSON.parse(execFileSync("npm", ["audit", "--json", ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }));
   } catch (error) {
     // npm audit exits non-zero whenever it finds anything, with the report on stdout.
     if (error.stdout) return JSON.parse(error.stdout);
@@ -61,7 +77,9 @@ function audit(...args) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const file = new URL("./npm-audit-exceptions.json", import.meta.url);
   const { name } = JSON.parse(readFileSync("package.json", "utf8"));
-  const exceptions = JSON.parse(readFileSync(file, "utf8")).filter((e) => e.packages.includes(name));
+  const records = JSON.parse(readFileSync(file, "utf8"));
+  validateExceptions(records);
+  const exceptions = records.filter((e) => e.packages.includes(name));
   const found = problems({
     full: audit(),
     production: audit("--omit=dev"),
