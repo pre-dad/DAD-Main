@@ -92,7 +92,9 @@ func (c Config) Providers() map[string]Provider {
 func FromEnvironment(getenv func(string) string) (Config, error) {
 	var config Config
 	keyFile, keyID, teamID, topic :=
-		getenv("DONOR_PUSH_APNS_KEY_FILE"), getenv("DONOR_PUSH_APNS_KEY_ID"), getenv("DONOR_PUSH_APNS_TEAM_ID"), getenv("DONOR_PUSH_APNS_TOPIC")
+		getenv(
+			"DONOR_PUSH_APNS_KEY_FILE",
+		), getenv("DONOR_PUSH_APNS_KEY_ID"), getenv("DONOR_PUSH_APNS_TEAM_ID"), getenv("DONOR_PUSH_APNS_TOPIC")
 	if cmp.Or(keyFile, keyID, teamID, topic) != "" {
 		key, err := readFile(keyFile)
 		if err != nil {

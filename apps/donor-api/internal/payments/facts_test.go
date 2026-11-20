@@ -18,7 +18,11 @@ func TestDecodeObjectRequiresAJSONObject(t *testing.T) {
 }
 
 func TestObjectAccessors(t *testing.T) {
-	o, err := DecodeObject([]byte(`{"n":7,"text":"x","none":null,"yes":true,"no":false,"neg":-1,"big":253402300800,"obj":{"a":1},"rows":[{"id":"a"}],"float":1.5}`))
+	o, err := DecodeObject(
+		[]byte(
+			`{"n":7,"text":"x","none":null,"yes":true,"no":false,"neg":-1,"big":253402300800,"obj":{"a":1},"rows":[{"id":"a"}],"float":1.5}`,
+		),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

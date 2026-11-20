@@ -341,7 +341,8 @@ func TestFCMExchangesASignedAssertionAndCachesTheAccessToken(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(server.exchangeList()) != 1 || server.authorizations()[0] != "Bearer access-1" || server.authorizations()[1] != "Bearer access-1" {
+	if len(server.exchangeList()) != 1 || server.authorizations()[0] != "Bearer access-1" ||
+		server.authorizations()[1] != "Bearer access-1" {
 		t.Fatalf(
 			"exchanges %d, authorizations %v: the access token should be exchanged once and reused",
 			len(server.exchangeList()),

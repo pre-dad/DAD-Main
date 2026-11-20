@@ -129,7 +129,13 @@ const (
 // ChangeAccess disables another account, changes its role, or replaces its
 // passkeys through a recovery invitation, revoking its sessions. It locks
 // every account so at least one other active administrator always remains.
-func (s *StaffService) ChangeAccess(ctx context.Context, token string, targetID pgtype.UUID, action StaffAccessAction, role string) (AccessChange, error) {
+func (s *StaffService) ChangeAccess(
+	ctx context.Context,
+	token string,
+	targetID pgtype.UUID,
+	action StaffAccessAction,
+	role string,
+) (AccessChange, error) {
 	return staffRead(ctx, s, token, "staff.manage", func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (AccessChange, error) {
 		q := queries.New(tx)
 		rows, err := q.LockStaffAccounts(ctx)

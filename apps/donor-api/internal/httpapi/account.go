@@ -55,7 +55,8 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	next, ok := optional(body.Next, "")
-	if !ok || (next != "" && !store.ValidReturnPath(next)) || body.Email == nil || utf8.RuneCountInString(*body.Email) > identity.MaxEmailRunes {
+	if !ok || (next != "" && !store.ValidReturnPath(next)) || body.Email == nil ||
+		utf8.RuneCountInString(*body.Email) > identity.MaxEmailRunes {
 		invalidFields(w, r)
 		return
 	}

@@ -148,7 +148,15 @@ func TestLadderWithCustomMilestonesRepeatsYearlyPastTheLast(t *testing.T) {
 		since := asOf.Add(-time.Duration(c.days) * 24 * time.Hour)
 		l := Streak{Since: &since}.LadderWithMilestones(asOf, time.UTC, []int64{5, 10})
 		if l.LastMilestone != c.wantLast || l.NextMilestone == nil || *l.NextMilestone != c.wantNext || *l.DaysToNext != c.wantNext-c.days {
-			t.Errorf("days=%d: last %d next %v toNext %v, want last %d next %d", c.days, l.LastMilestone, l.NextMilestone, l.DaysToNext, c.wantLast, c.wantNext)
+			t.Errorf(
+				"days=%d: last %d next %v toNext %v, want last %d next %d",
+				c.days,
+				l.LastMilestone,
+				l.NextMilestone,
+				l.DaysToNext,
+				c.wantLast,
+				c.wantNext,
+			)
 		}
 	}
 }
