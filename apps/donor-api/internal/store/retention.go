@@ -32,7 +32,7 @@ const (
 )
 
 // TouchRetention deletes analytics events past retention, lapsed credentials,
-// spent rate limits, referral touches past retention, and company-code touches once they expire,
+// expired staff sign-in ceremonies, spent rate limits, referral touches past retention, and company-code touches once they expire,
 // since an expired one can never bind. A pass starts once an interval and deletes one batch per call
 // until a batch comes up short. Concurrent passes skip each other's rows, so
 // every worker may run one.
@@ -94,6 +94,12 @@ func (r *TouchRetention) PurgeNext(ctx context.Context, now time.Time) (bool, er
 			{credentialPurgeBatch, func() (int64, error) {
 				return q.PurgePhoneCodes(ctx, queries.PurgePhoneCodesParams{
 					ExpiredBefore: timestamp(now.Add(-phoneCodeRetention)),
+					Batch:         credentialPurgeBatch,
+				})
+			}},
+			{credentialPurgeBatch, func() (int64, error) {
+				return q.PurgeStaffCeremonies(ctx, queries.PurgeStaffCeremoniesParams{
+					ExpiredBefore: timestamp(now),
 					Batch:         credentialPurgeBatch,
 				})
 			}},

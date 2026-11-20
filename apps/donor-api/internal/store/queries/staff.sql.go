@@ -35,15 +35,6 @@ func (q *Queries) AuthenticatedStaff(ctx context.Context, arg AuthenticatedStaff
 	return i, err
 }
 
-const deleteExpiredStaffCeremonies = `-- name: DeleteExpiredStaffCeremonies :exec
-DELETE FROM donor_staff_ceremonies WHERE expires_at<=$1
-`
-
-func (q *Queries) DeleteExpiredStaffCeremonies(ctx context.Context, expiresAt pgtype.Timestamptz) error {
-	_, err := q.db.Exec(ctx, deleteExpiredStaffCeremonies, expiresAt)
-	return err
-}
-
 const deleteStaffPasskeys = `-- name: DeleteStaffPasskeys :execrows
 DELETE FROM donor_staff_passkeys WHERE staff_id=$1
 `

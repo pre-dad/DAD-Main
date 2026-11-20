@@ -146,3 +146,23 @@ func (q *Queries) PurgeRateLimits(ctx context.Context, batch int32) (int64, erro
 	}
 	return result.RowsAffected(), nil
 }
+
+const purgeStaffCeremonies = `-- name: PurgeStaffCeremonies :execrows
+DELETE FROM donor_staff_ceremonies WHERE token_hash=ANY(ARRAY(
+ SELECT token_hash FROM donor_staff_ceremonies WHERE expires_at<$1::timestamptz
+ ORDER BY expires_at,token_hash LIMIT $2
+))
+`
+
+type PurgeStaffCeremoniesParams struct {
+	ExpiredBefore pgtype.Timestamptz `json:"expired_before"`
+	Batch         int32              `json:"batch"`
+}
+
+func (q *Queries) PurgeStaffCeremonies(ctx context.Context, arg PurgeStaffCeremoniesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeStaffCeremonies, arg.ExpiredBefore, arg.Batch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

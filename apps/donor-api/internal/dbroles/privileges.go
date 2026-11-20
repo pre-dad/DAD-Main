@@ -220,7 +220,7 @@ var grants = map[string]map[Role]string{
 		ProjectionWorker: "SELECT (id, name, email, role, disabled, created_at)",
 	},
 	"donor_staff_passkeys":   {API: "SELECT, INSERT, UPDATE, DELETE", StaffCLI: "SELECT, DELETE"},
-	"donor_staff_ceremonies": {API: "SELECT, INSERT, DELETE"},
+	"donor_staff_ceremonies": {API: "SELECT, INSERT, DELETE", ProjectionWorker: "SELECT (token_hash, expires_at), DELETE"},
 	"donor_staff_invites":    {API: "SELECT, INSERT, UPDATE", StaffCLI: "SELECT, INSERT, UPDATE"},
 	"donor_staff_sessions":   {API: "SELECT, INSERT, UPDATE", StaffCLI: "SELECT, UPDATE"},
 	"donor_staff_audit":      {API: "SELECT, INSERT", StaffCLI: "INSERT", ProjectionWorker: "SELECT, INSERT"},

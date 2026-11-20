@@ -36,6 +36,12 @@ DELETE FROM donor_phone_codes WHERE phone=ANY(ARRAY(
  ORDER BY expires_at,phone LIMIT sqlc.arg(batch)
 ));
 
+-- name: PurgeStaffCeremonies :execrows
+DELETE FROM donor_staff_ceremonies WHERE token_hash=ANY(ARRAY(
+ SELECT token_hash FROM donor_staff_ceremonies WHERE expires_at<sqlc.arg(expired_before)::timestamptz
+ ORDER BY expires_at,token_hash LIMIT sqlc.arg(batch)
+));
+
 -- name: PurgeRateLimits :execrows
 DELETE FROM donor_rate_limits WHERE (class, client) IN (
  SELECT class, client FROM donor_rate_limits WHERE tat < clock_timestamp() LIMIT sqlc.arg(batch)
