@@ -142,6 +142,45 @@ func TestAdoptionPreservesExistingRecordsAndRejectsDrift(t *testing.T) {
 	}
 }
 
+func TestHistoryReportsPendingAndUnknownMigrations(t *testing.T) {
+	pool, ctx := isolatedDatabase(t)
+	if err := Apply(ctx, pool, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "DELETE FROM donor_schema_migrations WHERE version=(SELECT max(version) FROM donor_schema_migrations)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(ctx, pool); err == nil || !strings.Contains(err.Error(), "pending") {
+		t.Fatalf("missing last migration: %v, want pending", err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO donor_schema_migrations(version,checksum) VALUES('9999_unknown.sql','x')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(ctx, pool, false); err == nil || !strings.Contains(err.Error(), "unknown migration: 9999_unknown.sql") {
+		t.Fatalf("unknown history entry: %v", err)
+	}
+	if err := Verify(ctx, pool); err == nil {
+		t.Fatal("unknown history entry reported ready")
+	}
+}
+
+func TestAdoptionRejectsADroppedColumn(t *testing.T) {
+	pool, ctx := isolatedDatabase(t)
+	files, err := manifest(db.Migrations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, files[0].sql); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, "CREATE TABLE alembic_version(version_num text); INSERT INTO alembic_version VALUES('0030_donor_public_content'); ALTER TABLE donors DROP COLUMN public_name"); err != nil {
+		t.Fatal(err)
+	}
+	if err = Apply(ctx, pool, true); !errors.Is(err, ErrSchemaMismatch) || !strings.Contains(err.Error(), "public_name") {
+		t.Fatalf("dropped column accepted: %v", err)
+	}
+}
+
 // applyBefore records the embedded migrations preceding name as applied, so a
 // test can seed data the way that migration will find it.
 func applyBefore(t *testing.T, ctx context.Context, pool *pgxpool.Pool, name string) {
