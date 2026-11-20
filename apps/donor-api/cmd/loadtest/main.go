@@ -78,10 +78,8 @@ type fixture struct {
 
 // defaultMix approximates a referral spike: most traffic lands on referral
 // links, and a minority of donors check their recognition. The event-day and
-// engagement scenarios (events, event-detail, event-reserve, today-initiative,
-// team) default to 0 here and are turned on by the event-burst and
-// dashboard-soak mixes in the Makefile, so the referral-spike shape is
-// unchanged unless asked for.
+// engagement scenarios are opt-in at 0 so the referral-spike shape stays the
+// same; they are listed so -mix accepts them.
 var defaultMix = map[string]int{
 	"referral-lookup": 30, "referral-capture": 12, "referral-missing": 3, "spend": 15,
 	"dashboard": 18, "gifts": 7, "sharing": 5, "profile": 4, "recurring": 4, "annual-summary": 2,
@@ -204,6 +202,15 @@ func urlMix(list string) ([]scenario, error) {
 		mix[i] = scenario{name: name, weight: 1, expect: http.StatusOK, signedIn: true, build: get(target)}
 	}
 	return mix, nil
+}
+
+func sameHost(targets []string) bool {
+	hosts := map[string]bool{}
+	for _, target := range targets {
+		u, _ := url.Parse(target)
+		hosts[u.Host] = true
+	}
+	return len(hosts) <= 1
 }
 
 func parseTargets(list string) ([]string, error) {
@@ -418,7 +425,8 @@ func load(ctx context.Context, cfg config) result {
 				if cfg.clientIPs {
 					address := u.address
 					if request.Method == http.MethodPost {
-						// Each capture is a new visitor, as in a real spike.
+						// Each capture is a new visitor, as in a real spike; the upper half
+						// of the /15 gives 65,536 distinct visitors before addresses repeat.
 						address = clientAddress(1<<16 + visitors.Add(1)%(1<<16))
 					}
 					request.Header.Set("X-Real-IP", address.String())
@@ -551,6 +559,9 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 			return err
 		}
 		if cookie := getenv("DONOR_LOAD_COOKIE"); cookie != "" {
+			if hosts, _ := parseTargets(*targets); !sameHost(hosts) {
+				return errors.New("DONOR_LOAD_COOKIE is sent to every -url target, so they must share one host")
+			}
 			cfg.sessions, cfg.nativeShare = []string{cookie}, 0
 		}
 	} else {

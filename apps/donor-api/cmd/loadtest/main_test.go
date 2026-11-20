@@ -339,3 +339,16 @@ func TestSummarizeReportsBucketEdgesUpToTheSlowest(t *testing.T) {
 		t.Fatalf("percentiles exceed the slowest request: %+v", s)
 	}
 }
+
+func TestSessionCookieIsNotSentAcrossHosts(t *testing.T) {
+	env := func(name string) string {
+		if name == "DONOR_LOAD_COOKIE" {
+			return "session=abc"
+		}
+		return ""
+	}
+	err := run(context.Background(), []string{"-url", "http://a.example.org/,http://b.example.org/", "-duration", "1s"}, env, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "share one host") {
+		t.Fatalf("got %v, want the multi-host cookie run refused", err)
+	}
+}
