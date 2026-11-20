@@ -1,5 +1,6 @@
 // Package credentials preserves the legacy credential contract: the formats
-// already stored in the deployed pre-rewrite database. Secrets and hashes must never be included in HTTP errors or application logs.
+// already stored in the deployed pre-rewrite database. Secrets and hashes must
+// never be included in HTTP errors or application logs.
 package credentials
 
 import (
@@ -13,6 +14,8 @@ import (
 	"github.com/fernet/fernet-go"
 )
 
+// ErrInvalid is returned for any credential that fails to parse, decrypt or
+// encode; it deliberately says nothing about why.
 var ErrInvalid = errors.New("invalid credential")
 
 func key(value string) (*fernet.Key, error) {

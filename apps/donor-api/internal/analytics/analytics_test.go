@@ -6,7 +6,7 @@ import (
 )
 
 func TestTaxonomyHasExactlyThirtyNames(t *testing.T) {
-	if got := len(Names()); got != 30 {
+	if got := len(eventProperties); got != 30 {
 		t.Fatalf("taxonomy has %d names; PRD §9 defines 30", got)
 	}
 	// Spot-check representative names across the lifecycle.
@@ -45,6 +45,11 @@ func TestValidateProperties(t *testing.T) {
 		// push_opened: free-form type.
 		{"push_opened", map[string]string{"type": "STREAK_AT_RISK"}, true},
 		{"push_opened", map[string]string{"type": "x", "extra": "y"}, false},
+		{"invite_shared", map[string]string{"channel": "   "}, false},
+		{"invite_shared", map[string]string{"channel": "a\x00b"}, false},
+		{"invite_shared", map[string]string{"channel": "a\nb"}, false},
+		{"invite_shared", map[string]string{"channel": "\xff"}, false},
+		{"invite_shared", map[string]string{"channel": "café"}, true},
 		// Unknown event.
 		{"nope", nil, false},
 	}

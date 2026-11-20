@@ -92,7 +92,7 @@ func Plan(logins []Login, replicas map[string]int32, budget int32) error {
 		}
 		limit := logins[i].ConnectionLimit()
 		if limit < 1 || limit > math.MaxInt32 {
-			return fmt.Errorf("%s connection limit %d is invalid or over the budget of %d", logins[i].Role.Name, limit, budget)
+			return fmt.Errorf("%s connection limit %d is out of range", logins[i].Role.Name, limit)
 		}
 		total += limit
 	}
