@@ -177,7 +177,7 @@ var grants = map[string]map[Role]string{
 	},
 	"donor_referral_corrections": {API: "SELECT, INSERT", StripeWorker: "SELECT, INSERT", ProjectionWorker: "SELECT, INSERT"},
 	"donor_messages": {
-		API:              "SELECT, INSERT",
+		API:              "SELECT, INSERT, UPDATE (subject, body, context)",
 		StripeWorker:     "SELECT, INSERT",
 		ProjectionWorker: "SELECT, INSERT",
 		MessageWorker:    "SELECT, UPDATE",
@@ -243,9 +243,10 @@ var grants = map[string]map[Role]string{
 		MessageWorker:    "SELECT",
 		LoginEmailWorker: "SELECT, UPDATE (invite_token_hash, invite_expires_at)",
 	},
-	"donor_partner_sessions": {API: "SELECT, INSERT, UPDATE", PushWorker: "SELECT, UPDATE", ProjectionWorker: "SELECT"},
+	"donor_partner_sessions": {API: "SELECT, INSERT, UPDATE", PushWorker: "SELECT, UPDATE", ProjectionWorker: "SELECT, DELETE"},
 	"donor_partner_login_emails": {API: "SELECT, INSERT", LoginEmailWorker: "SELECT, UPDATE",
-		Monitor: "SELECT (attempts, available_at, completed_at)", Rekey: "SELECT (id, encrypted_token), UPDATE (encrypted_token)"},
+		ProjectionWorker: "SELECT (id, completed_at), DELETE",
+		Monitor:          "SELECT (attempts, available_at, completed_at)", Rekey: "SELECT (id, encrypted_token), UPDATE (encrypted_token)"},
 	"donor_partner_push_notifications": {
 		API:              "SELECT, INSERT",
 		ProjectionWorker: "INSERT",

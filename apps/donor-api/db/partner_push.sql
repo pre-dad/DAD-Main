@@ -27,7 +27,7 @@ ON CONFLICT(dedup_key) DO NOTHING;
 
 -- name: NextPartnerPush :one
 SELECT * FROM donor_partner_push_notifications
-WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+WHERE completed_at IS NULL AND attempts<sqlc.arg(max_attempts)::int AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
 
 -- name: PartnerPushTarget :one

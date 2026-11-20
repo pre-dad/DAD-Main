@@ -118,7 +118,7 @@ func TestStaffDonorDetailShowsUncomputedStreakAsUpdating(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &StaffService{DB: api}
-	detail, err := s.DonorDetail(ctx, token, id, 0, 0)
+	detail, err := s.DonorDetail(ctx, token, id, 0, "")
 	if err != nil || detail.Streak != nil {
 		t.Fatalf("seeded projection reported a streak: %+v, %v", detail.Streak, err)
 	}
@@ -132,7 +132,7 @@ func TestStaffDonorDetailShowsUncomputedStreakAsUpdating(t *testing.T) {
 	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	detail, err = s.DonorDetail(ctx, token, id, 0, 0)
+	detail, err = s.DonorDetail(ctx, token, id, 0, "")
 	if err != nil || detail.Streak == nil || detail.Streak.Best != 0 {
 		t.Fatalf("computed projection missing from detail: %+v, %v", detail.Streak, err)
 	}
@@ -240,5 +240,44 @@ VALUES($1,$2,'RECEIPT',$3,'{"gift_id":"g"}',now()-interval '2 minutes',5,now()-i
 	}
 	if _, err = s.ResendMessage(ctx, token, testID(t), testID(t)); err == nil {
 		t.Fatal("resent a message that does not exist")
+	}
+}
+
+func TestStaffReferredDonorsPageByKeyset(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	_, token := staffFixture(t, pool, "SUPER_ADMIN")
+	referrer, _ := donor(t, pool)
+	const referred = pageSize + 5
+	want := make(map[pgtype.UUID]bool, referred)
+	for range referred {
+		id, _ := donor(t, pool)
+		want[id] = true
+		mustExec(t, pool,
+			`INSERT INTO donor_metric_projections(id,donor_id,referrer_id,referral_kind,net_minor,computed_at,next_refresh_at)
+			VALUES ($1,$2,$3,'LINK',100,now(),now())`, testID(t), id, referrer)
+	}
+	s := &StaffService{DB: as(t, dbroles.API)}
+	first, err := s.DonorDetail(ctx, token, referrer, 0, "")
+	if err != nil || len(first.Referred) != pageSize || first.NextReferralsCursor == nil {
+		t.Fatalf("first page: %d rows, cursor %v, %v", len(first.Referred), first.NextReferralsCursor, err)
+	}
+	second, err := s.DonorDetail(ctx, token, referrer, 0, *first.NextReferralsCursor)
+	if err != nil || len(second.Referred) != referred-pageSize || second.NextReferralsCursor != nil {
+		t.Fatalf("second page: %d rows, cursor %v, %v", len(second.Referred), second.NextReferralsCursor, err)
+	}
+	for _, row := range append(first.Referred, second.Referred...) {
+		if !want[row.ID] {
+			t.Fatalf("unexpected or repeated referred donor %v", row.ID)
+		}
+		delete(want, row.ID)
+	}
+	if len(want) != 0 {
+		t.Fatalf("%d referred donors were never listed", len(want))
+	}
+	for _, bad := range []string{"not-a-cursor", *keyCursor("email@example.org")} {
+		if _, err = s.DonorDetail(ctx, token, referrer, 0, bad); !errors.Is(err, ErrStaffInput) {
+			t.Errorf("cursor %q: %v; want ErrStaffInput", bad, err)
+		}
 	}
 }

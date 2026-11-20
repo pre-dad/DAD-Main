@@ -106,12 +106,17 @@ func (q *Queries) NativePartnerSession(ctx context.Context, tokenHash string) (p
 
 const nextPartnerPush = `-- name: NextPartnerPush :one
 SELECT id, session_id, partner_id, kind, dedup_key, available_at, expires_at, attempts, last_error, completed_at, suppressed_reason FROM donor_partner_push_notifications
-WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+WHERE completed_at IS NULL AND attempts<$2::int AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
 `
 
-func (q *Queries) NextPartnerPush(ctx context.Context, availableAt pgtype.Timestamptz) (DonorPartnerPushNotification, error) {
-	row := q.db.QueryRow(ctx, nextPartnerPush, availableAt)
+type NextPartnerPushParams struct {
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	MaxAttempts int32              `json:"max_attempts"`
+}
+
+func (q *Queries) NextPartnerPush(ctx context.Context, arg NextPartnerPushParams) (DonorPartnerPushNotification, error) {
+	row := q.db.QueryRow(ctx, nextPartnerPush, arg.AvailableAt, arg.MaxAttempts)
 	var i DonorPartnerPushNotification
 	err := row.Scan(
 		&i.ID,

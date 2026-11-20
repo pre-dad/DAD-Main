@@ -29,7 +29,12 @@ var (
 	referralPathPattern   = regexp.MustCompile(`^/r/[a-zA-Z0-9_-]+$`)
 )
 
-const disclosure = "About a dollar a day · $30/month. DAD launches in April 2027. Sandbox preview: no real donations."
+const (
+	monthlyAmount = "$30/month"
+	disclosure    = "About a dollar a day · " + monthlyAmount + ". DAD launches in April 2027. Sandbox preview: no real donations."
+	passHeadline  = "DAD sandbox referral code"
+	passLogoText  = "DAD · Sandbox"
+)
 
 type Issuer struct {
 	Apple  *Apple

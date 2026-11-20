@@ -103,7 +103,10 @@ func (w PartnerLoginEmailWorker) claim(ctx context.Context, site publicSite, now
 	worked := false
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		job, err := q.NextPartnerLoginEmail(ctx, timestamp(now))
+		job, err := q.NextPartnerLoginEmail(
+			ctx,
+			queries.NextPartnerLoginEmailParams{AvailableAt: timestamp(now), MaxAttempts: MaxDeliveryAttempts},
+		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}

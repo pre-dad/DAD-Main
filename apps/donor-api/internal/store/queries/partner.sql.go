@@ -573,11 +573,11 @@ func (q *Queries) LockPartnerOrg(ctx context.Context, id pgtype.UUID) (pgtype.UU
 const nextPartnerDelivery = `-- name: NextPartnerDelivery :one
 WITH next AS (
     SELECT q.id FROM donor_partner_message_deliveries q
-    WHERE q.completed_at IS NULL AND q.attempts<5 AND q.available_at<=$1
+    WHERE q.completed_at IS NULL AND q.attempts<$1::int AND q.available_at<=$2
     ORDER BY q.available_at,q.id LIMIT 1 FOR UPDATE SKIP LOCKED
 ), claimed AS (
     UPDATE donor_partner_message_deliveries d
-    SET attempts=d.attempts+1,available_at=$2
+    SET attempts=d.attempts+1,available_at=$3
     FROM next WHERE d.id=next.id
     RETURNING d.id,d.message_id,d.partner_user_id,d.ordinal,d.attempts
 )
@@ -592,8 +592,9 @@ JOIN donor_partner_signups s ON s.id=m.partner_id
 `
 
 type NextPartnerDeliveryParams struct {
-	AsOf       pgtype.Timestamptz `json:"as_of"`
-	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+	MaxAttempts int32              `json:"max_attempts"`
+	AsOf        pgtype.Timestamptz `json:"as_of"`
+	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
 }
 
 type NextPartnerDeliveryRow struct {
@@ -613,7 +614,7 @@ type NextPartnerDeliveryRow struct {
 // lease taken in the same statement, so a send that crashes the worker is still
 // retried later and eventually parked.
 func (q *Queries) NextPartnerDelivery(ctx context.Context, arg NextPartnerDeliveryParams) (NextPartnerDeliveryRow, error) {
-	row := q.db.QueryRow(ctx, nextPartnerDelivery, arg.AsOf, arg.LeaseUntil)
+	row := q.db.QueryRow(ctx, nextPartnerDelivery, arg.MaxAttempts, arg.AsOf, arg.LeaseUntil)
 	var i NextPartnerDeliveryRow
 	err := row.Scan(
 		&i.ID,
@@ -631,12 +632,17 @@ func (q *Queries) NextPartnerDelivery(ctx context.Context, arg NextPartnerDelive
 }
 
 const nextPartnerLoginEmail = `-- name: NextPartnerLoginEmail :one
-SELECT id, partner_user_id, kind, encrypted_token, expires_at, attempts, last_error, available_at, completed_at, created_at FROM donor_partner_login_emails WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+SELECT id, partner_user_id, kind, encrypted_token, expires_at, attempts, last_error, available_at, completed_at, created_at FROM donor_partner_login_emails WHERE completed_at IS NULL AND attempts<$2::int AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
 `
 
-func (q *Queries) NextPartnerLoginEmail(ctx context.Context, availableAt pgtype.Timestamptz) (DonorPartnerLoginEmail, error) {
-	row := q.db.QueryRow(ctx, nextPartnerLoginEmail, availableAt)
+type NextPartnerLoginEmailParams struct {
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	MaxAttempts int32              `json:"max_attempts"`
+}
+
+func (q *Queries) NextPartnerLoginEmail(ctx context.Context, arg NextPartnerLoginEmailParams) (DonorPartnerLoginEmail, error) {
+	row := q.db.QueryRow(ctx, nextPartnerLoginEmail, arg.AvailableAt, arg.MaxAttempts)
 	var i DonorPartnerLoginEmail
 	err := row.Scan(
 		&i.ID,
@@ -654,12 +660,17 @@ func (q *Queries) NextPartnerLoginEmail(ctx context.Context, availableAt pgtype.
 }
 
 const nextPartnerMessage = `-- name: NextPartnerMessage :one
-SELECT id, partner_id, kind, dedup_key, context, available_at, completed_at, attempts, last_error, suppressed_reason, subject, body, created_at, fanned_out_at FROM donor_partner_messages WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+SELECT id, partner_id, kind, dedup_key, context, available_at, completed_at, attempts, last_error, suppressed_reason, subject, body, created_at, fanned_out_at FROM donor_partner_messages WHERE completed_at IS NULL AND attempts<$2::int AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
 `
 
-func (q *Queries) NextPartnerMessage(ctx context.Context, availableAt pgtype.Timestamptz) (DonorPartnerMessage, error) {
-	row := q.db.QueryRow(ctx, nextPartnerMessage, availableAt)
+type NextPartnerMessageParams struct {
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	MaxAttempts int32              `json:"max_attempts"`
+}
+
+func (q *Queries) NextPartnerMessage(ctx context.Context, arg NextPartnerMessageParams) (DonorPartnerMessage, error) {
+	row := q.db.QueryRow(ctx, nextPartnerMessage, arg.AvailableAt, arg.MaxAttempts)
 	var i DonorPartnerMessage
 	err := row.Scan(
 		&i.ID,

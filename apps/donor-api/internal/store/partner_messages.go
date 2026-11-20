@@ -139,7 +139,10 @@ func (w PartnerMessageWorker) fanOut(ctx context.Context, site publicSite, now t
 	var attempts int32
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		row, err := q.NextPartnerMessage(ctx, timestamp(now))
+		row, err := q.NextPartnerMessage(
+			ctx,
+			queries.NextPartnerMessageParams{AvailableAt: timestamp(now), MaxAttempts: MaxDeliveryAttempts},
+		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -196,7 +199,7 @@ func (w PartnerMessageWorker) fanOut(ctx context.Context, site publicSite, now t
 
 // deliver sends the next due delivery. The claim counts the attempt and takes
 // the lease before the send, so a crash mid-send is retried after the lease and
-// parked after maxDeliveryAttempts, and the stable Message-ID lets a lost
+// parked after MaxDeliveryAttempts, and the stable Message-ID lets a lost
 // acknowledgement resend the same email.
 func (w PartnerMessageWorker) deliver(ctx context.Context, now time.Time) (bool, error) {
 	var message *mail.Message
@@ -206,7 +209,7 @@ func (w PartnerMessageWorker) deliver(ctx context.Context, now time.Time) (bool,
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
 		row, err := q.NextPartnerDelivery(ctx, queries.NextPartnerDeliveryParams{
-			AsOf: timestamp(now), LeaseUntil: timestamp(now.Add(deliveryLease)),
+			AsOf: timestamp(now), LeaseUntil: timestamp(now.Add(deliveryLease)), MaxAttempts: MaxDeliveryAttempts,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil

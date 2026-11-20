@@ -287,7 +287,7 @@ func TestOperatorsActOnlyInTheirArea(t *testing.T) {
 		if allowed := !errors.Is(err, ErrStaffForbidden); allowed != may.initiative || (may.initiative && err != nil) {
 			t.Errorf("%s creating an initiative: %v", role, err)
 		}
-		_, err = staff.DonorDetail(ctx, token, donorID, 0, 0)
+		_, err = staff.DonorDetail(ctx, token, donorID, 0, "")
 		if allowed := !errors.Is(err, ErrStaffForbidden); allowed != may.donors || (may.donors && err != nil) {
 			t.Errorf("%s reading a donor: %v", role, err)
 		}

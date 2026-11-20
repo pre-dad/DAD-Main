@@ -133,7 +133,7 @@ func (s CheckoutService) begin(ctx context.Context, request payments.CheckoutReq
 	}
 	remote, err := s.Gateway.CreateCheckout(ctx, attempt.RequestParams, "dad-checkout-"+request.RequestID.String())
 	if err != nil {
-		return empty, payments.ErrProcessorUnavailable
+		return empty, processorFailure(err)
 	}
 	if err = payments.ValidateRemoteCheckout(remote); err != nil {
 		return empty, err
@@ -279,6 +279,16 @@ func heldCheckout(
 	return staleCheckout{held}
 }
 
+// processorFailure keeps a processor's refusal distinguishable from an outage
+// and reports every other gateway failure as an outage, whose request may be
+// retried under the same idempotency key.
+func processorFailure(err error) error {
+	if errors.Is(err, payments.ErrProcessorRejected) || errors.Is(err, payments.ErrCheckoutRejected) {
+		return err
+	}
+	return payments.ErrProcessorUnavailable
+}
+
 // retire expires an unpaid checkout at the processor, then frees its
 // reservation. No database lock is held across the processor call, so a
 // failure leaves the reservation untouched and a retry finds it again. If the
@@ -286,7 +296,7 @@ func heldCheckout(
 func (s CheckoutService) retire(ctx context.Context, stale queries.DonorStripeCheckout) error {
 	status, err := s.Gateway.ExpireCheckout(ctx, stale.StripeSessionID.String, "dad-checkout-expire-"+stale.ID.String())
 	if err != nil {
-		return payments.ErrProcessorUnavailable
+		return processorFailure(err)
 	}
 	if status != "expired" {
 		return payments.ErrCheckoutConflict

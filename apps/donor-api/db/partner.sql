@@ -229,7 +229,7 @@ INSERT INTO donor_partner_messages (id,partner_id,kind,dedup_key,context,availab
 VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (dedup_key) DO NOTHING;
 
 -- name: NextPartnerMessage :one
-SELECT * FROM donor_partner_messages WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+SELECT * FROM donor_partner_messages WHERE completed_at IS NULL AND attempts<sqlc.arg(max_attempts)::int AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
 
 -- name: RenderPartnerMessage :exec
@@ -262,7 +262,7 @@ UPDATE donor_partner_messages SET fanned_out_at=$2,completed_at=$2 WHERE id=$1;
 -- retried later and eventually parked.
 WITH next AS (
     SELECT q.id FROM donor_partner_message_deliveries q
-    WHERE q.completed_at IS NULL AND q.attempts<5 AND q.available_at<=sqlc.arg(as_of)
+    WHERE q.completed_at IS NULL AND q.attempts<sqlc.arg(max_attempts)::int AND q.available_at<=sqlc.arg(as_of)
     ORDER BY q.available_at,q.id LIMIT 1 FOR UPDATE SKIP LOCKED
 ), claimed AS (
     UPDATE donor_partner_message_deliveries d
@@ -327,7 +327,7 @@ WHERE u.email=$1 AND NOT u.disabled AND p.approved_at IS NOT NULL
 ORDER BY u.id FOR UPDATE OF u;
 
 -- name: NextPartnerLoginEmail :one
-SELECT * FROM donor_partner_login_emails WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+SELECT * FROM donor_partner_login_emails WHERE completed_at IS NULL AND attempts<sqlc.arg(max_attempts)::int AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
 
 -- name: LockPartnerLoginRecipient :one

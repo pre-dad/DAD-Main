@@ -13,17 +13,17 @@ import (
 
 const anonymizeDonor = `-- name: AnonymizeDonor :exec
 UPDATE donors SET
-	email = 'deleted-' || id::text || '@deleted.invalid',
-	public_name = NULL,
+ email = 'deleted-' || id::text || '@deleted.invalid',
+ public_name = NULL,
  full_name = NULL,
-	referral_code = NULL,
-	zip = NULL,
-	city = NULL,
-	timezone = NULL,
+ referral_code = NULL,
+ zip = NULL,
+ city = NULL,
+ timezone = NULL,
  timezone_override = NULL,
-	phone = NULL,
-	company_code = NULL,
-	disabled = true
+ phone = NULL,
+ company_code = NULL,
+ disabled = true
 WHERE id = $1
 `
 
@@ -653,14 +653,26 @@ func (q *Queries) SaveSignupProfile(ctx context.Context, arg SaveSignupProfilePa
 
 const scrubDonorEmailChanges = `-- name: ScrubDonorEmailChanges :exec
 UPDATE donor_email_changes SET
-	old_email = 'deleted-old-' || id::text || '@deleted.invalid',
-	new_email = 'deleted-new-' || id::text || '@deleted.invalid',
-	encrypted_token = NULL
+ old_email = 'deleted-old-' || id::text || '@deleted.invalid',
+ new_email = 'deleted-new-' || id::text || '@deleted.invalid',
+ encrypted_token = NULL
 WHERE donor_id = $1
 `
 
 func (q *Queries) ScrubDonorEmailChanges(ctx context.Context, donorID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, scrubDonorEmailChanges, donorID)
+	return err
+}
+
+const scrubDonorMessages = `-- name: ScrubDonorMessages :exec
+UPDATE donor_messages SET subject = NULL, body = NULL, context = '{}'
+WHERE donor_id = $1 AND completed_at IS NOT NULL
+`
+
+// Rendered subjects and bodies of delivered notices can carry gift amounts and
+// referral names; pending rows keep their context so the worker can still resolve them.
+func (q *Queries) ScrubDonorMessages(ctx context.Context, donorID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, scrubDonorMessages, donorID)
 	return err
 }
 

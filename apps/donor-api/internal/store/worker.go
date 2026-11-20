@@ -164,6 +164,8 @@ func eventFailure(err error) string {
 	switch {
 	case errors.Is(err, payments.ErrProcessorUnavailable), errors.Is(err, payments.ErrUnconfigured):
 		return "PaymentUnavailable"
+	case errors.Is(err, payments.ErrProcessorRejected), errors.Is(err, payments.ErrCheckoutRejected):
+		return "PaymentRejected"
 	case errors.Is(err, pgx.ErrNoRows):
 		return "MissingRecord"
 	case errors.Is(err, payments.ErrFacts), errors.Is(err, recognition.ErrInvalid):

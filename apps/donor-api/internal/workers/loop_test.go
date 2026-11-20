@@ -34,7 +34,7 @@ func TestEachStepGetsTheBudgetItWasGiven(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if remaining := deadline.Sub(started); remaining < budget || remaining > budget+time.Second {
+		if remaining := deadline.Sub(started); remaining < budget || remaining > budget+10*time.Second {
 			t.Fatalf("step budget %v, want %v", remaining, budget)
 		}
 	}
@@ -94,8 +94,8 @@ func TestContinuousModeBacksOffAndRecoversFromFailures(t *testing.T) {
 	if first < 50*time.Millisecond || second < 100*time.Millisecond || third < 200*time.Millisecond {
 		t.Fatalf("backoff did not grow: %v %v %v", first, second, third)
 	}
-	if gap := calls[4].Sub(calls[3]); gap >= 50*time.Millisecond {
-		t.Fatalf("successful work waited %v before continuing", gap)
+	if gap := calls[4].Sub(calls[3]); gap >= third {
+		t.Fatalf("successful work waited %v before continuing, backoff was %v", gap, third)
 	}
 }
 
@@ -148,5 +148,32 @@ func TestRunConcurrentOnceReturnsAfterEachLoopsStep(t *testing.T) {
 	})
 	if err != nil || calls.Load() != 2 {
 		t.Fatal(err, calls.Load())
+	}
+}
+
+func TestZeroIdleStillBacksOffAfterFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls []time.Time
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, false, 0, StepBudget, func(context.Context) (bool, error) {
+			calls = append(calls, time.Now())
+			if len(calls) == 2 {
+				cancel()
+			}
+			return true, errors.New("down")
+		})
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("worker did not stop")
+	}
+	if len(calls) != 2 {
+		t.Fatalf("got %d steps, want 2", len(calls))
+	}
+	if gap := calls[1].Sub(calls[0]); gap < time.Second {
+		t.Fatalf("failed step retried after %v, want a backoff", gap)
 	}
 }

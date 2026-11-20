@@ -482,13 +482,14 @@ func (q *Queries) StaffPendingAction(ctx context.Context, arg StaffPendingAction
 
 const staffReferredPage = `-- name: StaffReferredPage :many
 SELECT d.id,d.email,p.referral_kind,p.net_minor FROM donors d
-JOIN donor_metric_projections p ON p.donor_id=d.id WHERE p.referrer_id=$1
-ORDER BY d.id LIMIT 51 OFFSET $2::bigint
+JOIN donor_metric_projections p ON p.donor_id=d.id
+WHERE p.referrer_id=$1::uuid AND d.id > $2::uuid
+ORDER BY d.id LIMIT 51
 `
 
 type StaffReferredPageParams struct {
 	ReferrerID pgtype.UUID `json:"referrer_id"`
-	PageOffset int64       `json:"page_offset"`
+	AfterID    pgtype.UUID `json:"after_id"`
 }
 
 type StaffReferredPageRow struct {
@@ -499,7 +500,7 @@ type StaffReferredPageRow struct {
 }
 
 func (q *Queries) StaffReferredPage(ctx context.Context, arg StaffReferredPageParams) ([]StaffReferredPageRow, error) {
-	rows, err := q.db.Query(ctx, staffReferredPage, arg.ReferrerID, arg.PageOffset)
+	rows, err := q.db.Query(ctx, staffReferredPage, arg.ReferrerID, arg.AfterID)
 	if err != nil {
 		return nil, err
 	}

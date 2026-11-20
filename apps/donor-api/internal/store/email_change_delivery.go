@@ -51,7 +51,10 @@ func (w EmailChangeWorker) claim(ctx context.Context, site publicSite, now time.
 	worked := false
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		owner, err := q.EmailChangeDeliveryOwner(ctx, timestamp(now))
+		owner, err := q.EmailChangeDeliveryOwner(
+			ctx,
+			queries.EmailChangeDeliveryOwnerParams{AvailableAt: timestamp(now), MaxAttempts: MaxDeliveryAttempts},
+		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -62,7 +65,10 @@ func (w EmailChangeWorker) claim(ctx context.Context, site publicSite, now time.
 		if err != nil {
 			return err
 		}
-		job, err := q.NextEmailChangeDelivery(ctx, queries.NextEmailChangeDeliveryParams{DonorID: owner, AvailableAt: timestamp(now)})
+		job, err := q.NextEmailChangeDelivery(
+			ctx,
+			queries.NextEmailChangeDeliveryParams{DonorID: owner, AvailableAt: timestamp(now), MaxAttempts: MaxDeliveryAttempts},
+		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}

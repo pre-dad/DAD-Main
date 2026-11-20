@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -72,8 +73,8 @@ func (g *StripeGateway) ListInvoicePayments(ctx context.Context, invoice, paymen
 		params.Payment = &stripe.InvoicePaymentListPaymentParams{Type: stripe.String("payment_intent"), PaymentIntent: stripe.String(payment)}
 	}
 	page := g.client.V1InvoicePayments.List(ctx, params)
-	if page.Err() != nil {
-		return nil, ErrProcessorUnavailable
+	if err := page.Err(); err != nil {
+		return nil, processorError(err)
 	}
 	raw, err := rawObject(page.LastResponse())
 	if err != nil || !raw.BoolIs("has_more", false) || raw.Absent("data") {
@@ -116,7 +117,8 @@ func ReconciliationFacts(o Object) Object {
 }
 
 // StripeGateway calls Stripe in test mode. A failed call is reported as
-// ErrProcessorUnavailable, never as the SDK error, which can carry donor inputs.
+// ErrProcessorUnavailable or a *ProcessorError, never as the SDK error, which
+// can carry donor inputs.
 // Every call first spends from budget.
 type StripeGateway struct {
 	client *stripe.Client
@@ -139,6 +141,27 @@ func NewStripeGateway(key string) (*StripeGateway, error) {
 	return &StripeGateway{client: stripe.NewClient(key, stripe.WithBackends(backends)), budget: DefaultRateBudget()}, nil
 }
 
+// processorError classifies an SDK failure. Network failures, timeouts, 408,
+// 409 (a request in flight under the same idempotency key), 429 and 5xx may
+// succeed when the same request is repeated, and map to ErrProcessorUnavailable.
+// Any other 4xx is a verdict on the request itself, and maps to a
+// *ProcessorError that keeps only the status, error code and request ID.
+func processorError(err error) error {
+	var api *stripe.Error
+	if !errors.As(err, &api) {
+		return ErrProcessorUnavailable
+	}
+	switch status := api.HTTPStatusCode; {
+	case status < 400 || status >= 500,
+		status == http.StatusRequestTimeout,
+		status == http.StatusConflict,
+		status == http.StatusTooManyRequests:
+		return ErrProcessorUnavailable
+	default:
+		return &ProcessorError{Status: status, Code: string(api.Code), RequestID: api.RequestID}
+	}
+}
+
 // UseBudget replaces the process-local budget the gateway starts with, such as
 // with one shared by every replica.
 func (g *StripeGateway) UseBudget(budget Budget) { g.budget = budget }
@@ -150,7 +173,7 @@ func (g *StripeGateway) CreateCheckout(ctx context.Context, raw []byte, key stri
 	// Refuse an old/unknown saved parameter rather than silently dropping it and
 	// changing an idempotent request. Such attempts require reconciliation.
 	if err := decoder.Decode(&params); err != nil {
-		return RemoteCheckout{}, ErrProcessorUnavailable
+		return RemoteCheckout{}, fmt.Errorf("%w: saved parameters are not accepted", ErrCheckoutRejected)
 	}
 	params.SetIdempotencyKey(key)
 	if err := g.acquire(ctx, BucketCheckout); err != nil {
@@ -158,7 +181,7 @@ func (g *StripeGateway) CreateCheckout(ctx context.Context, raw []byte, key stri
 	}
 	session, err := g.client.V1CheckoutSessions.Create(ctx, &params)
 	if err != nil {
-		return RemoteCheckout{}, ErrProcessorUnavailable
+		return RemoteCheckout{}, processorError(err)
 	}
 	var result RemoteCheckout
 	if session.LastResponse == nil || json.Unmarshal(session.LastResponse.RawJSON, &result) != nil {
@@ -183,7 +206,7 @@ func (g *StripeGateway) ExpireCheckout(ctx context.Context, sessionID, key strin
 		}
 		session, err = g.client.V1CheckoutSessions.Retrieve(ctx, sessionID, nil)
 		if err != nil {
-			return "", ErrProcessorUnavailable
+			return "", processorError(err)
 		}
 	}
 	raw, err := rawObject(session.LastResponse)
@@ -205,7 +228,7 @@ func (g *StripeGateway) mutateSubscription(ctx context.Context, id string, param
 		return err
 	}
 	if _, err := g.client.V1Subscriptions.Update(ctx, id, params); err != nil {
-		return ErrProcessorUnavailable
+		return processorError(err)
 	}
 	return nil
 }
@@ -260,7 +283,7 @@ func (g *StripeGateway) RetrieveCheckout(ctx context.Context, id string) (Object
 	}
 	result, err := g.client.V1CheckoutSessions.Retrieve(ctx, id, nil)
 	if err != nil {
-		return nil, ErrProcessorUnavailable
+		return nil, processorError(err)
 	}
 	return rawObject(result.LastResponse)
 }
@@ -271,7 +294,7 @@ func (g *StripeGateway) RetrieveSetupIntent(ctx context.Context, id string) (Obj
 	}
 	result, err := g.client.V1SetupIntents.Retrieve(ctx, id, nil)
 	if err != nil {
-		return nil, ErrProcessorUnavailable
+		return nil, processorError(err)
 	}
 	return rawObject(result.LastResponse)
 }
@@ -286,7 +309,7 @@ func (g *StripeGateway) RetrievePaymentIntent(ctx context.Context, id string) (O
 	}
 	result, err := g.client.V1PaymentIntents.Retrieve(ctx, id, params)
 	if err != nil {
-		return nil, ErrProcessorUnavailable
+		return nil, processorError(err)
 	}
 	return rawObject(result.LastResponse)
 }
@@ -299,7 +322,7 @@ func (g *StripeGateway) RetrievePaymentMethod(ctx context.Context, id string) (O
 	}
 	result, err := g.client.V1PaymentMethods.Retrieve(ctx, id, nil)
 	if err != nil {
-		return nil, ErrProcessorUnavailable
+		return nil, processorError(err)
 	}
 	return rawObject(result.LastResponse)
 }
@@ -310,7 +333,7 @@ func (g *StripeGateway) RetrieveRefund(ctx context.Context, id string) (Object, 
 	}
 	result, err := g.client.V1Refunds.Retrieve(ctx, id, nil)
 	if err != nil {
-		return nil, ErrProcessorUnavailable
+		return nil, processorError(err)
 	}
 	return rawObject(result.LastResponse)
 }
@@ -321,7 +344,7 @@ func (g *StripeGateway) RetrieveSubscription(ctx context.Context, id string) (Ob
 	}
 	result, err := g.client.V1Subscriptions.Retrieve(ctx, id, nil)
 	if err != nil {
-		return nil, ErrProcessorUnavailable
+		return nil, processorError(err)
 	}
 	return rawObject(result.LastResponse)
 }
@@ -339,7 +362,7 @@ func (g *StripeGateway) CreateRefund(ctx context.Context, payment string, amount
 	}
 	result, err := g.client.V1Refunds.Create(ctx, params)
 	if err != nil {
-		return nil, ErrProcessorUnavailable
+		return nil, processorError(err)
 	}
 	return rawObject(result.LastResponse)
 }
@@ -358,7 +381,7 @@ func (g *StripeGateway) RefundAfterDeletion(ctx context.Context, payment string,
 		return err
 	}
 	if _, err := g.client.V1Refunds.Create(ctx, params); err != nil {
-		return ErrProcessorUnavailable
+		return processorError(err)
 	}
 	return nil
 }
@@ -372,7 +395,7 @@ func (g *StripeGateway) CancelSubscriptionNow(ctx context.Context, id, key strin
 		return err
 	}
 	if _, err := g.client.V1Subscriptions.Cancel(ctx, id, params); err != nil {
-		return ErrProcessorUnavailable
+		return processorError(err)
 	}
 	return nil
 }
@@ -458,8 +481,8 @@ func (g *StripeGateway) paginate(
 			return nil, err
 		}
 		page := list(after)
-		if page.Err() != nil {
-			return nil, ErrProcessorUnavailable
+		if err := page.Err(); err != nil {
+			return nil, processorError(err)
 		}
 		raw, err := rawObject(page.LastResponse())
 		if err != nil {
