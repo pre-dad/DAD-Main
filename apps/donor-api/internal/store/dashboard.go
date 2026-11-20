@@ -102,7 +102,12 @@ func dashboard(ctx context.Context, q *queries.Queries, donor queries.Donor, now
 	irlAmount, irlErr := referred.IrlMinor.Int64Value()
 	ready := !missing && referred.Ready && linkErr == nil && irlErr == nil && linkAmount.Valid && irlAmount.Valid
 	linkMinor, irlMinor := linkAmount.Int64, irlAmount.Int64
-	result := DonorDashboard{Mode: processorMode, State: "ready", ComputedAt: row.ComputedAt.Time, FoundingDonor: row.FoundingAwardedAt.Valid}
+	result := DonorDashboard{
+		Mode:          processorMode,
+		State:         "ready",
+		ComputedAt:    row.ComputedAt.Time,
+		FoundingDonor: row.FoundingAwardedAt.Valid,
+	}
 	if ready && irlMinor <= math.MaxInt64-linkMinor {
 		result.Referrals = &ReferralSummary{
 			Link:       referred.LinkCount,
