@@ -11,6 +11,8 @@ import (
 
 type reversalGateway struct {
 	refunds       []string
+	refundAmounts []int64
+	refundKeys    []string
 	cancels       []string
 	subscriptions map[string]payments.Object
 	cancelErr     error
@@ -29,6 +31,8 @@ func (g *reversalGateway) RefundAfterDeletion(_ context.Context, payment string,
 		return g.refundErr
 	}
 	g.refunds = append(g.refunds, payment)
+	g.refundAmounts = append(g.refundAmounts, amount)
+	g.refundKeys = append(g.refundKeys, reversal)
 	return nil
 }
 
@@ -110,6 +114,13 @@ func TestLateCheckoutAfterDeletionIsReversed(t *testing.T) {
 	}
 	if len(gateway.refunds) != 1 || gateway.refunds[0] != "pi_in_after_"+result.CheckoutID {
 		t.Fatalf("refunds sent: %v", gateway.refunds)
+	}
+	var refundJob string
+	if err := f.db.QueryRow(ctx, "SELECT id::text FROM donor_deleted_account_reversals WHERE kind='REFUND' AND donor_id=$1", f.donorID).Scan(&refundJob); err != nil {
+		t.Fatal(err)
+	}
+	if gateway.refundAmounts[0] != 3000 || gateway.refundKeys[0] != refundJob {
+		t.Fatalf("refund sent %d under key %q; want 3000 under the reversal id %q", gateway.refundAmounts[0], gateway.refundKeys[0], refundJob)
 	}
 	var lastError string
 	if err := f.db.QueryRow(ctx, "SELECT last_error FROM donor_deleted_account_reversals WHERE kind='CANCEL' AND completed_at IS NULL AND donor_id=$1", f.donorID).Scan(&lastError); err != nil ||

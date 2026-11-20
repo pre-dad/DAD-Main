@@ -15,7 +15,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-var emailTestKeys, _ = credentials.ParseKeyring("MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+var emailTestKeys = func() credentials.Keyring {
+	keys, err := credentials.ParseKeyring("MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+	if err != nil {
+		panic(err)
+	}
+	return keys
+}()
 
 type recordingMail struct {
 	mu       sync.Mutex

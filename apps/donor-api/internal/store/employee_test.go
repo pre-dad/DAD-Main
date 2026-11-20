@@ -69,7 +69,7 @@ func TestMatchOwed(t *testing.T) {
 // terms, returning its id.
 func approvedPartner(t *testing.T, pool *pgxpool.Pool, org, code string, rateBP int32, capMinor int64) pgtype.UUID {
 	t.Helper()
-	id, _ := NewID()
+	id := mustNewID(t)
 	mustExec(
 		t,
 		pool,
@@ -100,8 +100,7 @@ func linkDonorWithGift(t *testing.T, pool *pgxpool.Pool, partnerID pgtype.UUID, 
 	id, _ := donor(t, pool)
 	mustExec(t, pool, "INSERT INTO donor_partner_employees (donor_id, partner_id, enrolled_at) VALUES ($1,$2,now())", id, partnerID)
 	if amount > 0 {
-		gift, _ := NewID()
-		chk, _ := NewID()
+		gift, chk := mustNewID(t), mustNewID(t)
 		mustExec(t, pool,
 			"INSERT INTO donor_checkouts (id, donor_id, amount_minor, frequency) VALUES ($1,$2,$3,'MONTHLY')", chk, id, amount)
 		mustExec(t, pool,
@@ -359,7 +358,7 @@ func TestEmployeeEnrollAndTeams(t *testing.T) {
 }
 
 // approvePartnerAdmin creates a first ADMIN partner user for an approved
-// partner, returning (userID, userID) — the id is reused as the session owner.
+// partner, returning the user id and its string form, used as the session owner.
 func approvePartnerAdmin(t *testing.T, pool *pgxpool.Pool, partnerID pgtype.UUID) (pgtype.UUID, string) {
 	t.Helper()
 	uid := mustNewID(t)

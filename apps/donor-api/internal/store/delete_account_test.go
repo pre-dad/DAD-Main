@@ -29,16 +29,15 @@ func TestDeleteAccountErasesPersonalDataAndKeepsLedger(t *testing.T) {
 		HashToken("123456"),
 	)
 	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_phone_codes WHERE phone='+14155550123'") })
-	oidcID, _ := NewID()
+	oidcID := mustNewID(t)
 	if _, err := pool.Exec(ctx,
 		"INSERT INTO donor_oidc_identities (id, donor_id, provider, subject) VALUES ($1,$2,'GOOGLE','sub-del')", oidcID, id,
 	); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { pool.Exec(ctx, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id) })
+	cleanup(t, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id)
 	// A gift is the retained legal record.
-	checkoutID, _ := NewID()
-	giftID, _ := NewID()
+	checkoutID, giftID := mustNewID(t), mustNewID(t)
 	if _, err := pool.Exec(ctx,
 		"INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency) VALUES($1,$2,3000,'MONTHLY')", checkoutID, id,
 	); err != nil {
@@ -51,9 +50,9 @@ func TestDeleteAccountErasesPersonalDataAndKeepsLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		pool.Exec(ctx, "DELETE FROM donor_gifts WHERE donor_id=$1", id)
-		pool.Exec(ctx, "DELETE FROM donor_checkouts WHERE donor_id=$1", id)
-		pool.Exec(ctx, "DELETE FROM donor_deletions WHERE donor_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_gifts WHERE donor_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_checkouts WHERE donor_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_deletions WHERE donor_id=$1", id)
 	})
 
 	// An email change, an app session naming its device, an employer, and the
