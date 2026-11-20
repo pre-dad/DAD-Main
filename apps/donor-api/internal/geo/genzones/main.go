@@ -111,7 +111,7 @@ var overrides = map[string]string{
 	"49858": central, "49866": central, "49870": central, "49874": central,
 	// West North Dakota (mountain), prefix 586/587/588 defaults central.
 	"58601": mountain, "58602": mountain, "58631": mountain, "58634": mountain,
-	"58640": mountain, "58701": central, "58801": mountain, "58854": mountain,
+	"58640": mountain, "58801": mountain, "58854": mountain,
 	// West Kansas (mountain), prefix 677/679 defaults central.
 	"67701": mountain, "67731": mountain, "67801": mountain, "67846": mountain,
 	"67880": mountain, "67901": mountain, "67951": mountain,
