@@ -29,7 +29,7 @@ const timezones = [
 
 type Profile = Schema<"Profile">;
 type PreferenceKey = {
-  [K in keyof Profile]: Profile[K] extends boolean ? K : never;
+  [K in keyof Profile]-?: Profile[K] extends boolean ? K : never;
 }[keyof Profile];
 
 const emailPreferences: readonly (readonly [PreferenceKey, string])[] = [
