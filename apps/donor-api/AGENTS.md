@@ -60,8 +60,9 @@ true; add a rule when a mistake would otherwise be repeated.
   the payload" for charge facts that live on the expanded charge.
 - **Preserve the fetch-outside-lock discipline.** The Stripe worker fetches
   provider state *before* taking the donor lock; a stale snapshot rolls back
-  the transaction before a bounded re-fetch outside the lock. Do not move a provider round trip inside the lock — a test
-  (`TestEventWorkerReadsProcessorOutsideDonorLock`) enforces this.
+  the transaction before a bounded re-fetch outside the lock. Do not move a provider
+  round trip inside the lock — a test (`TestEventWorkerReadsProcessorOutsideDonorLock`)
+  enforces this.
 - **Every Stripe call spends from the account's request budget**
   (`internal/payments/ratebudget.go`, buckets worker/checkout/staff/reconcile).
   Route new calls and every list page through the appropriate bucket. The API

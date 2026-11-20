@@ -1,6 +1,11 @@
 // Package identity preserves the existing donor email identity contract. The
 // IDNA2003 codec intentionally differs from modern UTS46/IDNA2008: changing that
 // policy during a language rewrite could split one donor into two identities.
+//
+// The retired Python backend is the source of truth for testdata/identity.json.
+// Its "cases" were produced by that backend's normalize_email. Its scalar_digest is
+// the SHA-256 of normalize_email("x@<scalar>.org") for every Unicode scalar value in
+// order, each result followed by a newline and rejected inputs recorded as "!".
 package identity
 
 import (
