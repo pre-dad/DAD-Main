@@ -87,7 +87,7 @@ func (s RecurringService) BeginPaymentUpdate(ctx context.Context, token string, 
 	if !ValidRequestID(requestID) {
 		return PaymentUpdate{}, payments.ErrFacts
 	}
-	site, err := site(s.Origin)
+	origin, err := site(s.Origin)
 	if err != nil {
 		return PaymentUpdate{}, err
 	}
@@ -100,7 +100,7 @@ func (s RecurringService) BeginPaymentUpdate(ctx context.Context, token string, 
 			owner := donorOwner(token)
 			var updateID pgtype.UUID
 			finished, err := donorWrite(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (*PaymentUpdate, error) {
-				id, finished, err := s.stagePaymentUpdate(ctx, queries.New(tx), d, requestID, prefetch, site, now)
+				id, finished, err := s.stagePaymentUpdate(ctx, queries.New(tx), d, requestID, prefetch, origin, now)
 				updateID = id
 				return finished, err
 			})
