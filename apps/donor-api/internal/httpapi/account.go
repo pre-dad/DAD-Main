@@ -18,8 +18,6 @@ type AccountSource interface {
 	QueueLogin(ctx context.Context, email, next string) error
 }
 
-const maxEmailRunes = 320
-
 // nativeSession hands the donor app its tokens. Browsers never receive one:
 // their session is only an HttpOnly cookie.
 type nativeSession struct {
@@ -57,7 +55,7 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	next, ok := optional(body.Next, "")
-	if !ok || (next != "" && !store.ValidReturnPath(next)) || body.Email == nil || utf8.RuneCountInString(*body.Email) > maxEmailRunes {
+	if !ok || (next != "" && !store.ValidReturnPath(next)) || body.Email == nil || utf8.RuneCountInString(*body.Email) > identity.MaxEmailRunes {
 		invalidFields(w, r)
 		return
 	}

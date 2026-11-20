@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/sharing"
 	"dad/donor-api/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -131,7 +132,7 @@ func (a *api) partnerSignIn(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if body.Email == nil || utf8.RuneCountInString(*body.Email) > maxEmailRunes {
+	if body.Email == nil || utf8.RuneCountInString(*body.Email) > identity.MaxEmailRunes {
 		invalidFields(w, r)
 		return
 	}

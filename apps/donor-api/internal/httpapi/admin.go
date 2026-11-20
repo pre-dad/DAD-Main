@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/store"
 )
 
@@ -16,7 +17,7 @@ import (
 const maxCursorLength = 600
 
 // maxSearchRunes lets staff search by a full email address.
-const maxSearchRunes = maxEmailRunes
+const maxSearchRunes = identity.MaxEmailRunes
 
 type AdminSource interface {
 	ResetStreak(context.Context, string, pgtype.UUID, string) error

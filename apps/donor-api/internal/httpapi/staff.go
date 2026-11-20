@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/store"
 )
 
@@ -175,7 +176,7 @@ type invitationBody struct {
 
 func (b invitationBody) valid() bool {
 	n := utf8.RuneCountInString(b.Name)
-	return utf8.RuneCountInString(b.Email) <= maxEmailRunes && n > 0 && n <= 100 && validRole(b.Role)
+	return utf8.RuneCountInString(b.Email) <= identity.MaxEmailRunes && n > 0 && n <= 100 && validRole(b.Role)
 }
 
 func (a *api) inviteStaff(w http.ResponseWriter, r *http.Request, session string) {
