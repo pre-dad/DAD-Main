@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -190,6 +191,102 @@ func TestInvalidSubscriptionRollsBackBindingAndProjection(t *testing.T) {
 				schedules != 0 {
 				t.Fatal("invalid schedule saved", err)
 			}
+		})
+	}
+}
+
+func TestMonthlyPeriodBounds(t *testing.T) {
+	start := time.Unix(1_700_000_000, 0)
+	for name, tc := range map[string]struct {
+		days int
+		ok   bool
+	}{"26 days": {26, false}, "27 days": {27, true}, "32 days": {32, true}, "33 days": {33, false}} {
+		t.Run(name, func(t *testing.T) {
+			o := paymentObject(t, map[string]any{"s": start.Unix(), "e": start.Add(time.Duration(tc.days) * 24 * time.Hour).Unix()})
+			_, _, err := monthlyPeriod(o, "s", "e")
+			if (err == nil) != tc.ok || (err != nil && !errors.Is(err, payments.ErrFacts)) {
+				t.Fatalf("%d-day period: err=%v, want accepted=%v", tc.days, err, tc.ok)
+			}
+		})
+	}
+	if _, _, err := monthlyPeriod(paymentObject(t, map[string]any{"s": start.Unix()}), "s", "e"); err == nil {
+		t.Fatal("a period without an end was accepted")
+	}
+}
+
+func TestMonthlyItemRejectsOtherBillingShapes(t *testing.T) {
+	checkout := testID(t)
+	draft := queries.DonorCheckout{ID: checkout, Frequency: "MONTHLY"}
+	attempt := queries.DonorStripeCheckout{StripeSubscriptionID: pgtype.Text{String: "sub_" + checkout.String(), Valid: true}}
+	build := func(edit func(map[string]any)) payments.Object {
+		remote := subscription(checkout.String(), time.Now())
+		if edit != nil {
+			edit(remote)
+		}
+		return paymentObject(t, remote)
+	}
+	price := func(r map[string]any) map[string]any { return subscriptionItem(r)["price"].(map[string]any) }
+	if _, _, err := monthlyItem(draft, attempt, build(nil)); err != nil {
+		t.Fatal("a monthly USD subscription was refused:", err)
+	}
+	for name, edit := range map[string]func(map[string]any){
+		"interval count": func(r map[string]any) { price(r)["recurring"].(map[string]any)["interval_count"] = 2 },
+		"yearly":         func(r map[string]any) { price(r)["recurring"].(map[string]any)["interval"] = "year" },
+		"currency":       func(r map[string]any) { price(r)["currency"] = "eur" },
+		"quantity":       func(r map[string]any) { subscriptionItem(r)["quantity"] = 2 },
+		"second item": func(r map[string]any) {
+			items := r["items"].(map[string]any)
+			items["data"] = append(items["data"].([]any), subscriptionItem(r))
+		},
+		"wrong subscription": func(r map[string]any) { r["id"] = "sub_other" },
+		"other checkout":     func(r map[string]any) { r["metadata"] = map[string]any{"dad_checkout_id": "another"} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := monthlyItem(draft, attempt, build(edit)); !errors.Is(err, payments.ErrFacts) {
+				t.Fatalf("err=%v, want ErrFacts", err)
+			}
+		})
+	}
+	if _, _, err := monthlyItem(queries.DonorCheckout{ID: checkout, Frequency: "ONE_TIME"}, attempt, build(nil)); !errors.Is(
+		err,
+		payments.ErrFacts,
+	) {
+		t.Fatalf("a non-monthly checkout was accepted: %v", err)
+	}
+}
+
+func TestReconcileAmountRefusesFactsThatContradictTheRecordedChange(t *testing.T) {
+	for name, tc := range map[string]struct {
+		itemID, productID string
+		confirmed         bool
+		unitAmount        int
+	}{
+		"other item":                {"si_other", "prod_fixture", false, 9000},
+		"other product":             {"si_fixture", "prod_other", false, 9000},
+		"price reverted after sync": {"si_fixture", "prod_fixture", true, 3000},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newWorkerFixture(t, "MONTHLY")
+			result := f.checkout(t)
+			start := time.Now().UTC().Truncate(time.Second).Add(-24 * time.Hour)
+			confirmedAt := any(nil)
+			if tc.confirmed {
+				confirmedAt = start
+			}
+			if _, err := f.db.Exec(
+				context.Background(),
+				`INSERT INTO donor_amount_changes(id,donor_id,checkout_id,previous_minor,amount_minor,effective_at,item_id,product_id,confirmed_at)
+VALUES($1,$2,$3,3000,9000,$4,$5,$6,$7)`,
+				testID(t), f.donorID, result.CheckoutID, start.Add(30*24*time.Hour), tc.itemID, tc.productID, confirmedAt,
+			); err != nil {
+				t.Fatal(err)
+			}
+			remote := subscription(result.CheckoutID, start)
+			subscriptionItem(remote)["price"].(map[string]any)["unit_amount"] = tc.unitAmount
+			f.gateway.subscriptions["sub_"+result.CheckoutID] = paymentObject(t, remote)
+			event := f.receive(t, "customer.subscription.updated", remote)
+			f.process(t)
+			assertEventProcessed(t, f, event, false)
 		})
 	}
 }
