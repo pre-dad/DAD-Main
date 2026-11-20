@@ -58,15 +58,16 @@ export function problems({ full, production, exceptions, today }) {
     else if (exception.expires < today) out.push(`${url} (${title}): its exception expired on ${exception.expires}`);
   }
   for (const exception of exceptions) {
-    if (!present.has(exception.advisory))
-      out.push(`${exception.advisory} no longer appears; remove its exception`);
+    if (!present.has(exception.advisory)) out.push(`${exception.advisory} no longer appears; remove its exception`);
   }
   return out;
 }
 
 function audit(...args) {
   try {
-    return JSON.parse(execFileSync("npm", ["audit", "--json", ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }));
+    return JSON.parse(
+      execFileSync("npm", ["audit", "--json", ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }),
+    );
   } catch (error) {
     // npm audit exits non-zero whenever it finds anything, with the report on stdout.
     if (error.stdout) return JSON.parse(error.stdout);
