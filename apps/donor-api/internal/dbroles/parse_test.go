@@ -2,6 +2,7 @@ package dbroles
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -27,4 +28,14 @@ func TestEveryDeclaredRoleIsAProcessRole(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestParsePrivilegesNamesAnUnbalancedList(t *testing.T) {
+	defer func() {
+		got, _ := recover().(string)
+		if !strings.Contains(got, `"(id"`) {
+			t.Fatalf("panic = %q; want it to quote the unclosed list", got)
+		}
+	}()
+	parsePrivileges("SELECT (id")
 }

@@ -58,6 +58,7 @@ func TestConfigureRejectsInvalidEnvironmentBeforeTheDatabase(t *testing.T) {
 		{"local staff on the public host", map[string]string{"DONOR_STAFF_ORIGIN": "http://localhost:3001"}, "must use its own host"},
 		{"content key", map[string]string{"DONOR_CONTENT_ENCRYPTION_KEY": "short"}, "DONOR_CONTENT_ENCRYPTION_KEY key 1 of 1"},
 		{"retired content key", map[string]string{"DONOR_CONTENT_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=,short"}, "DONOR_CONTENT_ENCRYPTION_KEY key 2 of 2"},
+		{"short event check-in secret", map[string]string{"DONOR_EVENT_CHECKIN_SECRET": "too-short"}, "DONOR_EVENT_CHECKIN_SECRET must be at least 32 bytes"},
 		{"short waitlist key", map[string]string{"DONOR_FOUNDING_CLAIM_KEY": "c2hvcnQ="}, "DONOR_FOUNDING_CLAIM_KEY"},
 		{"partial SMTP", map[string]string{"DONOR_SMTP_HOST": "smtp.example.org"}, "invalid email configuration"},
 		{"partial APNs", map[string]string{"DONOR_PUSH_APNS_TEAM_ID": "TEAM123456"}, "DONOR_PUSH_APNS_KEY_FILE"},

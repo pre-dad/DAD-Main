@@ -57,7 +57,10 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 	if getenv("DONOR_GO_WORKERS_ENABLED") != "true" {
 		return configError("workers require DONOR_GO_WORKERS_ENABLED=true")
 	}
-	dsn := role.URL(getenv)
+	dsn, err := role.URL(getenv)
+	if err != nil {
+		return configError(err.Error())
+	}
 	if dsn == "" {
 		return configError(role.Variable() + " is required")
 	}

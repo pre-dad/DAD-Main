@@ -32,7 +32,10 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 	if err := payments.ValidateOrigin(origin); err != nil {
 		return fmt.Errorf("DONOR_STAFF_ORIGIN %w", err)
 	}
-	dsn := dbroles.StaffCLI.URL(getenv)
+	dsn, err := dbroles.StaffCLI.URL(getenv)
+	if err != nil {
+		return err
+	}
 	if dsn == "" {
 		return errors.New(dbroles.StaffCLI.Variable() + " is required")
 	}

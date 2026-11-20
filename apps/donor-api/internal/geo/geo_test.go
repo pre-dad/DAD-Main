@@ -98,6 +98,50 @@ func TestEveryZoneLoads(t *testing.T) {
 	}
 }
 
+func TestTimezoneStraddledRegions(t *testing.T) {
+	const (
+		eastern  = "America/New_York"
+		central  = "America/Chicago"
+		mountain = "America/Denver"
+		pacific  = "America/Los_Angeles"
+	)
+	cases := map[string]string{
+		"37402": eastern,  // Chattanooga TN
+		"37660": eastern,  // Kingsport TN
+		"37203": central,  // Nashville TN
+		"38103": central,  // Memphis TN
+		"83501": pacific,  // Lewiston ID
+		"83843": pacific,  // Moscow ID
+		"83702": mountain, // Boise ID
+		"42001": central,  // Paducah KY
+		"42101": central,  // Bowling Green KY
+		"42301": central,  // Owensboro KY
+		"42420": central,  // Henderson KY
+		"40202": eastern,  // Louisville KY
+		"42701": eastern,  // Elizabethtown KY
+		"57701": mountain, // Rapid City SD
+		"57104": central,  // Sioux Falls SD
+		"32456": eastern,  // Port St. Joe FL
+		"32401": central,  // Panama City FL
+		"32580": central,  // Pensacola area FL
+		"32301": eastern,  // Tallahassee FL
+		"88501": mountain, // El Paso TX
+		"89883": mountain, // West Wendover NV
+		"89101": pacific,  // Las Vegas NV
+		"96910": "Pacific/Guam",
+	}
+	for zip, want := range cases {
+		got, err := Timezone(zip)
+		if err != nil {
+			t.Errorf("Timezone(%q) error = %v", zip, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("Timezone(%q) = %q; want %q", zip, got, want)
+		}
+	}
+}
+
 func TestEveryResolvableZoneIsAValidOverride(t *testing.T) {
 	seen := map[string]bool{}
 	for _, name := range zones.Prefix {

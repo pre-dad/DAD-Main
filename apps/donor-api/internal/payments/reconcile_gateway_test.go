@@ -22,7 +22,10 @@ func gatewayAt(server *httptest.Server) *StripeGateway {
 			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
 		},
 	)
-	return &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}
+	return &StripeGateway{
+		client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends)),
+		budget: DefaultRateBudget(),
+	}
 }
 
 func stripeTestGateway(t *testing.T, handler http.HandlerFunc) (*StripeGateway, func()) {

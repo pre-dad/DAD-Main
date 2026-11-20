@@ -91,7 +91,7 @@ type api struct {
 	staffCookie string
 }
 
-// WriteTimeout exceeds providerTimeout so a slow processor call can still answer.
+// writeTimeout exceeds providerTimeout so a slow processor call can still answer.
 const writeTimeout = 30 * time.Second
 
 func NewServer(address string, services Services) *http.Server {
@@ -105,7 +105,7 @@ func NewServer(address string, services Services) *http.Server {
 		staffCookie: staffCookie,
 	}
 	if a.staffSecure {
-		a.staffCookie = "__Host-" + staffCookie
+		a.staffCookie = hostPrefix + staffCookie
 	}
 	mux := http.NewServeMux()
 	for _, route := range a.routes() {

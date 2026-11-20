@@ -20,6 +20,8 @@ import (
 )
 
 var ErrAdoptionRequired = errors.New("existing donor database requires explicit baseline adoption")
+var ErrHistoryMismatch = errors.New("migration history mismatch")
+var ErrPending = errors.New("database migrations are pending")
 var ErrSchemaMismatch = errors.New("existing donor schema does not match the R1 baseline")
 
 type migration struct{ name, sql, checksum string }
@@ -172,7 +174,7 @@ func Verify(ctx context.Context, pool *pgxpool.Pool) error {
 			return err
 		}
 		if index >= len(files) || files[index].name != name || files[index].checksum != checksum {
-			return errors.New("migration history mismatch")
+			return ErrHistoryMismatch
 		}
 		index++
 	}
@@ -180,7 +182,7 @@ func Verify(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	if index != len(files) {
-		return errors.New("database migrations are pending")
+		return fmt.Errorf("%w: first missing is %s", ErrPending, files[index].name)
 	}
 	return nil
 }

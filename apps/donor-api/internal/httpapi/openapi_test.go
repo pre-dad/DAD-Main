@@ -199,7 +199,9 @@ func TestContractDocumentsWrapperStatuses(t *testing.T) {
 	}
 }
 
-var idWildcard = regexp.MustCompile(`\{[a-z_]+_id\}`)
+// pathIDWildcard matches both wildcard spellings of a record ID, snake_case
+// ({gift_id}) and camelCase ({partnerID}).
+var pathIDWildcard = regexp.MustCompile(`\{[A-Za-z_]+(_id|ID)\}`)
 
 // A path ID that is not a UUID answers 404 from the handler, after the wrapper
 // has admitted the caller. Wrappers cannot be probed without a session store,
@@ -211,11 +213,11 @@ func TestContractDocumentsMalformedPathIDs(t *testing.T) {
 	var reached int
 	for _, route := range allRoutes() {
 		op, ok := ops[route.pattern]
-		if !ok || route.auth == stripeAuth || !strings.Contains(route.pattern, "_id}") {
+		if !ok || route.auth == stripeAuth || !pathIDWildcard.MatchString(route.pattern) {
 			continue
 		}
 		method, path, _ := strings.Cut(route.pattern, " ")
-		path = idWildcard.ReplaceAllString(path, "not-a-uuid")
+		path = pathIDWildcard.ReplaceAllString(path, "not-a-uuid")
 		path = wildcard.ReplaceAllString(path, testID)
 		r := httptest.NewRequest(method, path, strings.NewReader("{}"))
 		r.Header.Set("Origin", originFor(route.pattern))

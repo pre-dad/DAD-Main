@@ -19,6 +19,8 @@ var ErrZip = errors.New("enter a valid US ZIP code")
 // lookup. It mirrors the ck_donor_zip database constraint.
 var zipPattern = regexp.MustCompile(`^[0-9]{5}(-[0-9]{4})?$`)
 
+//go:generate go run ./genzones
+
 //go:embed zones.json
 var encodedZones []byte
 

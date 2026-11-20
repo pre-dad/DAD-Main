@@ -93,15 +93,15 @@ func (r Role) Variable() string {
 // URL returns the database URL the process connects with: its own, or the
 // owner's where the environment allows that. It is empty when neither is set.
 // Each may be given whole or as separate parts with the password on its own
-// (see ConnectionURL).
-func (r Role) URL(getenv func(string) string) string {
-	if url := ConnectionURL(r.Variable(), getenv); url != "" {
-		return url
+// (see ConnectionURL, whose errors it returns).
+func (r Role) URL(getenv func(string) string) (string, error) {
+	if url, err := ConnectionURL(r.Variable(), getenv); url != "" || err != nil {
+		return url, err
 	}
 	if getenv(AllowOwnerVariable) == "true" {
 		return ConnectionURL(OwnerVariable, getenv)
 	}
-	return ""
+	return "", nil
 }
 
 // ErrCheckFailed reports that the connection's privileges could not be read.
