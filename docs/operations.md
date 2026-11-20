@@ -1444,3 +1444,18 @@ cancellation. An export exceeding 1,000 spend categories or a 2 MiB PDF returns
 413 `PARTNER_REPORT_TOO_LARGE` without storing a partial artifact. Previously
 exported reports remain immutable and downloadable. Renderer changes use a new
 snapshot version, so older lossy PDFs are not reused for new exports.
+
+## R1 native contract rollout
+
+Foundation 2.13.0 adds verification fields to employee responses and an optional
+profile time-zone correction. The current iOS and Android sources adopt that exact
+released snapshot. Older Swift clients generated from 2.12.0 reject unknown object
+properties (`additionalProperties: false`), so schema-additive response fields are
+not runtime-compatible with those installed builds. A profile read is also affected
+once a manual correction adds `timezone_override` to its response.
+
+Do not roll this API revision out to a mixed fleet of older iOS builds. Before R1,
+coordinate the native update with the backend and confirm every supported installed
+build against the deployed contract. If old installed builds must remain supported,
+first design and test explicit response-version negotiation or a versioned API;
+a foundation snapshot tag alone does not negotiate the server's response format.
