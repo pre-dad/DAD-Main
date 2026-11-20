@@ -77,6 +77,17 @@ func TestEnvironmentConfiguration(t *testing.T) {
 	if s != nil || err != nil {
 		t.Fatal("unconfigured mail should be disabled")
 	}
+	for _, only := range []string{"DONOR_SMTP_CA", "DONOR_SMTP_PORT"} {
+		s, err = FromEnvironment(func(key string) string {
+			if key == only {
+				return "2525"
+			}
+			return ""
+		})
+		if s != nil || !errors.Is(err, ErrConfiguration) {
+			t.Fatalf("%s alone: got %v, %v; want a configuration error", only, s, err)
+		}
+	}
 }
 
 func TestRootCAsFromCAPath(t *testing.T) {

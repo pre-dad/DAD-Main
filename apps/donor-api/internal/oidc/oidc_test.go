@@ -85,17 +85,14 @@ func TestStubVerifierRejections(t *testing.T) {
 	v := NewVerifier(stubSettings())
 	ctx := context.Background()
 
-	// Wrong signing key.
 	bad := SignStubToken("wrong", Apple, "s", "com.dad.app", "", time.Now().Add(time.Hour))
 	if _, err := v.Verify(ctx, Apple, bad); !errors.Is(err, ErrToken) {
 		t.Errorf("bad signature error = %v; want ErrToken", err)
 	}
-	// Wrong audience (client id).
 	wrongAud := SignStubToken("secret", Apple, "s", "someone.else", "", time.Now().Add(time.Hour))
 	if _, err := v.Verify(ctx, Apple, wrongAud); !errors.Is(err, ErrToken) {
 		t.Errorf("wrong aud error = %v; want ErrToken", err)
 	}
-	// Expired.
 	expired := SignStubToken("secret", Apple, "s", "com.dad.app", "", time.Now().Add(-time.Hour))
 	if _, err := v.Verify(ctx, Apple, expired); !errors.Is(err, ErrToken) {
 		t.Errorf("expired error = %v; want ErrToken", err)
@@ -105,7 +102,6 @@ func TestStubVerifierRejections(t *testing.T) {
 	if _, err := v.Verify(ctx, Google, appleTok); !errors.Is(err, ErrToken) {
 		t.Errorf("provider mismatch error = %v; want ErrToken", err)
 	}
-	// Malformed.
 	if _, err := v.Verify(ctx, Apple, "not.a.token.at.all"); !errors.Is(err, ErrToken) {
 		t.Errorf("malformed error = %v; want ErrToken", err)
 	}

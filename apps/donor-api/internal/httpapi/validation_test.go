@@ -7,6 +7,14 @@ import (
 	"testing"
 )
 
+// preferencesWith returns a full preferences body whose volunteer_interests is
+// the given JSON array.
+func preferencesWith(interests string) string {
+	return `{"version":0,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,` +
+		`"push_streak_at_risk":true,"push_streak_milestone":false,"push_streak_lapsed":true,"push_badge_earned":false,` +
+		`"rankings_opted_out":true,"network_visible":false,"volunteer":true,"volunteer_interests":` + interests + `}`
+}
+
 // With no services configured, a request that passes validation answers 503;
 // any other status shows the handler judged the input without storage.
 func TestHandlersValidateInputBeforeCallingServices(t *testing.T) {
@@ -22,12 +30,12 @@ func TestHandlersValidateInputBeforeCallingServices(t *testing.T) {
 		{"POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":null,"push_streak_milestone":false}`, false, 422},
 		{"POST", "/donor/me/preferences", `{"version":-1,"referral_emails":true,"marketing_emails":false}`, false, 422},
 		{"POST", "/donor/me/preferences", `{"version":0,"referral_emails":true}`, false, 422},
-		{"POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":false,"push_streak_lapsed":true,"push_badge_earned":false,"rankings_opted_out":true,"network_visible":false,"volunteer":true,"volunteer_interests":["food-bank","mentoring"]}`, false, 503},
-		{"POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":false,"push_streak_lapsed":true,"push_badge_earned":false,"rankings_opted_out":true,"network_visible":false,"volunteer":true,"volunteer_interests":[""]}`, false, 422},
-		{"POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":false,"push_streak_lapsed":true,"push_badge_earned":false,"rankings_opted_out":true,"network_visible":false,"volunteer":true,"volunteer_interests":[" padded"]}`, false, 422},
-		{"POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":false,"push_streak_lapsed":true,"push_badge_earned":false,"rankings_opted_out":true,"network_visible":false,"volunteer":true,"volunteer_interests":["a","a"]}`, false, 422},
-		{"POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":false,"push_streak_lapsed":true,"push_badge_earned":false,"rankings_opted_out":true,"network_visible":false,"volunteer":true,"volunteer_interests":["` + strings.Repeat("i", 61) + `"]}`, false, 422},
-		{"POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":false,"push_streak_lapsed":true,"push_badge_earned":false,"rankings_opted_out":true,"network_visible":false,"volunteer":true,"volunteer_interests":["i0","i1","i2","i3","i4","i5","i6","i7","i8","i9","i10","i11","i12","i13","i14","i15","i16","i17","i18","i19","i20"]}`, false, 422},
+		{"POST", "/donor/me/preferences", preferencesWith(`["food-bank","mentoring"]`), false, 503},
+		{"POST", "/donor/me/preferences", preferencesWith(`[""]`), false, 422},
+		{"POST", "/donor/me/preferences", preferencesWith(`[" padded"]`), false, 422},
+		{"POST", "/donor/me/preferences", preferencesWith(`["a","a"]`), false, 422},
+		{"POST", "/donor/me/preferences", preferencesWith(`["` + strings.Repeat("i", 61) + `"]`), false, 422},
+		{"POST", "/donor/me/preferences", preferencesWith(`["i0","i1","i2","i3","i4","i5","i6","i7","i8","i9","i10","i11","i12","i13","i14","i15","i16","i17","i18","i19","i20"]`), false, 422},
 		{"POST", "/donor/me/sharing", `{"public_name":"Sam"}`, false, 503},
 		{"POST", "/donor/me/sharing", `{"public_name":""}`, false, 422},
 		{"POST", "/donor/me/sharing", `{"public_name":"` + strings.Repeat("n", 81) + `"}`, false, 422},

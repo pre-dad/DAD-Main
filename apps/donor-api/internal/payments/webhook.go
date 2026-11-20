@@ -154,7 +154,8 @@ func uuid(value any) error {
 }
 
 // minimalObject keeps only the allowlisted fields the worker verifies. keep is
-// false for an event about an object DAD did not create.
+// false for an event about an object DAD did not create, except refund.*
+// events, which are always kept.
 func minimalObject(kind string, obj map[string]any) (map[string]any, bool, error) {
 	metadata, err := object(obj["metadata"])
 	if err != nil {
@@ -243,8 +244,8 @@ func page(value any) ([]any, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	complete, ok := obj["has_more"].(bool)
-	complete = ok && !complete
+	hasMore, ok := obj["has_more"].(bool)
+	complete := ok && !hasMore
 	if obj["data"] == nil {
 		return []any{}, complete, nil
 	}

@@ -6,6 +6,7 @@
 package push
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -90,18 +91,16 @@ func (c Config) Providers() map[string]Provider {
 // when one is configured incompletely or its key cannot be used.
 func FromEnvironment(getenv func(string) string) (Config, error) {
 	var config Config
-	apns := []string{
-		getenv("DONOR_PUSH_APNS_KEY_FILE"),
-		getenv("DONOR_PUSH_APNS_KEY_ID"),
-		getenv("DONOR_PUSH_APNS_TEAM_ID"),
-		getenv("DONOR_PUSH_APNS_TOPIC"),
-	}
-	if apns[0] != "" || apns[1] != "" || apns[2] != "" || apns[3] != "" {
-		key, err := readFile(apns[0])
+	keyFile, keyID, teamID, topic :=
+		getenv(
+			"DONOR_PUSH_APNS_KEY_FILE",
+		), getenv("DONOR_PUSH_APNS_KEY_ID"), getenv("DONOR_PUSH_APNS_TEAM_ID"), getenv("DONOR_PUSH_APNS_TOPIC")
+	if cmp.Or(keyFile, keyID, teamID, topic) != "" {
+		key, err := readFile(keyFile)
 		if err != nil {
 			return config, fmt.Errorf("%w: DONOR_PUSH_APNS_KEY_FILE is unreadable", ErrConfiguration)
 		}
-		if config.APNs, err = NewAPNs(key, apns[1], apns[2], apns[3]); err != nil {
+		if config.APNs, err = NewAPNs(key, keyID, teamID, topic); err != nil {
 			return config, err
 		}
 	}

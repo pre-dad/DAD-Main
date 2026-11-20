@@ -53,7 +53,7 @@ func TestLegacyEmailCompatibility(t *testing.T) {
 }
 
 func TestNormalizeEmailBoundsLength(t *testing.T) {
-	long := "x@" + strings.Repeat("\u0315", maxEmailRunes) + ".org"
+	long := "x@" + strings.Repeat("\u0315", MaxEmailRunes) + ".org"
 	if _, err := NormalizeEmail(long); err == nil {
 		t.Fatal("an address over the length bound was normalized")
 	}

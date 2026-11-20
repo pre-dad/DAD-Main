@@ -3,6 +3,7 @@ package partnerreport
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 
@@ -23,6 +24,7 @@ type glyphKey struct {
 	glyph uint16
 	text  string
 }
+
 type codedFont struct {
 	backend.Font
 	name     string
@@ -47,6 +49,7 @@ type semanticOutput struct {
 	sources map[text.FontOrigin]*sfnt.SFNT
 	err     error
 }
+
 type semanticPage struct {
 	backend.Page
 	output *semanticOutput
@@ -55,6 +58,7 @@ type semanticPage struct {
 func (out *semanticOutput) AddPage(left, top, right, bottom backend.Fl) backend.Page {
 	return &semanticPage{Page: out.Output.AddPage(left, top, right, bottom), output: out}
 }
+
 func (page *semanticPage) AddFont(original backend.Font, content []byte) *backend.FontChars {
 	out := page.output
 	if out.fonts == nil {
@@ -85,6 +89,7 @@ func (page *semanticPage) AddFont(original backend.Font, content []byte) *backen
 	out.fonts[key], out.names[f.name] = f, f
 	return f.raw
 }
+
 func (page *semanticPage) DrawText(drawings []backend.TextDrawing) {
 	out := page.output
 	if out.err != nil {
@@ -111,7 +116,7 @@ func (page *semanticPage) DrawText(drawings []backend.TextDrawing) {
 		for j, run := range drawing.Runs {
 			f := out.fonts[fontKey{run.Font.Origin(), run.Font.Description()}]
 			if f == nil {
-				out.err = fmt.Errorf("unregistered font")
+				out.err = errors.New("unregistered font")
 				return
 			}
 			copied[i].Runs[j].Font = f
@@ -158,6 +163,7 @@ func (page *semanticPage) DrawText(drawings []backend.TextDrawing) {
 	}
 	page.Page.DrawText(copied)
 }
+
 func (out *semanticOutput) enhance(ctx context.Context, doc *model.Document) error {
 	if out.err != nil {
 		return out.err
@@ -174,11 +180,11 @@ func (out *semanticOutput) enhance(ctx context.Context, doc *model.Document) err
 			seen[font] = true
 			kind, ok := font.Subtype.(model.FontType0)
 			if !ok {
-				return fmt.Errorf("unexpected font subtype")
+				return errors.New("unexpected font subtype")
 			}
 			source := out.names[kind.DescendantFonts.FontDescriptor.FontFamily]
 			if source == nil {
-				return fmt.Errorf("unrecognized font")
+				return errors.New("unrecognized font")
 			}
 			glyphs := []uint16{0}
 			subsetIDs := map[uint16]uint16{0: 0}
@@ -195,8 +201,13 @@ func (out *semanticOutput) enhance(ctx context.Context, doc *model.Document) err
 			}
 			data := subset.Write()
 			file := kind.DescendantFonts.FontDescriptor.FontFile
+			if file == nil {
+				return errors.New("font file not embedded")
+			}
 			file.Stream = model.NewCompressedStream(data)
 			file.Length1 = len(data)
+			// Each CID indexes the glyph list built above, so the CID-to-GID map
+			// points every CID at its glyph's position in the subset font.
 			var mapping []byte
 			for _, glyph := range source.glyphs {
 				mapping = binary.BigEndian.AppendUint16(mapping, subsetIDs[glyph])

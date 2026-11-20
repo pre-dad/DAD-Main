@@ -61,12 +61,14 @@ func ascii(value string) bool {
 	return true
 }
 
-// maxEmailRunes bounds an address before normalization, whose canonical
+// MaxEmailRunes bounds an address before normalization, whose canonical
 // reordering is quadratic in the length of a label.
-const maxEmailRunes = 320
+const MaxEmailRunes = 320
+
+var domainDots = strings.NewReplacer("。", ".", "．", ".", "｡", ".")
 
 func NormalizeEmail(value string) (string, error) {
-	if !utf8.ValidString(value) || utf8.RuneCountInString(value) > maxEmailRunes {
+	if !utf8.ValidString(value) || utf8.RuneCountInString(value) > MaxEmailRunes {
 		return "", ErrEmail
 	}
 	value = TrimSpace(value)
@@ -77,7 +79,7 @@ func NormalizeEmail(value string) (string, error) {
 	if !localPattern.MatchString(local) || strings.HasPrefix(local, ".") || strings.HasSuffix(local, ".") || strings.Contains(local, "..") {
 		return "", ErrEmail
 	}
-	domain = strings.NewReplacer("。", ".", "．", ".", "｡", ".").Replace(domain)
+	domain = domainDots.Replace(domain)
 	labels := strings.Split(domain, ".")
 	for i, label := range labels {
 		encoded, err := labelASCII(label)

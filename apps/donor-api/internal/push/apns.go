@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -136,7 +137,12 @@ func (a *APNs) Send(ctx context.Context, device Device, n Notification) error {
 	request.Header.Set("apns-collapse-id", n.ID)
 	response, err := a.Client.Do(request)
 	if err != nil {
-		return err
+		// A *url.Error prints the request URL, which carries the device token.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return fmt.Errorf("apns transport: %w", err)
 	}
 	defer response.Body.Close()
 	var reply struct {

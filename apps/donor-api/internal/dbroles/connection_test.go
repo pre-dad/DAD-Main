@@ -15,9 +15,10 @@ func env(m map[string]string) func(string) string { return func(k string) string
 func TestConnectionURLPrecedenceAndParts(t *testing.T) {
 	const secret = "s3cr3t/p@ss:word#1"
 	for name, tc := range map[string]struct {
-		env  map[string]string
-		want func(*testing.T, *pgx.ConnConfig)
-		none bool
+		variable string
+		env      map[string]string
+		want     func(*testing.T, *pgx.ConnConfig)
+		none     bool
 	}{
 		"full URL alone is unchanged": {
 			env: map[string]string{"DONOR_API_DATABASE_URL": "postgresql://dad_api_login:inline-password-1@db:5432/dad?sslmode=require"},
@@ -39,6 +40,7 @@ func TestConnectionURLPrecedenceAndParts(t *testing.T) {
 			},
 		},
 		"parts build a URL": {
+			variable: "DONOR_WORKER_STRIPE_DATABASE_URL",
 			env: map[string]string{
 				"DONOR_WORKER_STRIPE_DATABASE_HOST":     "db.internal",
 				"DONOR_WORKER_STRIPE_DATABASE_PORT":     "6432",
@@ -72,18 +74,27 @@ func TestConnectionURLPrecedenceAndParts(t *testing.T) {
 				}
 			},
 		},
+		"host alone builds a URL with the default port": {
+			env: map[string]string{"DONOR_API_DATABASE_HOST": "h"},
+			want: func(t *testing.T, c *pgx.ConnConfig) {
+				if c.Host != "h" || c.Port != 5432 || c.Password != "" {
+					t.Fatalf("got %s:%d", c.Host, c.Port)
+				}
+			},
+		},
 		"nothing configured": {env: map[string]string{"DONOR_API_DATABASE_PASSWORD": "alone"}, none: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got := ConnectionURL("DONOR_API_DATABASE_URL", env(tc.env))
+			variable := tc.variable
+			if variable == "" {
+				variable = "DONOR_API_DATABASE_URL"
+			}
+			got := ConnectionURL(variable, env(tc.env))
 			if tc.none {
 				if got != "" {
 					t.Fatalf("got %q", got)
 				}
 				return
-			}
-			if name == "parts build a URL" {
-				got = ConnectionURL("DONOR_WORKER_STRIPE_DATABASE_URL", env(tc.env))
 			}
 			c, err := pgx.ParseConfig(got)
 			if err != nil {

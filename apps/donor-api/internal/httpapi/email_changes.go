@@ -26,7 +26,7 @@ func (a *api) requestEmailChange(w http.ResponseWriter, r *http.Request, session
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if utf8.RuneCountInString(body.Email) > maxEmailRunes {
+	if utf8.RuneCountInString(body.Email) > identity.MaxEmailRunes {
 		writeError(w, r, http.StatusUnprocessableEntity, "Enter a valid email address", nil)
 		return
 	}

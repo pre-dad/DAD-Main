@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"unicode/utf8"
 
 	"dad/donor-api/internal/oidc"
 	"dad/donor-api/internal/store"
@@ -135,7 +136,7 @@ func signInClient(r *http.Request, device, platform *string) (store.Client, bool
 	if platform != nil {
 		client.Platform = *platform
 	}
-	ok := len([]rune(client.Device)) <= store.MaxDeviceName &&
+	ok := utf8.RuneCountInString(client.Device) <= store.MaxDeviceName &&
 		(client.Platform == "" || client.Platform == "IOS" || client.Platform == "ANDROID")
 	return client, ok
 }

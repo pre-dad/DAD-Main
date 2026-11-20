@@ -173,7 +173,7 @@ func (a *api) ready(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusServiceUnavailable, unavailable, nil)
 		return
 	}
-	ctx, cancel := withTimeout(r, 3*time.Second)
+	ctx, cancel := withTimeout(r, probeTimeout)
 	defer cancel()
 	if err := a.Ready(ctx); err != nil {
 		writeError(w, r, http.StatusServiceUnavailable, unavailable, err)

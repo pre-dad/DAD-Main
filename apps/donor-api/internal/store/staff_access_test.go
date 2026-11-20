@@ -146,7 +146,7 @@ func TestRecoveryReplacesPasskeysAndRevokesSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	change, err := s.ChangeAccess(ctx, admin, target, "recovery", "")
+	change, err := s.ChangeAccess(ctx, admin, target, AccessRecovery, "")
 	if err != nil || change.Token == "" {
 		t.Fatal("recovery invitation not issued", err)
 	}
@@ -316,17 +316,17 @@ func TestChangeAccessDisablesAndChangesRolesWithSessionsRevokedAndAudited(t *tes
 		return n
 	}
 
-	if _, err = s.ChangeAccess(ctx, admin, target, "role", "bogus"); !errors.Is(err, ErrStaffInput) {
+	if _, err = s.ChangeAccess(ctx, admin, target, AccessRole, "bogus"); !errors.Is(err, ErrStaffInput) {
 		t.Fatal("unknown role accepted", err)
 	}
-	if _, err = s.ChangeAccess(ctx, admin, target, "promote", ""); !errors.Is(err, ErrStaffInput) {
+	if _, err = s.ChangeAccess(ctx, admin, target, StaffAccessAction("promote"), ""); !errors.Is(err, ErrStaffInput) {
 		t.Fatal("unknown action accepted", err)
 	}
-	if _, err = s.ChangeAccess(ctx, admin, testID(t), "disable", ""); !errors.Is(err, pgx.ErrNoRows) {
+	if _, err = s.ChangeAccess(ctx, admin, testID(t), AccessDisable, ""); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatal("unknown account accepted", err)
 	}
 
-	change, err := s.ChangeAccess(ctx, admin, target, "role", "OP_PARTNERSHIPS")
+	change, err := s.ChangeAccess(ctx, admin, target, AccessRole, "OP_PARTNERSHIPS")
 	if err != nil || change.Staff == nil || change.Staff.Role != "OP_PARTNERSHIPS" {
 		t.Fatal("role not changed", change, err)
 	}
@@ -336,7 +336,7 @@ func TestChangeAccessDisablesAndChangesRolesWithSessionsRevokedAndAudited(t *tes
 	if audited("staff.role_changed") != 1 {
 		t.Fatal("role change not audited")
 	}
-	if _, err = s.ChangeAccess(ctx, admin, target, "role", "OP_PARTNERSHIPS"); err != nil || audited("staff.role_changed") != 1 {
+	if _, err = s.ChangeAccess(ctx, admin, target, AccessRole, "OP_PARTNERSHIPS"); err != nil || audited("staff.role_changed") != 1 {
 		t.Fatal("repeating a role change must be a silent no-op", err)
 	}
 
@@ -344,7 +344,7 @@ func TestChangeAccessDisablesAndChangesRolesWithSessionsRevokedAndAudited(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	change, err = s.ChangeAccess(ctx, admin, target, "disable", "")
+	change, err = s.ChangeAccess(ctx, admin, target, AccessDisable, "")
 	if err != nil || !change.Disabled {
 		t.Fatal("account not disabled", change, err)
 	}
@@ -376,7 +376,7 @@ func TestChangeAccessRefusesSelfAndKeepsAnActiveAdministrator(t *testing.T) {
 	if err = selfID.Scan(self.ID); err != nil {
 		t.Fatal(err)
 	}
-	for _, action := range []string{"disable", "role", "recovery"} {
+	for _, action := range []StaffAccessAction{AccessDisable, AccessRole, AccessRecovery} {
 		if _, err = s.ChangeAccess(ctx, admin, selfID, action, "OP_PARTNERSHIPS"); !errors.Is(err, ErrStaffConflict) {
 			t.Fatal("administrator changed their own access", action, err)
 		}
@@ -385,10 +385,10 @@ func TestChangeAccessRefusesSelfAndKeepsAnActiveAdministrator(t *testing.T) {
 	// An administrator with no passkey is not an active administrator, so
 	// acting as one must not allow removing the only account that can sign in.
 	_, dormantSession := staffFixture(t, pool, "SUPER_ADMIN")
-	if _, err = s.ChangeAccess(ctx, dormantSession, selfID, "disable", ""); !errors.Is(err, ErrStaffConflict) {
+	if _, err = s.ChangeAccess(ctx, dormantSession, selfID, AccessDisable, ""); !errors.Is(err, ErrStaffConflict) {
 		t.Fatal("last active administrator disabled", err)
 	}
-	if _, err = s.ChangeAccess(ctx, dormantSession, selfID, "role", "OP_PARTNERSHIPS"); !errors.Is(err, ErrStaffConflict) {
+	if _, err = s.ChangeAccess(ctx, dormantSession, selfID, AccessRole, "OP_PARTNERSHIPS"); !errors.Is(err, ErrStaffConflict) {
 		t.Fatal("last active administrator demoted", err)
 	}
 	if _, err = s.Me(ctx, admin); err != nil {

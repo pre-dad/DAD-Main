@@ -6,16 +6,30 @@ type fontSpec struct {
 	file, family string
 	weight       int
 	scripts      []*unicode.RangeTable
+	// always selects the font for every report; match selects it for runes
+	// the scripts do not cover.
+	always bool
+	match  func(rune) bool
+}
+
+// isCJKPunctuation covers the CJK radicals, symbols and punctuation blocks.
+func isCJKPunctuation(r rune) bool { return r >= 0x2e80 && r <= 0x303f }
+
+// isSymbol reports runes outside Latin-1 that the Latin face lacks: symbols,
+// math operators and mathematical alphanumerics.
+func isSymbol(r rune) bool {
+	return r > 0xff && (unicode.Is(unicode.So, r) || unicode.Is(unicode.Sm, r) || (r >= 0x1d400 && r <= 0x1d7ff))
 }
 
 var fontCatalog = []fontSpec{
-	{file: "NotoSans-Regular.ttf", family: "ReportLatin", weight: 400},
-	{file: "NotoSans-Bold.ttf", family: "ReportLatin", weight: 700},
+	{file: "NotoSans-Regular.ttf", family: "ReportLatin", weight: 400, always: true},
+	{file: "NotoSans-Bold.ttf", family: "ReportLatin", weight: 700, always: true},
 	{
 		file:    "NotoSansCJKjp-Regular.ttf",
 		family:  "ReportCJK",
 		weight:  400,
 		scripts: []*unicode.RangeTable{unicode.Han, unicode.Hangul, unicode.Hiragana, unicode.Katakana, unicode.Bopomofo},
+		match:   isCJKPunctuation,
 	},
 	{file: "NotoSansArabic-Regular.ttf", family: "ReportArabic", weight: 400, scripts: []*unicode.RangeTable{unicode.Arabic}},
 	{file: "NotoSansHebrew-Regular.ttf", family: "ReportHebrew", weight: 400, scripts: []*unicode.RangeTable{unicode.Hebrew}},
@@ -35,32 +49,29 @@ var fontCatalog = []fontSpec{
 	{file: "NotoSansEthiopic-Regular.ttf", family: "ReportEthiopic", weight: 400, scripts: []*unicode.RangeTable{unicode.Ethiopic}},
 	{file: "NotoSansGeorgian-Regular.ttf", family: "ReportGeorgian", weight: 400, scripts: []*unicode.RangeTable{unicode.Georgian}},
 	{file: "NotoSansArmenian-Regular.ttf", family: "ReportArmenian", weight: 400, scripts: []*unicode.RangeTable{unicode.Armenian}},
-	{file: "NotoEmoji-Regular.ttf", family: "ReportEmoji", weight: 400},
-	{file: "NotoSansSymbols2-Regular.ttf", family: "ReportSymbols", weight: 400},
-	{file: "NotoSansMath-Regular.ttf", family: "ReportMath", weight: 400},
+	{file: "NotoEmoji-Regular.ttf", family: "ReportEmoji", weight: 400, match: isSymbol},
+	{file: "NotoSansSymbols2-Regular.ttf", family: "ReportSymbols", weight: 400, match: isSymbol},
+	{file: "NotoSansMath-Regular.ttf", family: "ReportMath", weight: 400, match: isSymbol},
 }
 
 func selectFonts(data Data) []fontSpec {
 	needed := make([]bool, len(fontCatalog))
-	needed[0], needed[1] = true, true
+	for i, font := range fontCatalog {
+		needed[i] = font.always
+	}
 	inspect := func(value string) {
 		for _, r := range value {
 			for i, font := range fontCatalog {
 				if needed[i] {
 					continue
 				}
+				needed[i] = font.match != nil && font.match(r)
 				for _, script := range font.scripts {
 					if unicode.Is(script, r) {
 						needed[i] = true
 						break
 					}
 				}
-			}
-			if r >= 0x2e80 && r <= 0x303f {
-				needed[2] = true
-			}
-			if unicode.Is(unicode.So, r) || unicode.Is(unicode.Sm, r) || (r >= 0x1d400 && r <= 0x1d7ff) {
-				needed[len(needed)-3], needed[len(needed)-2], needed[len(needed)-1] = true, true, true
 			}
 		}
 	}

@@ -5,7 +5,12 @@
 // with well-formed payloads — the schema is enforced here, not in the database.
 package analytics
 
-import "errors"
+import (
+	"errors"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
 
 // ErrEvent is returned for an unknown event name or an invalid property payload.
 var ErrEvent = errors.New("invalid analytics event")
@@ -73,15 +78,6 @@ func Known(name string) bool {
 	return ok
 }
 
-// Names returns every taxonomy event name (unordered); for tests and tooling.
-func Names() []string {
-	names := make([]string, 0, len(eventProperties))
-	for name := range eventProperties {
-		names = append(names, name)
-	}
-	return names
-}
-
 // ValidateProperties checks props against name's declared property. An unknown
 // event name is rejected. An event that takes no property rejects any property.
 // An event with an enumerated property requires exactly that key with a value
@@ -112,9 +108,15 @@ func ValidateProperties(name string, props map[string]string) error {
 		}
 		return nil
 	}
-	// Free-form but bounded and non-empty.
-	if value == "" || len(value) > maxPropertyValue {
+	if !validFreeForm(value) {
 		return ErrEvent
 	}
 	return nil
+}
+
+// validFreeForm accepts printable UTF-8 of at most maxPropertyValue bytes with
+// something other than whitespace in it.
+func validFreeForm(value string) bool {
+	return len(value) <= maxPropertyValue && utf8.ValidString(value) && strings.TrimSpace(value) != "" &&
+		!strings.ContainsFunc(value, unicode.IsControl)
 }

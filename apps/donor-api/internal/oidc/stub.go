@@ -15,8 +15,8 @@ import (
 // stubVerifier validates an HMAC-SHA256-signed, JWT-shaped token so the sign-in
 // flow is exercisable without a live provider. The token is
 // base64url(header).base64url(claims).base64url(HMAC(key, header.claims)); the
-// verifier checks the signature, issuer, audience and expiry exactly as the
-// live verifier will, so only the signature mechanism differs.
+// verifier checks the signature, issuer, audience and expiry. The live verifier
+// also checks the authorized party, issued-at time and clock skew.
 type stubVerifier struct {
 	clientIDs map[Provider][]string
 	key       string

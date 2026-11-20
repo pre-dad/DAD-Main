@@ -11,11 +11,9 @@ import (
 	"github.com/stripe/stripe-go/v87"
 )
 
-// stripeTestGateway points the pinned SDK at a local test server, exactly as
-// checkout_test.go does, so no live Stripe is touched.
-func stripeTestGateway(t *testing.T, handler http.HandlerFunc) (*StripeGateway, func()) {
-	t.Helper()
-	server := httptest.NewServer(handler)
+// gatewayAt points the pinned SDK at a local test server, so no live Stripe is
+// touched.
+func gatewayAt(server *httptest.Server) *StripeGateway {
 	backends := stripe.NewBackendsWithConfig(
 		&stripe.BackendConfig{
 			URL:               stripe.String(server.URL),
@@ -24,7 +22,13 @@ func stripeTestGateway(t *testing.T, handler http.HandlerFunc) (*StripeGateway, 
 			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
 		},
 	)
-	return &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}, server.Close
+	return &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}
+}
+
+func stripeTestGateway(t *testing.T, handler http.HandlerFunc) (*StripeGateway, func()) {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	return gatewayAt(server), server.Close
 }
 
 func TestReconcileListPagesByCreatedWindow(t *testing.T) {
@@ -194,5 +198,23 @@ func TestInvoicePaymentLookupRequiresExactlyOneFilter(t *testing.T) {
 		if _, err := g.ListInvoicePayments(context.Background(), filters[0], filters[1]); err == nil {
 			t.Fatal("unscoped or conflicting lookup accepted")
 		}
+	}
+}
+
+type stubPage struct{ response *stripe.APIResponse }
+
+func (p stubPage) Err() error                        { return nil }
+func (p stubPage) LastResponse() *stripe.APIResponse { return p.response }
+
+func TestPaginateReturnsTheExhaustionErrorAtThePageCap(t *testing.T) {
+	g := &StripeGateway{}
+	exhausted := errors.New("exhausted")
+	pages := 0
+	_, err := g.paginate(context.Background(), BucketReconcile, 3, exhausted, func(after string) listPage {
+		pages++
+		return stubPage{&stripe.APIResponse{RawJSON: []byte(`{"has_more":true,"data":[{"id":"ch_` + after + `x"}]}`)}}
+	}, func(row Object) (Object, error) { return row, nil })
+	if !errors.Is(err, exhausted) || pages != 3 {
+		t.Fatalf("err = %v after %d pages, want the exhaustion error after 3", err, pages)
 	}
 }

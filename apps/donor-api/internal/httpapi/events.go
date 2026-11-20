@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -202,7 +201,7 @@ func (a *api) eventDetail(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	ctx, cancel := withTimeout(r, 3*time.Second)
+	ctx, cancel := withTimeout(r, publicReadTimeout)
 	defer cancel()
 	body, err := a.EventRead.Detail(ctx, id)
 	switch {
@@ -227,7 +226,7 @@ func (a *api) eventCalendar(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	ctx, cancel := withTimeout(r, 3*time.Second)
+	ctx, cancel := withTimeout(r, publicReadTimeout)
 	defer cancel()
 	ics, err := a.EventRead.Calendar(ctx, id)
 	switch {

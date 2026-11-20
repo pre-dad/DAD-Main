@@ -53,15 +53,16 @@ func (a *api) ingestAnalytics(w http.ResponseWriter, r *http.Request) {
 			store.Event{ID: e.ID, JourneyID: e.JourneyID, Name: e.Name, OccurredAt: e.OccurredAt, Properties: e.Properties},
 		)
 	}
+	isNative := native(r)
 	source := "WEB"
-	if native(r) {
+	if isNative {
 		source = nativePlatform(r)
 	}
 	a.analytics().serve(w, r, func(ctx context.Context) (any, error) {
 		if err := a.Analytics.Record(ctx, source, donorSession(r), events); err != nil {
 			return nil, err
 		}
-		if !native(r) && len(events) > 0 {
+		if !isNative && len(events) > 0 {
 			var journey pgtype.UUID
 			if journey.Scan(events[0].JourneyID) == nil && store.ValidRequestID(journey) {
 				a.setCookie(w, journeyCookie, journey.String(), 86400, http.SameSiteLaxMode)
@@ -71,9 +72,9 @@ func (a *api) ingestAnalytics(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// nativePlatform maps the app's declared platform to an analytics source,
-// defaulting to IOS/ANDROID from the X-DAD-Platform header; an unrecognised or
-// missing platform falls back to WEB so a malformed header cannot fail ingest.
+// nativePlatform maps the app's X-DAD-Platform header to an analytics source.
+// An unrecognised or missing platform is recorded as WEB so a malformed header
+// cannot fail ingest.
 func nativePlatform(r *http.Request) string {
 	switch r.Header.Get("X-DAD-Platform") {
 	case "IOS":

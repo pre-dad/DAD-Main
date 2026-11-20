@@ -23,6 +23,11 @@ func donorSession(r *http.Request) string {
 	if !native(r) {
 		return sessionCookieValue(r, donorCookie)
 	}
+	return bearerToken(r)
+}
+
+// bearerToken returns the well-formed Bearer credential of the request, or "".
+func bearerToken(r *http.Request) string {
 	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
 	if !strings.EqualFold(scheme, "Bearer") || !validToken(token) {
 		return ""
