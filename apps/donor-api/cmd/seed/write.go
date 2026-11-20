@@ -483,7 +483,7 @@ func (p *population) tables() []table {
 		},
 		{
 			"donor_events",
-			"id slug title type description venue address city zip starts_at ends_at capacity publish_state published_at created_at",
+			"id slug title type description venue address city zip starts_at ends_at capacity publish_state published_at created_at time_zone",
 			func(emit func(...any) bool) {
 				for _, ev := range p.events {
 					if !emit(
@@ -502,6 +502,7 @@ func (p *population) tables() []table {
 						"PUBLISHED",
 						ev.publishedAt,
 						ev.publishedAt,
+						"America/New_York",
 					) {
 						return
 					}
