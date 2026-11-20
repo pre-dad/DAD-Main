@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -167,7 +166,7 @@ func (a *api) deleteInitiativeMetric(w http.ResponseWriter, r *http.Request, ses
 // metricPosition reads the {position} path value (a headline-metric slot 0-5).
 func metricPosition(w http.ResponseWriter, r *http.Request) (int32, bool) {
 	n, err := strconv.Atoi(r.PathValue("position"))
-	if err != nil || n < 0 || n >= 6 {
+	if err != nil || n < 0 || n >= store.MetricSlots {
 		writeError(w, r, http.StatusNotFound, "Record not found", nil)
 		return 0, false
 	}
@@ -188,9 +187,9 @@ func (a *api) setInitiativeSpend(w http.ResponseWriter, r *http.Request, session
 	})
 }
 
-// deleteSpendBody names the category to remove; a category is free text, so it
-// travels in the body rather than the path.
-type deleteSpendBody struct {
+// spendCategoryBody names the category to remove or publish; a category is free
+// text, so it travels in the body rather than the path.
+type spendCategoryBody struct {
 	Category string `json:"category"`
 }
 
@@ -199,7 +198,7 @@ func (a *api) deleteInitiativeSpend(w http.ResponseWriter, r *http.Request, sess
 	if !ok {
 		return
 	}
-	var body deleteSpendBody
+	var body spendCategoryBody
 	if !decodeJSON(w, r, &body) {
 		return
 	}
@@ -239,31 +238,30 @@ func (a *api) publishedInitiative(w http.ResponseWriter, r *http.Request) {
 // publicInitiativeRead answers a published-initiative read, cacheable for a
 // minute like the published content.
 func (a *api) publicInitiativeRead(w http.ResponseWriter, r *http.Request, read func(context.Context) (any, error)) {
-	const unavailable = "Donor database unavailable"
 	if a.InitiativeRead == nil {
-		writeError(w, r, http.StatusServiceUnavailable, unavailable, nil)
+		writeError(w, r, http.StatusServiceUnavailable, donorDatabaseUnavailable, nil)
 		return
 	}
-	ctx, cancel := withTimeout(r, 3*time.Second)
+	ctx, cancel := withTimeout(r, publicReadTimeout)
 	defer cancel()
 	body, err := read(ctx)
 	switch {
 	case errors.Is(err, store.ErrInitiativeNotPublished):
 		writeError(w, r, http.StatusNotFound, "Record not found", nil)
 	case err != nil:
-		writeError(w, r, http.StatusServiceUnavailable, unavailable, err)
+		writeError(w, r, http.StatusServiceUnavailable, donorDatabaseUnavailable, err)
 	default:
 		w.Header().Set("Cache-Control", "public, max-age=60")
 		writeJSON(w, http.StatusOK, body)
 	}
 }
 
-const donorUnavailableInitiative = "Donor database unavailable"
+const donorDatabaseUnavailable = "Donor database unavailable"
 
 // todayInitiative serves the signed-in donor's initiative of the day. A rotation
 // with no published, active initiative answers 404.
 func (a *api) todayInitiative(w http.ResponseWriter, r *http.Request, session string) {
-	svc := service{a.TodayInitiative != nil, donorUnavailableInitiative, readTimeout, donorStatus}.
+	svc := service{a.TodayInitiative != nil, donorDatabaseUnavailable, readTimeout, donorStatus}.
 		missing("No initiative to show today")
 	svc.serve(w, r, func(ctx context.Context) (any, error) { return a.TodayInitiative.Today(ctx, session) })
 }
@@ -273,7 +271,7 @@ func (a *api) publishInitiativeSpend(w http.ResponseWriter, r *http.Request, ses
 	if !ok {
 		return
 	}
-	var body deleteSpendBody
+	var body spendCategoryBody
 	if !decodeJSON(w, r, &body) {
 		return
 	}

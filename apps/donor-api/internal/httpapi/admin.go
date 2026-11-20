@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -13,6 +14,9 @@ import (
 
 // maxCursorLength bounds a keyset cursor before it is decoded.
 const maxCursorLength = 600
+
+// maxSearchRunes lets staff search by a full email address.
+const maxSearchRunes = maxEmailRunes
 
 type AdminSource interface {
 	ResetStreak(context.Context, string, pgtype.UUID, string) error
@@ -33,6 +37,12 @@ func (a *api) admin() service {
 	return service{a.Admin != nil, staffUnavailable, readTimeout, staffStatus}
 }
 
+// adminWrite serves a staff action that changes several rows, which may take
+// longer than a read.
+func (a *api) adminWrite() service {
+	return service{a.Admin != nil, staffUnavailable, staffTimeout, staffStatus}
+}
+
 // cursorParam reads the keyset cursor of a paged staff list, answering the
 // request itself when it is longer than any cursor the API issues.
 func cursorParam(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -50,8 +60,8 @@ func (a *api) searchDonors(w http.ResponseWriter, r *http.Request, session strin
 		return
 	}
 	term := r.URL.Query().Get("q")
-	if utf8.RuneCountInString(term) > maxEmailRunes || strings.ContainsRune(term, 0) {
-		writeError(w, r, http.StatusUnprocessableEntity, "Search for at most 320 characters", nil)
+	if utf8.RuneCountInString(term) > maxSearchRunes || strings.ContainsRune(term, 0) {
+		writeError(w, r, http.StatusUnprocessableEntity, fmt.Sprintf("Search for at most %d characters", maxSearchRunes), nil)
 		return
 	}
 	a.admin().serve(w, r, func(ctx context.Context) (any, error) {
@@ -151,7 +161,7 @@ func (a *api) requestClaim(w http.ResponseWriter, r *http.Request, session strin
 	if !ok {
 		return
 	}
-	a.admin().serve(w, r, func(ctx context.Context) (any, error) {
+	a.adminWrite().serve(w, r, func(ctx context.Context) (any, error) {
 		return map[string]bool{"queued": true}, a.Admin.RequestClaim(ctx, session, id)
 	})
 }
@@ -165,7 +175,7 @@ func (a *api) resendMessage(w http.ResponseWriter, r *http.Request, session stri
 	if !ok {
 		return
 	}
-	a.admin().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.ResendMessage(ctx, session, id, key) })
+	a.adminWrite().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.ResendMessage(ctx, session, id, key) })
 }
 
 type recomputeRecognitionBody struct {
@@ -181,8 +191,7 @@ func (a *api) recomputeRecognition(w http.ResponseWriter, r *http.Request, token
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	svc := service{a.Admin != nil, staffUnavailable, staffTimeout, staffStatus}
-	svc.serve(w, r, func(ctx context.Context) (any, error) {
+	a.adminWrite().serve(w, r, func(ctx context.Context) (any, error) {
 		return map[string]bool{"recomputed": true}, a.Admin.RecomputeRecognition(ctx, token, id, body.Reason)
 	})
 }
@@ -196,7 +205,7 @@ func (a *api) resetStreak(w http.ResponseWriter, r *http.Request, token string) 
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	a.admin().serve(w, r, func(ctx context.Context) (any, error) {
+	a.adminWrite().serve(w, r, func(ctx context.Context) (any, error) {
 		return map[string]bool{"reset": true}, a.Admin.ResetStreak(ctx, token, id, body.Reason)
 	})
 }

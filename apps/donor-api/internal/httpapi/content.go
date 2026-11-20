@@ -41,9 +41,10 @@ func (a *api) uploadSource(w http.ResponseWriter, r *http.Request, session strin
 	if !a.contentAdmin().available(w, r) {
 		return
 	}
-	ctx, cancel := withTimeout(r, staffTimeout)
-	defer cancel()
-	if err := a.ContentAdmin.AuthorizeSourceUpload(ctx, session); err != nil {
+	authorizeCtx, cancelAuthorize := withTimeout(r, staffTimeout)
+	err := a.ContentAdmin.AuthorizeSourceUpload(authorizeCtx, session)
+	cancelAuthorize()
+	if err != nil {
 		respond(w, r, nil, err, staffStatus)
 		return
 	}
@@ -56,6 +57,8 @@ func (a *api) uploadSource(w http.ResponseWriter, r *http.Request, session strin
 		invalidFields(w, r)
 		return
 	}
+	ctx, cancel := withTimeout(r, staffTimeout)
+	defer cancel()
 	body, err := a.ContentAdmin.StoreSource(ctx, session, name, data)
 	respond(w, r, body, err, staffStatus)
 }

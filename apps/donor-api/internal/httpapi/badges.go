@@ -19,7 +19,7 @@ type BadgeSource interface {
 // donorBadges serves the signed-in donor's badge wall. It is a donorRead route
 // but records newly-earned badges as a side effect (permanent earn-state).
 func (a *api) donorBadges(w http.ResponseWriter, r *http.Request, session string) {
-	svc := service{a.Badges != nil, donorUnavailableInitiative, readTimeout, donorStatus}
+	svc := service{a.Badges != nil, donorDatabaseUnavailable, readTimeout, donorStatus}
 	svc.serve(w, r, func(ctx context.Context) (any, error) {
 		views, err := a.Badges.Badges(ctx, session)
 		if err != nil {
@@ -29,7 +29,7 @@ func (a *api) donorBadges(w http.ResponseWriter, r *http.Request, session string
 	})
 }
 
-// grantBadgeBody / revokeBadgeBody carry the badge code; the donor is in the path.
+// badgeCodeBody carries the badge code; the donor is in the path.
 type badgeCodeBody struct {
 	Code string `json:"code"`
 }
