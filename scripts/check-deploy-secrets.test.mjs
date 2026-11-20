@@ -82,7 +82,10 @@ function render(overrides = {}) {
 
 test("rendered deployment gives each process only its credential capabilities", () => {
   const services = render();
-  for (const service of Object.values(services)) assert.equal(service.environment?.UNRELATED_SECRET, undefined);
+  for (const service of Object.values(services)) {
+    assert.equal(service.environment?.UNRELATED_SECRET, undefined);
+    assert.equal(service.env_file, undefined);
+  }
   for (const [name, service] of Object.entries(services)) {
     for (const [key, value] of Object.entries({
       DONOR_OAUTH_APPLE_CLIENT_ID: "fixture-apple-web",
@@ -97,12 +100,15 @@ test("rendered deployment gives each process only its credential capabilities", 
   assert.equal(api.STRIPE_SECRET_KEY, "canary-stripe");
   assert.equal(api.DONOR_EMAIL_ENCRYPTION_KEY, "canary-email");
   assert.equal(api.DONOR_FOUNDING_CLAIM_KEY, "canary-founding");
+  assert.equal(api.DONOR_SMS_AUTH_TOKEN, "canary-sms");
+  assert.equal(api.DONOR_EVENT_CHECKIN_SECRET, "canary-checkin");
   assert.equal(api.DONOR_SMTP_PASSWORD, undefined);
   assert.equal(api.DONOR_SMTP_USERNAME, undefined);
   assert.equal(api.DONOR_PUSH_APNS_KEY_FILE, undefined);
   assert.equal(api.DONOR_PUSH_FCM_KEY_FILE, undefined);
   assert.equal(api.DONOR_PUSH_PLATFORMS, "IOS,ANDROID");
   for (const name of ["monitor", "projection-worker", "staff", "migrate", "provision", "web", "nginx"]) {
+    assert.ok(services[name], `${name} service is missing`);
     const env = services[name].environment ?? {};
     for (const key of [
       "STRIPE_SECRET_KEY",

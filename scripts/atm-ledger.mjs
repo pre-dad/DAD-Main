@@ -55,10 +55,18 @@ export async function request(route, method = "GET", body, dependencies = {}) {
       signal: AbortSignal.timeout(60000),
       redirect: "error",
     });
-    const value = await responseJSON(response);
+    let value = {};
+    try {
+      value = await responseJSON(response);
+    } catch (error) {
+      if (response.ok || error.message.includes("capacity")) throw error;
+    }
     if (response.ok) return value;
-    if (response.status >= 500 && attempt < 2) continue;
-    throw new Error(`Ledger operation failed (${response.status}): ${String(value.detail ?? "Unavailable")}`);
+    if (response.status >= 500 && attempt < 2) {
+      await new Promise((resolve) => setTimeout(resolve, (dependencies.delay ?? 500) * (attempt + 1)));
+      continue;
+    }
+    throw new Error(`Ledger operation failed (${response.status}): ${String(value?.detail ?? "Unavailable")}`);
   }
 }
 
@@ -66,7 +74,8 @@ export function migrationHistory(repo, revision) {
   if (!/^[a-f0-9]{40}$/.test(revision)) throw new Error("A full legacy state commit is required");
   const git = (...args) =>
     execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }).trim();
-  const commits = git("rev-list", "--reverse", revision, "--", "ledger.json").split("\n");
+  const commits = git("rev-list", "--reverse", revision, "--", "ledger.json").split("\n").filter(Boolean);
+  if (commits.at(-1) !== revision) throw new Error("Legacy tip must be its last ledger revision");
   let parent = null;
   const history = commits.map((commit) => {
     const entry = {
@@ -78,7 +87,6 @@ export function migrationHistory(repo, revision) {
     parent = commit;
     return entry;
   });
-  if (history.at(-1)?.commit !== revision) throw new Error("Legacy tip must be its last ledger revision");
   return { source: SOURCE, history };
 }
 
