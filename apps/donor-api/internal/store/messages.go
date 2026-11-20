@@ -222,7 +222,11 @@ func renderMessage(
 		if !ok {
 			return "", "", payments.ErrFacts
 		}
-		return referral.subject + " completed a first test gift", "Someone you invited through " + referral.phrase + " completed their first test gift.\nSee your circle's impact: " + site.dashboard() + "\n\nTurn off referral notifications: " + site.profile() + "\nThis is a sandbox notification. DAD launches in April 2027.\n", nil
+		return referral.subject + " completed a first test gift",
+			"Someone you invited through " + referral.phrase + " completed their first test gift.\n" +
+				"See your circle's impact: " + site.dashboard() + "\n\n" +
+				"Turn off referral notifications: " + site.profile() + "\n" +
+				"This is a sandbox notification. DAD launches in " + launchMonth + ".\n", nil
 	case "RECOVERY":
 		id, err := parseID(data.Text("period_id"))
 		if err != nil {
@@ -232,11 +236,20 @@ func renderMessage(
 		if err != nil {
 			return "", "", err
 		}
-		return "Your DAD test payment needs attention", "Your monthly test payment was declined. Your giving streak is at risk.\nThe recovery grace period ends " + iso(
-			period.DueAt.Time.Add(recognition.Grace),
-		) + ".\nUpdate your payment method securely: " + site.paymentMethod() + "\nIf signed out, request a sign-in link for the email used to give, then return to payment methods.\nUpdating a card does not itself confirm payment recovery. Stripe's retry sequence handles collection.\nThis essential payment notice concerns sandbox giving, not a real charge.\n", nil
+		return "Your DAD test payment needs attention",
+			"Your monthly test payment was declined. Your giving streak is at risk.\n" +
+				"The recovery grace period ends " + iso(period.DueAt.Time.Add(recognition.Grace)) + ".\n" +
+				"Update your payment method securely: " + site.paymentMethod() + "\n" +
+				"If signed out, request a sign-in link for the email used to give, then return to payment methods.\n" +
+				"Updating a card does not itself confirm payment recovery. Stripe's retry sequence handles collection.\n" +
+				"This essential payment notice concerns sandbox giving, not a real charge.\n", nil
 	case "LAPSED":
-		return "Your DAD giving streak has ended", "Your monthly test payment did not recover within the grace period, so your giving streak has reset to zero.\nYou can start a new streak any time — your next monthly test gift begins it.\nStart giving again securely: " + site.paymentMethod() + "\nIf signed out, request a sign-in link for the email used to give.\nThis is an essential status notice about sandbox giving, not a real charge.\n", nil
+		return "Your DAD giving streak has ended",
+			"Your monthly test payment did not recover within the grace period, so your giving streak has reset to zero.\n" +
+				"You can start a new streak any time — your next monthly test gift begins it.\n" +
+				"Start giving again securely: " + site.paymentMethod() + "\n" +
+				"If signed out, request a sign-in link for the email used to give.\n" +
+				"This is an essential status notice about sandbox giving, not a real charge.\n", nil
 	case eventPromotedCategory:
 		id, err := parseID(data.Text("event_id"))
 		if err != nil {
@@ -305,6 +318,9 @@ func renderPromotion(event queries.DonorEvent, donor queries.Donor, site publicS
 		"If you can no longer go, cancel there before it starts so the next person on the waitlist gets your spot.\n"
 }
 
+// launchMonth is when sandbox notices say DAD goes live.
+const launchMonth = "April 2027"
+
 // deliveryLease reserves a claimed job while its send is in flight. It outlasts
 // a worker step, so a claim abandoned by a crashed worker is retried later.
 const deliveryLease = 5 * time.Minute
@@ -314,7 +330,7 @@ const deliveryLease = 5 * time.Minute
 const maxDeliveryAttempts = 5
 
 func messageRetryAt(now time.Time, attempts int32) pgtype.Timestamptz {
-	return timestamp(now.Add(time.Duration(min(60, 1<<uint(attempts))) * time.Minute))
+	return timestamp(now.Add(time.Duration(min(60, 1<<min(attempts, 6))) * time.Minute))
 }
 
 func failMessage(ctx context.Context, q *queries.Queries, job queries.DonorMessage, now time.Time, category string) error {

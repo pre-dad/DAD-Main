@@ -175,3 +175,13 @@ func TestListedNameIsFirstNameAndLastInitial(t *testing.T) {
 		}
 	}
 }
+
+func TestNetworkWithoutProjectionStillShowsTheFirstMilestone(t *testing.T) {
+	pool := database(t)
+	referrer, _ := donor(t, pool)
+	mustExec(t, pool, "DELETE FROM donor_metric_projections WHERE donor_id=$1", referrer)
+	got, err := buildNetwork(context.Background(), queries.New(pool), referrer)
+	if err != nil || got.NextMilestone == nil || got.NextMilestone.Remaining != got.NextMilestone.Target || got.NextMilestone.Target <= 0 {
+		t.Fatalf("donor with no projection: %+v %v", got.NextMilestone, err)
+	}
+}
