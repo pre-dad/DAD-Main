@@ -27,6 +27,27 @@ const timezones = [
   ["Pacific/Pago_Pago", "American Samoa"],
 ] as const;
 
+type Profile = Schema<"Profile">;
+type PreferenceKey = {
+  [K in keyof Profile]: Profile[K] extends boolean ? K : never;
+}[keyof Profile];
+
+const emailPreferences: readonly (readonly [PreferenceKey, string])[] = [
+  ["referral_emails", "Tell me when a Link or IRL Referral gives for the first time"],
+  ["marketing_emails", "Send me DAD news and campaign updates"],
+];
+
+const pushPreferences: readonly (readonly [PreferenceKey, string])[] = [
+  ["push_referral_converted", "When someone I invited gives for the first time"],
+  ["push_streak_at_risk", "When a declined payment puts my giving streak at risk"],
+  ["push_streak_milestone", "When my giving streak reaches a milestone"],
+  ["push_streak_lapsed", "When my giving streak ends"],
+  ["push_gift_processed", "When my gift is processed"],
+  ["push_badge_earned", "When I earn a badge"],
+  ["push_event_reminder", "Before an event I signed up for"],
+  ["push_event_promoted", "When a waitlist spot opens for me"],
+];
+
 const field = (form: FormData, name: string) => String(form.get(name) ?? "").trim();
 
 export default function Profile() {
@@ -92,19 +113,25 @@ export default function Profile() {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     run(async () => {
-      setData(
-        await api<Schema<"Profile">>("/donor/me/profile", {
-          method: "POST",
-          body: JSON.stringify({
-            zip: field(form, "zip"),
-            city: field(form, "city"),
-            phone: field(form, "phone"),
-            timezone_override: field(form, "timezone_override") as NonNullable<
-              RequestBody<"/donor/me/profile", "post">["timezone_override"]
-            >,
-          } satisfies RequestBody<"/donor/me/profile", "post">),
-        }),
-      );
+      const saved = await api<Schema<"Profile">>("/donor/me/profile", {
+        method: "POST",
+        body: JSON.stringify({
+          zip: field(form, "zip"),
+          city: field(form, "city"),
+          phone: field(form, "phone"),
+          timezone_override: field(form, "timezone_override") as NonNullable<
+            RequestBody<"/donor/me/profile", "post">["timezone_override"]
+          >,
+        } satisfies RequestBody<"/donor/me/profile", "post">),
+      });
+      setData((current) => ({
+        ...current,
+        zip: saved.zip,
+        city: saved.city,
+        phone: saved.phone,
+        timezone_override: saved.timezone_override,
+        version: saved.version,
+      }));
       setMessage("Your details were saved.");
     }, "Your details were not saved. Please retry in a moment.");
   };
@@ -138,6 +165,17 @@ export default function Profile() {
       await api("/donor/logout-all", { method: "POST" });
       setSignedOut(true);
     }, "Sign-out was not confirmed. Please retry.");
+  const toggle = (key: PreferenceKey, label: string) =>
+    data && (
+      <label className="choice" key={key}>
+        <input
+          type="checkbox"
+          checked={data[key]}
+          onChange={(event) => setData({ ...data, [key]: event.target.checked })}
+        />{" "}
+        {label}
+      </label>
+    );
   return (
     <Page
       eyebrow="My account"
@@ -226,22 +264,7 @@ export default function Profile() {
               <form onSubmit={save}>
                 <fieldset disabled={busy}>
                   <legend>Optional email notifications</legend>
-                  <label className="choice">
-                    <input
-                      type="checkbox"
-                      checked={data.referral_emails}
-                      onChange={(event) => setData({ ...data, referral_emails: event.target.checked })}
-                    />{" "}
-                    Tell me when a Link or IRL Referral gives for the first time
-                  </label>
-                  <label className="choice">
-                    <input
-                      type="checkbox"
-                      checked={data.marketing_emails}
-                      onChange={(event) => setData({ ...data, marketing_emails: event.target.checked })}
-                    />{" "}
-                    Send me DAD news and campaign updates
-                  </label>
+                  {emailPreferences.map(([key, label]) => toggle(key, label))}
                 </fieldset>
                 <p className="note">
                   These choices are optional and start off. Gift records, account access, and essential payment notices
@@ -249,80 +272,8 @@ export default function Profile() {
                 </p>
                 <fieldset disabled={busy}>
                   <legend>DAD app notifications</legend>
-                  <label className="choice">
-                    <input
-                      type="checkbox"
-                      checked={data.push_referral_converted}
-                      onChange={(event) => setData({ ...data, push_referral_converted: event.target.checked })}
-                    />{" "}
-                    When someone I invited gives for the first time
-                  </label>
-                  <label className="choice">
-                    <input
-                      type="checkbox"
-                      checked={data.push_streak_at_risk}
-                      onChange={(event) => setData({ ...data, push_streak_at_risk: event.target.checked })}
-                    />{" "}
-                    When a declined payment puts my giving streak at risk
-                  </label>
-                  <label className="choice">
-                    <input
-                      type="checkbox"
-                      checked={data.push_streak_milestone}
-                      onChange={(event) => setData({ ...data, push_streak_milestone: event.target.checked })}
-                    />{" "}
-                    When my giving streak reaches a milestone
-                  </label>
-                  <label className="choice">
-                    <input
-                      type="checkbox"
-                      checked={data.push_streak_lapsed}
-                      onChange={(event) => setData({ ...data, push_streak_lapsed: event.target.checked })}
-                    />{" "}
-                    When my giving streak ends
-                  </label>
-                  <label className="choice">
-                    <input
-                      type="checkbox"
-                      checked={data.push_gift_processed}
-                      onChange={(event) => setData({ ...data, push_gift_processed: event.target.checked })}
-                    />{" "}
-                    When my gift is processed
-                  </label>
-                  <label className="choice">
-                    <input
-                      type="checkbox"
-                      checked={data.push_badge_earned}
-                      onChange={(event) => setData({ ...data, push_badge_earned: event.target.checked })}
-                    />{" "}
-                    When I earn a badge
-                  </label>
-                  <label className="choice">
-                    <input
-                      type="checkbox"
-                      checked={data.push_event_reminder}
-                      onChange={(event) => setData({ ...data, push_event_reminder: event.target.checked })}
-                    />{" "}
-                    Before an event I signed up for
-                  </label>
-                  <label className="choice">
-                    <input
-                      type="checkbox"
-                      checked={data.push_event_promoted}
-                      onChange={(event) => setData({ ...data, push_event_promoted: event.target.checked })}
-                    />{" "}
-                    When a waitlist spot opens for me
-                  </label>
-                  {data.volunteer && (
-                    <label className="choice">
-                      <input
-                        type="checkbox"
-                        checked={data.push_event_nearby}
-                        onChange={(event) => setData({ ...data, push_event_nearby: event.target.checked })}
-                      />{" "}
-                      When a volunteer event is announced near me
-                    </label>
-                  )}
+                  {pushPreferences.map(([key, label]) => toggle(key, label))}
+                  {data.volunteer && toggle("push_event_nearby", "When a volunteer event is announced near me")}
                 </fieldset>
                 <p className="note">
                   App notifications reach only phones where you signed in to the DAD app and allowed its notifications.
