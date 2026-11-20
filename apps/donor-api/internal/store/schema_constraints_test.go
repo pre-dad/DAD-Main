@@ -97,10 +97,16 @@ func TestPartnerApplicationDecisionNamesItsDecider(t *testing.T) {
 	staff, _ := staffFixture(t, pool, "SUPER_ADMIN")
 	insert := func(status string, decidedBy any, approvedPartner any) error {
 		id := testID(t)
-		_, err := pool.Exec(ctx,
+		_, err := pool.Exec(
+			ctx,
 			`INSERT INTO donor_partner_applications(id,organization,contact_name,work_email,status,decided_by,decided_at,approved_partner_id)
 			VALUES ($1,'Org','Dana',$2,$3::varchar,$4,CASE WHEN $3::varchar='PENDING' THEN NULL ELSE now() END,$5)`,
-			id, id.String()+"@example.org", status, decidedBy, approvedPartner)
+			id,
+			id.String()+"@example.org",
+			status,
+			decidedBy,
+			approvedPartner,
+		)
 		t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_partner_applications WHERE id=$1", id) })
 		return err
 	}
@@ -202,10 +208,13 @@ func TestApprovingAPartnerCofundsItsLinkedInitiatives(t *testing.T) {
 func TestEventInsertMustNameItsTimeZone(t *testing.T) {
 	pool := database(t)
 	id := testID(t)
-	_, err := pool.Exec(context.Background(),
+	_, err := pool.Exec(
+		context.Background(),
 		`INSERT INTO donor_events (id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, created_at, updated_at)
 		VALUES ($1,$2,'T','VOLUNTEER','D','V','A','C','94103',now()+interval '1 day',now()+interval '2 days',5,now(),now())`,
-		id, "zone-"+id.String())
+		id,
+		"zone-"+id.String(),
+	)
 	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_events WHERE id=$1", id) })
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); !ok || pgErr.Code != notNullViolation || pgErr.ColumnName != "time_zone" {
 		t.Fatalf("an event without a zone was accepted: %v", err)

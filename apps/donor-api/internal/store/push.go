@@ -455,7 +455,10 @@ func (w PushWorker) claim(ctx context.Context, now time.Time) (*pushJob, bool, e
 	worked := false
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		row, err := q.NextPushNotification(ctx, queries.NextPushNotificationParams{AvailableAt: timestamp(now), MaxAttempts: MaxDeliveryAttempts})
+		row, err := q.NextPushNotification(
+			ctx,
+			queries.NextPushNotificationParams{AvailableAt: timestamp(now), MaxAttempts: MaxDeliveryAttempts},
+		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}

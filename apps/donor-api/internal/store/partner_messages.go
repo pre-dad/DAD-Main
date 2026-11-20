@@ -136,7 +136,10 @@ func (w PartnerMessageWorker) fanOut(ctx context.Context, site publicSite, now t
 	var attempts int32
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		row, err := q.NextPartnerMessage(ctx, queries.NextPartnerMessageParams{AvailableAt: timestamp(now), MaxAttempts: MaxDeliveryAttempts})
+		row, err := q.NextPartnerMessage(
+			ctx,
+			queries.NextPartnerMessageParams{AvailableAt: timestamp(now), MaxAttempts: MaxDeliveryAttempts},
+		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}

@@ -148,7 +148,8 @@ func TestDeleteAccountErasesPersonalDataAndKeepsLedger(t *testing.T) {
 	}
 	var delivered, pending string
 	if err := pool.QueryRow(ctx, "SELECT coalesce(subject,'')||coalesce(body,'')||context::text FROM donor_messages WHERE id=$1", deliveredID).
-		Scan(&delivered); err != nil || delivered != "{}" {
+		Scan(&delivered); err != nil ||
+		delivered != "{}" {
 		t.Errorf("delivered message kept content %q (%v)", delivered, err)
 	}
 	if err := pool.QueryRow(ctx, "SELECT context::text FROM donor_messages WHERE id=$1", pendingID).Scan(&pending); err != nil ||

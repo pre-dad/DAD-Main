@@ -192,7 +192,10 @@ func (s *StaffService) DonorDetail(
 		if err != nil {
 			return DonorDetail{}, err
 		}
-		referrals, out.NextReferralsCursor = keysetPage(referrals, func(row queries.StaffReferredPageRow) *string { return idCursor(row.ID) })
+		referrals, out.NextReferralsCursor = keysetPage(
+			referrals,
+			func(row queries.StaffReferredPageRow) *string { return idCursor(row.ID) },
+		)
 		out.Referred = make([]ReferredDonor, 0, len(referrals))
 		for _, row := range referrals {
 			out.Referred = append(out.Referred, ReferredDonor{ID: row.ID, Email: row.Email, Type: row.ReferralKind, NetMinor: row.NetMinor})

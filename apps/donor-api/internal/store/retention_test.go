@@ -447,8 +447,15 @@ func TestTouchRetentionPurgesLapsedPartnerCredentials(t *testing.T) {
 	oldSession, freshSession := session(now.Add(-sessionRetention-time.Hour)), session(recent)
 	email := func(completed *time.Time) pgtype.UUID {
 		id := testID(t)
-		mustExec(t, pool, `INSERT INTO donor_partner_login_emails(id,partner_user_id,kind,available_at,completed_at) VALUES ($1,$2,'SIGN_IN',$3,$4)`,
-			id, user, now, completed)
+		mustExec(
+			t,
+			pool,
+			`INSERT INTO donor_partner_login_emails(id,partner_user_id,kind,available_at,completed_at) VALUES ($1,$2,'SIGN_IN',$3,$4)`,
+			id,
+			user,
+			now,
+			completed,
+		)
 		return id
 	}
 	oldEmail, freshEmail, openEmail := email(new(now.Add(-loginRetention-time.Hour))), email(&recent), email(nil)
