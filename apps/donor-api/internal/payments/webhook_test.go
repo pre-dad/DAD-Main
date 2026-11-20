@@ -301,3 +301,39 @@ func TestReceiverWithoutInboxOrSecretNeverAcknowledges(t *testing.T) {
 		t.Fatalf("bad signature: %v, inbox called %v; want ErrInvalidEvent without saving", err, forged.called)
 	}
 }
+
+func TestRefundEventsAreKeptWithoutDADMetadata(t *testing.T) {
+	input := event()
+	input["type"] = "refund.updated"
+	input["data"] = map[string]any{"object": map[string]any{
+		"id": "re_test", "status": "succeeded", "currency": "usd", "amount": 3000, "payment_intent": "pi_test",
+	}}
+	body, signature := signed(t, input, time.Now())
+	verified, err := verifyEvent(body, signature, testSecret)
+	if err != nil || verified == nil {
+		t.Fatalf("refund event dropped: %v", err)
+	}
+}
+
+func TestInvoiceListsReportTruncation(t *testing.T) {
+	input := event()
+	input["type"] = "invoice.payment_succeeded"
+	input["data"] = map[string]any{"object": map[string]any{
+		"id": "in_test", "parent": map[string]any{"subscription_details": map[string]any{"subscription": "sub_test", "metadata": map[string]any{"dad_checkout_id": checkoutID}}},
+		"lines":              map[string]any{"has_more": true, "data": []any{}},
+		"payments":           map[string]any{"has_more": true, "data": []any{}},
+		"status_transitions": map[string]any{"paid_at": 1700000001},
+	}}
+	body, signature := signed(t, input, time.Now())
+	verified, err := verifyEvent(body, signature, testSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var facts map[string]any
+	if err = json.Unmarshal(verified.Data(), &facts); err != nil {
+		t.Fatal(err)
+	}
+	if facts["lines_complete"] != false || facts["payments_complete"] != false {
+		t.Fatalf("truncated lists reported complete: %s", verified.Data())
+	}
+}

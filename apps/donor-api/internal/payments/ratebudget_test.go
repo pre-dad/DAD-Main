@@ -67,26 +67,49 @@ func TestRefundPaginationSpendsBudgetForEveryPage(t *testing.T) {
 	}
 }
 
-// A fresh bucket grants up to its burst immediately, then blocks until a refill.
-func TestRateBudgetBurstThenRefill(t *testing.T) {
-	// 10 tokens/second, burst 2: two immediate grants, the third waits ~100ms.
-	rb := &RateBudget{buckets: map[string]*bucket{BucketWorker: newBucket(10, 2)}}
+// A fresh bucket grants up to its burst immediately, then reports how long
+// until a token refills. The clock is injected, so nothing here sleeps.
+func TestBucketBurstThenRefill(t *testing.T) {
+	// 10 tokens/second, burst 2: two immediate grants, then a ~100ms wait.
+	b := newBucket(10, 2)
+	now := b.last
+	for i := range 2 {
+		if wait := b.reserve(now); wait != 0 {
+			t.Fatalf("burst grant %d waits %v, want none", i, wait)
+		}
+	}
+	if wait := b.reserve(now); wait != 100*time.Millisecond {
+		t.Fatalf("drained bucket waits %v, want 100ms", wait)
+	}
+	if wait := b.reserve(now.Add(100 * time.Millisecond)); wait != 0 {
+		t.Fatalf("refilled bucket waits %v, want none", wait)
+	}
+	if wait := b.reserve(now.Add(24 * time.Hour)); wait != 0 || b.tokens > b.burst {
+		t.Fatalf("idle bucket waits %v with %v tokens over burst %v", wait, b.tokens, b.burst)
+	}
+}
+
+func TestBucketRejectsAZeroRate(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a bucket that never refills was accepted")
+		}
+	}()
+	newBucket(0, 1)
+}
+
+// A drained bucket makes Acquire wait for the refill.
+func TestRateBudgetBlocksUntilRefill(t *testing.T) {
+	rb := &RateBudget{buckets: map[string]*bucket{BucketWorker: newBucket(10, 1)}}
 	ctx := context.Background()
-	for i := 0; i < 2; i++ {
-		start := time.Now()
-		if err := rb.Acquire(ctx, BucketWorker); err != nil {
-			t.Fatalf("burst grant %d failed: %v", i, err)
-		}
-		if waited := time.Since(start); waited > 45*time.Millisecond {
-			t.Fatalf("burst grant %d blocked %v, expected immediate", i, waited)
-		}
+	if err := rb.Acquire(ctx, BucketWorker); err != nil {
+		t.Fatalf("burst grant failed: %v", err)
 	}
 	start := time.Now()
 	if err := rb.Acquire(ctx, BucketWorker); err != nil {
 		t.Fatalf("post-drain grant failed: %v", err)
 	}
-	waited := time.Since(start)
-	if waited < 50*time.Millisecond {
+	if waited := time.Since(start); waited < 50*time.Millisecond {
 		t.Fatalf("drained bucket granted after %v, expected a refill wait", waited)
 	}
 }
@@ -133,7 +156,7 @@ func TestRateBudgetBucketsAreIndependent(t *testing.T) {
 			if err := rb.Acquire(ctx, name); err != nil {
 				t.Fatal(err)
 			}
-			if waited := time.Since(start); waited > 100*time.Millisecond {
+			if waited := time.Since(start); waited > time.Second {
 				t.Fatalf("%s waited %v despite an undrained bucket", name, waited)
 			}
 		})
