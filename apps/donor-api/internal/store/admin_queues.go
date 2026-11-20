@@ -115,6 +115,33 @@ func decodeKeyCursor(value string) (string, error) {
 	return c.Key, nil
 }
 
+// idCursor encodes a position in a list ordered by a unique id.
+func idCursor(id pgtype.UUID) *string {
+	raw, err := json.Marshal(cursor{ID: id})
+	if err != nil {
+		return nil
+	}
+	out := base64.RawURLEncoding.EncodeToString(raw)
+	return &out
+}
+
+// decodeIDCursor reads an id cursor; the empty string is the first page, which
+// starts below every id.
+func decodeIDCursor(value string) (pgtype.UUID, error) {
+	if value == "" {
+		return zeroUUID, nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil || len(value) > 200 {
+		return pgtype.UUID{}, ErrStaffInput
+	}
+	var c cursor
+	if err = json.Unmarshal(raw, &c); err != nil || !c.ID.Valid || c.Key != "" || !c.At.IsZero() {
+		return pgtype.UUID{}, ErrStaffInput
+	}
+	return c.ID, nil
+}
+
 var zeroUUID = pgtype.UUID{Valid: true}
 
 // keysetBounds turns a cursor into non-null query bounds. The first page is

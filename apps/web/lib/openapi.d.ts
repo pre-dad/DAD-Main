@@ -3581,11 +3581,8 @@ export interface components {
              * @description Pass as gifts_offset for the next page of gifts.
              */
             next_gifts_offset: number | null;
-            /**
-             * Format: int64
-             * @description Pass as referrals_offset for the next page of referred donors.
-             */
-            next_referrals_offset: number | null;
+            /** @description Pass as referrals_cursor for the next page of referred donors. */
+            next_referrals_cursor: string | null;
             public_name: string | null;
             referred: components["schemas"]["ReferredDonor"][];
             referrer: components["schemas"]["ReferrerLink"] | null;
@@ -6521,7 +6518,8 @@ export interface operations {
         parameters: {
             query?: {
                 gifts_offset?: number;
-                referrals_offset?: number;
+                /** @description The previous page's next_referrals_cursor; omit for the first page. */
+                referrals_cursor?: string;
             };
             header?: never;
             path: {

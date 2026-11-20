@@ -455,7 +455,7 @@ func TestViewsServeSyncedStateWithoutCallingProcessor(t *testing.T) {
 		!jsonTime(t, view["observed_at"]).Equal(refundObserved) {
 		t.Fatal("refund quote: want 2500 available", view, err)
 	}
-	detail, err := (&StaffService{DB: api}).DonorDetail(ctx, reader, r.donorID, 0, 0)
+	detail, err := (&StaffService{DB: api}).DonorDetail(ctx, reader, r.donorID, 0, "")
 	if err != nil || detail.Subscription == nil || !detail.Subscription.ObservedAt.Equal(synced) {
 		t.Fatal("staff detail", detail.Subscription, err)
 	}
@@ -955,7 +955,7 @@ func TestGiftListsAndStaffDetailShowRefundsAndSubscription(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	detail, err := (&StaffService{DB: api}).DonorDetail(ctx, staff, r.donorID, 0, 0)
+	detail, err := (&StaffService{DB: api}).DonorDetail(ctx, staff, r.donorID, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -133,7 +133,7 @@ const staffDetail = {
   ],
   referred: [{ id: "donor-2", email: "invitee@example.org", type: "LINK", net_minor: 3000 }],
   next_gifts_offset: null,
-  next_referrals_offset: null,
+  next_referrals_cursor: null,
 };
 
 async function mockStaffDonor(page: Page) {

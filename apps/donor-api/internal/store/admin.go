@@ -55,7 +55,7 @@ type DonorDetail struct {
 	Gifts               []queries.DonorGiftsPageRow `json:"gifts"`
 	ID                  pgtype.UUID                 `json:"id"`
 	NextGiftsOffset     *int64                      `json:"next_gifts_offset"`
-	NextReferralsOffset *int64                      `json:"next_referrals_offset"`
+	NextReferralsCursor *string                     `json:"next_referrals_cursor"`
 	PublicName          pgtype.Text                 `json:"public_name"`
 	Referred            []ReferredDonor             `json:"referred"`
 	Referrer            *ReferrerLink               `json:"referrer"`
@@ -143,9 +143,11 @@ func (s *StaffService) DonorDetail(
 	ctx context.Context,
 	token string,
 	id pgtype.UUID,
-	giftsOffset, referralsOffset int64,
+	giftsOffset int64,
+	referralsAfter string,
 ) (DonorDetail, error) {
-	if !pageOffsetValid(giftsOffset) || !pageOffsetValid(referralsOffset) {
+	afterReferral, err := decodeIDCursor(referralsAfter)
+	if err != nil || !pageOffsetValid(giftsOffset) {
 		return DonorDetail{}, ErrStaffInput
 	}
 	return staffRead(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (DonorDetail, error) {
@@ -186,11 +188,11 @@ func (s *StaffService) DonorDetail(
 			return DonorDetail{}, err
 		}
 		out.Gifts, out.NextGiftsOffset = page(gifts, giftsOffset)
-		referrals, err := q.StaffReferredPage(ctx, queries.StaffReferredPageParams{ReferrerID: id, PageOffset: referralsOffset})
+		referrals, err := q.StaffReferredPage(ctx, queries.StaffReferredPageParams{ReferrerID: id, AfterID: afterReferral})
 		if err != nil {
 			return DonorDetail{}, err
 		}
-		referrals, out.NextReferralsOffset = page(referrals, referralsOffset)
+		referrals, out.NextReferralsCursor = keysetPage(referrals, func(row queries.StaffReferredPageRow) *string { return idCursor(row.ID) })
 		out.Referred = make([]ReferredDonor, 0, len(referrals))
 		for _, row := range referrals {
 			out.Referred = append(out.Referred, ReferredDonor{ID: row.ID, Email: row.Email, Type: row.ReferralKind, NetMinor: row.NetMinor})

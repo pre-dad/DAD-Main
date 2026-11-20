@@ -18,7 +18,7 @@ type AdminSource interface {
 	ResetStreak(context.Context, string, pgtype.UUID, string) error
 	RecomputeRecognition(context.Context, string, pgtype.UUID, string) error
 	SearchDonors(context.Context, string, string, string) (store.DonorSearch, error)
-	DonorDetail(context.Context, string, pgtype.UUID, int64, int64) (store.DonorDetail, error)
+	DonorDetail(context.Context, string, pgtype.UUID, int64, string) (store.DonorDetail, error)
 	AuditEvents(context.Context, string, string) (store.AuditPage, error)
 	FailedPayments(context.Context, string, string, string) (store.FailedPaymentPage, error)
 	AccountDeletions(context.Context, string, string) (store.AccountDeletionPage, error)
@@ -65,8 +65,8 @@ func (a *api) donorDetail(w http.ResponseWriter, r *http.Request, session string
 		return
 	}
 	gifts, okGifts := offsetParam(r, "gifts_offset")
-	referrals, okReferrals := offsetParam(r, "referrals_offset")
-	if !okGifts || !okReferrals {
+	referrals := r.URL.Query().Get("referrals_cursor")
+	if !okGifts || len(referrals) > maxCursorLength {
 		invalidFields(w, r)
 		return
 	}
