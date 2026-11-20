@@ -86,9 +86,9 @@ export default function Donate({ verifiedEmail, onSignedOut }: { verifiedEmail: 
       );
     const payload = JSON.stringify({
       email,
-      name,
-      zip,
-      city,
+      name: name.trim(),
+      zip: zip.trim(),
+      city: city.trim(),
       amount_minor: minor,
       frequency: "MONTHLY",
     } satisfies RequestBody<"/donor/checkouts", "post">);

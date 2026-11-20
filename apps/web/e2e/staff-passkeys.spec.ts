@@ -51,7 +51,7 @@ test("an invited administrator creates a passkey, then signs out and back in wit
 
   // An export builds in the background; the audited download starts from the back office itself,
   // never from another host.
-  await page.getByRole("link", { name: "Exports and enrolment queue" }).click();
+  await page.getByRole("link", { name: "Exports and enrollment queue" }).click();
   await page.getByRole("button", { name: "Request gifts CSV" }).click();
   // Earlier runs leave their own exports listed; the newest is the first row after the header.
   const newest = page.getByRole("row").nth(1);

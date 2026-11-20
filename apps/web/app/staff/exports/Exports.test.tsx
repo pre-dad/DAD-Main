@@ -163,20 +163,20 @@ it("announces every export that finished in one poll and clears the other channe
   expect(await screen.findByText("The donors and gifts exports are ready.")).toBeVisible();
 });
 
-it("shows the enrolment note and jobs table in a scroll region only once permitted", async () => {
+it("shows the enrollment note and jobs table in a scroll region only once permitted", async () => {
   backend(() => [job("complete", 3)]);
   render(<Exports />);
   expect(await screen.findByRole("region", { name: "Exports table" })).toHaveAttribute("tabindex", "0");
-  expect(screen.getByText(/enrolments export contains column headers only/)).toBeVisible();
+  expect(screen.getByText(/enrollments export contains column headers only/)).toBeVisible();
   expect(screen.queryByText(/R1|R2/)).toBeNull();
 });
 
-it("hides the enrolment note when the role permits no exports", async () => {
+it("hides the enrollment note when the role permits no exports", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => reply(403, { detail: "Permission denied" })),
   );
   render(<Exports />);
   await screen.findByText("Your role does not permit exports.");
-  expect(screen.queryByText(/enrolments export/)).toBeNull();
+  expect(screen.queryByText(/enrollments export/)).toBeNull();
 });

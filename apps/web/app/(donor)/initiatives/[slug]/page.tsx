@@ -6,28 +6,23 @@ import { ContentUnavailable, InitiativeFacts } from "@/components/donor/PublicCo
 import { launchDateLabel } from "@/lib/launch";
 import { loadInitiative } from "@/lib/publicContent";
 
-async function initiative(slug: string) {
-  const found = await loadInitiative(slug);
-  return found === null ? null : { found };
-}
-
 export async function generateMetadata({ params }: PageProps<"/initiatives/[slug]">): Promise<Metadata> {
-  const result = await initiative((await params).slug);
-  return { title: result?.found?.title ?? "Planned initiative", description: result?.found?.summary };
+  const found = await loadInitiative((await params).slug);
+  return { title: found?.title ?? "Planned initiative", description: found?.summary };
 }
 
 export default async function InitiativePage({ params }: PageProps<"/initiatives/[slug]">) {
-  const result = await initiative((await params).slug);
-  if (result && !result.found) notFound();
+  const found = await loadInitiative((await params).slug);
+  if (found === undefined) notFound();
   return (
     <Page
       eyebrow="Planned initiative"
       back={{ href: "/initiatives", label: "All initiatives" }}
-      title={result?.found?.title ?? "Planned initiative"}
+      title={found?.title ?? "Planned initiative"}
     >
-      {result?.found ? (
+      {found ? (
         <>
-          <InitiativeFacts initiative={result.found} />
+          <InitiativeFacts initiative={found} />
           <Link className="button" href="/donate">
             Support DAD’s work
           </Link>

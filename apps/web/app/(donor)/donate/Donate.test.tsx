@@ -149,6 +149,22 @@ describe("sandbox giving", () => {
       city: "New York",
     });
   });
+  it("trims name and city before sending", async () => {
+    const fetch = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetch);
+    render(<Donate verifiedEmail="ben@example.org" />);
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "  Ben Donor " } });
+    fireEvent.change(screen.getByLabelText("ZIP code"), { target: { value: "10001" } });
+    fireEvent.change(screen.getByLabelText("City"), { target: { value: " New York  " } });
+    fireEvent.click(screen.getByRole("button", { name: "$3 a day · $90/month" }));
+    fireEvent.click(checkout());
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({
+      name: "Ben Donor",
+      zip: "10001",
+      city: "New York",
+    });
+  });
   it("signs the donor out and says checkout could not be opened when the session has ended", async () => {
     vi.stubGlobal(
       "fetch",

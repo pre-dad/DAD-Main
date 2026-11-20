@@ -105,5 +105,5 @@ it("shows a running initiative without its partner when none is linked", async (
   render(await InitiativesPage());
   expect(screen.queryByText(/Partner:/)).toBeNull();
   expect(screen.getByText(/Started/)).toBeInTheDocument();
-  expect(screen.queryByText(/not a recipient enrolment form/)).toBeNull();
+  expect(screen.queryByText(/not a recipient enrollment form/)).toBeNull();
 });

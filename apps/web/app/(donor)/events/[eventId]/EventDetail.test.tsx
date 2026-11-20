@@ -114,5 +114,5 @@ it("recovers from a failed event read without repeating a reservation", async ()
   fireEvent.click(await screen.findByRole("button", { name: "Retry event" }));
   expect(await screen.findByRole("button", { name: "Join the waitlist" })).toBeVisible();
   expect(fetch).toHaveBeenCalledTimes(2);
-  expect(fetch.mock.calls.every(([, init]) => !init.method)).toBe(true);
+  expect(fetch.mock.calls.every(([, init]) => !init?.method)).toBe(true);
 });

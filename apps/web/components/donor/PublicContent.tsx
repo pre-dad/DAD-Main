@@ -72,7 +72,7 @@ export function InitiativeFacts({ initiative }: { initiative: Schema<"PublicInit
         <time dateTime={initiative.started_on}>{formatDay(initiative.started_on)}</time>.
         {initiative.status === "COMPLETE" && " Complete."}
       </p>
-      {planned && <p>Planned initiative. Programs open at launch; this is not a recipient enrolment form.</p>}
+      {planned && <p>Planned initiative. Programs open at launch; this is not a recipient enrollment form.</p>}
     </>
   );
 }

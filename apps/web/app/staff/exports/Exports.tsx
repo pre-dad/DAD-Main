@@ -179,8 +179,8 @@ export default function Exports() {
             jobs && <p>You have no exports in the last 24 hours.</p>
           )}
           {listFailed && <p className="errorMessage">Your exports could not be refreshed. They will keep building.</p>}
-          <h2>Recipient enrolment queue</h2>
-          <p>Recipient enrolments are not collected yet, so the enrolments export contains column headers only.</p>
+          <h2>Recipient enrollment queue</h2>
+          <p>Recipient enrollments are not collected yet, so the enrollments export contains column headers only.</p>
         </>
       )}
       <Announcer status={messages.status || status} alert={messages.alert || error} />

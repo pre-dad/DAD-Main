@@ -14,7 +14,7 @@ export default function HowItWorks() {
     <Page eyebrow="How it works" title="A small gift. A growing circle.">
       <p className="lead">
         DAD brings donors and partner organizations together to support practical aid work. Each initiative is assembled
-        with a partner and approved by the board. From launch, programs invite people to enrol in that work.
+        with a partner and approved by the board. From launch, programs invite people to enroll in that work.
       </p>
       <h2>Giving</h2>
       <p>
@@ -72,7 +72,7 @@ export default function HowItWorks() {
       </p>
       <h2>Programs start at launch</h2>
       <p>
-        This donor release does not enrol recipients or send money to them. Aid programs begin at launch. Partners can
+        This donor release does not enroll recipients or send money to them. Aid programs begin at launch. Partners can
         apply now; approved partners use the partner portal to manage their profile, initiatives, employee giving, and
         reports. Donor apps for iOS and Android are being developed separately.
       </p>

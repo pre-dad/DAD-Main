@@ -14,7 +14,7 @@ export default async function SpendPage() {
   return (
     <Page wide eyebrow="Transparency" title="Spend by category">
       <p className="lead">
-        Totals by category across DAD&apos;s published initiatives. DAD shows category totals only, not individual
+        Totals by category across DAD’s published initiatives. DAD shows category totals only, not individual
         transactions. DAD launches {launchDateLabel()}.
       </p>
       {spend ? <SpendByCategory spend={spend} /> : <ContentUnavailable />}

@@ -16,9 +16,9 @@ it("explains the donor release, monthly billing, direct referral credit, and lau
   expect(screen.getByText(/streak growing in local calendar days/)).toHaveTextContent(
     "Cancellation ends it at the first skipped renewal",
   );
-  expect(screen.getByText(/does not enrol recipients/)).toHaveTextContent("Aid programs begin at launch");
-  expect(screen.getByText(/does not enrol recipients/)).toHaveTextContent("approved partners use the partner portal");
-  expect(screen.getByText(/does not enrol recipients/)).toHaveTextContent(
+  expect(screen.getByText(/does not enroll recipients/)).toHaveTextContent("Aid programs begin at launch");
+  expect(screen.getByText(/does not enroll recipients/)).toHaveTextContent("approved partners use the partner portal");
+  expect(screen.getByText(/does not enroll recipients/)).toHaveTextContent(
     "Donor apps for iOS and Android are being developed separately",
   );
   expect(screen.queryByText(/R2/)).not.toBeInTheDocument();
@@ -53,6 +53,7 @@ it("leaves the test-payment caveat to the preview banner that frames every page"
     "Test payments only. No real money moves.",
   );
 });
+
 it("keeps /about as a permanent alias of the single About / how it works screen", () => {
   expect(() => About()).toThrow("NEXT_REDIRECT");
 });

@@ -92,7 +92,7 @@ export default function Staff({ q }: { q: string | null }) {
             </div>
             <nav aria-label="Staff tools" className="links">
               {actor.permissions.includes("data.export") && (
-                <Link href="/staff/exports">Exports and enrolment queue</Link>
+                <Link href="/staff/exports">Exports and enrollment queue</Link>
               )}
               {actor.permissions.includes("content.publish") && (
                 <>
