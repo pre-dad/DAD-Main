@@ -39,7 +39,7 @@ func TestCheckoutUsesPinnedSDKAndSavedParameters(t *testing.T) {
 			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
 		},
 	)
-	gateway := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}
+	gateway := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends)), budget: DefaultRateBudget()}
 	raw := []byte(
 		`{"mode":"payment","customer_email":"donor@example.org","allowed_payment_method_types":["card"],"line_items":[{"price_data":{"currency":"usd","unit_amount":3000,"product_data":{"name":"DAD one-time gift"}},"quantity":1}]}`,
 	)
@@ -60,7 +60,8 @@ func TestPaymentBoundariesRejectLiveAndUnsafeOrigins(t *testing.T) {
 		}
 	}
 	for _, origin := range []string{"http://example.org", "https://user:pass@example.org", "https://example.org/", "https://example.org?x=y", "https://example.org#part", "https://", "http://staff.localhost.example.org", "http://localhostx",
-		"https://Donor.example.org", "HTTPS://donor.example.org", "https://donor.example.org:443", "http://localhost:80", "https://donor.example.org:"} {
+		"https://Donor.example.org", "HTTPS://donor.example.org", "https://donor.example.org:443", "http://localhost:80", "https://donor.example.org:",
+		"https://donor.example.org:0443", "https://donor.example.org:99999", "https://donor.example.org:0", "http://localhost:03000"} {
 		if ValidateOrigin(origin) == nil {
 			t.Fatalf("unsafe origin accepted: %s", origin)
 		}
@@ -112,7 +113,7 @@ func TestFinancialGatewayUsesPinnedSDKAndIdempotentCardUpdate(t *testing.T) {
 			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
 		},
 	)
-	g := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}
+	g := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends)), budget: DefaultRateBudget()}
 	for _, read := range []func(context.Context, string) (Object, error){g.RetrievePaymentIntent, g.RetrieveRefund, g.RetrieveSubscription, g.RetrieveCheckout, g.RetrieveSetupIntent} {
 		value, err := read(context.Background(), "fixture")
 		if err != nil || !value.BoolIs("livemode", false) {
@@ -153,7 +154,7 @@ func TestSubscriptionMutationsNeverProrate(t *testing.T) {
 			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
 		},
 	)
-	gateway := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}
+	gateway := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends)), budget: DefaultRateBudget()}
 	ctx := context.Background()
 	for _, err := range []error{
 		gateway.ScheduleCancellation(ctx, "sub_fixture", 1800000000, "key"),
@@ -208,7 +209,7 @@ func TestExpireCheckoutReportsWhoWonTheRace(t *testing.T) {
 			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
 		},
 	)
-	gateway := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}
+	gateway := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends)), budget: DefaultRateBudget()}
 	ctx := context.Background()
 	if status, err := gateway.ExpireCheckout(ctx, "cs_test_open", "key"); err != nil || status != "expired" {
 		t.Fatalf("open session: %q %v", status, err)

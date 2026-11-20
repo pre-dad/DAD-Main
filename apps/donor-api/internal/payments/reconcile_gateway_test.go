@@ -24,7 +24,7 @@ func stripeTestGateway(t *testing.T, handler http.HandlerFunc) (*StripeGateway, 
 			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
 		},
 	)
-	return &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}, server.Close
+	return &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends)), budget: DefaultRateBudget()}, server.Close
 }
 
 func TestReconcileListPagesByCreatedWindow(t *testing.T) {

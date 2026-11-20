@@ -91,11 +91,11 @@ func (g *StripeGateway) ListInvoicePayments(ctx context.Context, invoice, paymen
 		for _, key := range []string{"id", "invoice", "amount_paid", "currency", "status", "livemode", "created"} {
 			facts[key] = row[key]
 		}
-		payment, err := row.Object("payment")
-		if err != nil || row.Text("invoice") == "" || payment.Text("payment_intent") == "" {
+		source, err := row.Object("payment")
+		if err != nil || row.Text("invoice") == "" || source.Text("payment_intent") == "" {
 			return nil, ErrFacts
 		}
-		reference := Object{"type": payment["type"], "payment_intent": payment["payment_intent"]}
+		reference := Object{"type": source["type"], "payment_intent": source["payment_intent"]}
 		facts["payment"], err = json.Marshal(reference)
 		if err != nil {
 			return nil, ErrFacts
@@ -117,7 +117,9 @@ func ReconciliationFacts(o Object) Object {
 
 // StripeGateway calls Stripe in test mode. A failed call is reported as
 // ErrProcessorUnavailable, never as the SDK error, which can carry donor inputs.
-// Every call first spends from budget.
+// Every call first spends from budget. The sk_test_ key prefix is the primary
+// guard against live mode; the livemode checks on the objects read back are a
+// second one, applied where a response carries the field, not on every call.
 type StripeGateway struct {
 	client *stripe.Client
 	budget Budget
@@ -235,13 +237,9 @@ func (g *StripeGateway) UpdateSubscriptionPaymentMethod(ctx context.Context, id,
 	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{DefaultPaymentMethod: stripe.String(method)}, key)
 }
 
-// acquire spends a token from the named bucket before an SDK call, blocking
-// until one is free or ctx is done. A gateway built directly in a test may have
-// no budget; that path is unlimited.
+// acquire spends a request from the named bucket before an SDK call, blocking
+// until one is free or ctx is done.
 func (g *StripeGateway) acquire(ctx context.Context, bucket string) error {
-	if g.budget == nil {
-		return ctx.Err()
-	}
 	return g.budget.Acquire(ctx, bucket)
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -60,12 +61,14 @@ type NativeCheckoutResult struct {
 	URL       string    `json:"url"`
 }
 
+// RemoteCheckout is the hosted checkout session the processor reports back.
 type RemoteCheckout struct {
 	ID       string `json:"id"`
 	URL      string `json:"url"`
 	Livemode *bool  `json:"livemode"`
 }
 
+// CheckoutGateway opens and closes hosted checkout sessions at the processor.
 type CheckoutGateway interface {
 	CreateCheckout(context.Context, []byte, string) (RemoteCheckout, error)
 	// ExpireCheckout closes an open hosted checkout so it can no longer be paid
@@ -88,8 +91,13 @@ func ValidateOrigin(origin string) error {
 	if strings.Contains(host, ":") {
 		host = "[" + host + "]"
 	}
-	if port := u.Port(); port != "" && port != map[string]string{"http": "80", "https": "443"}[u.Scheme] {
-		host += ":" + port
+	if port := u.Port(); port != "" {
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 || port[0] == '0' {
+			return errors.New("must use a port from 1 to 65535 without leading zeros")
+		}
+		if port != map[string]string{"http": "80", "https": "443"}[u.Scheme] {
+			host += ":" + port
+		}
 	}
 	if canonical := u.Scheme + "://" + host; origin != canonical {
 		return fmt.Errorf("must be written as browsers send it: %s", canonical)
@@ -110,6 +118,8 @@ func loopback(host string) bool {
 	return host == "localhost" || strings.HasSuffix(host, ".localhost") || host == "127.0.0.1"
 }
 
+// ValidateRemoteCheckout accepts only a test-mode session whose URL is on
+// checkout.stripe.com over HTTPS, so a donor is never sent anywhere else.
 func ValidateRemoteCheckout(remote RemoteCheckout) error {
 	u, err := url.Parse(remote.URL)
 	if err != nil || !strings.HasPrefix(remote.ID, "cs_test_") || len(remote.ID) > 255 || remote.Livemode == nil || *remote.Livemode ||
