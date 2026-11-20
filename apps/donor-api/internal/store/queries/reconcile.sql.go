@@ -68,7 +68,7 @@ FROM donor_gifts
 WHERE (paid_at >= $1::timestamptz AND paid_at < $2::timestamptz)
 OR stripe_payment_intent_id=ANY($3::text[])
 OR stripe_object_id=ANY($4::text[])
-ORDER BY paid_at, stripe_object_id LIMIT 10001
+ORDER BY paid_at, stripe_object_id LIMIT $5::int
 `
 
 type ReconciliationGiftsParams struct {
@@ -76,6 +76,7 @@ type ReconciliationGiftsParams struct {
 	EndAt          pgtype.Timestamptz `json:"end_at"`
 	PaymentIntents []string           `json:"payment_intents"`
 	StripeObjects  []string           `json:"stripe_objects"`
+	RowLimit       int32              `json:"row_limit"`
 }
 
 type ReconciliationGiftsRow struct {
@@ -93,6 +94,7 @@ func (q *Queries) ReconciliationGifts(ctx context.Context, arg ReconciliationGif
 		arg.EndAt,
 		arg.PaymentIntents,
 		arg.StripeObjects,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -123,13 +125,14 @@ SELECT stripe_refund_id, amount_minor, currency, status, observed_at
 FROM donor_refunds
 WHERE (observed_at >= $1::timestamptz AND observed_at < $2::timestamptz)
 OR stripe_refund_id=ANY($3::text[])
-ORDER BY observed_at, stripe_refund_id LIMIT 10001
+ORDER BY observed_at, stripe_refund_id LIMIT $4::int
 `
 
 type ReconciliationRefundsParams struct {
 	Start         pgtype.Timestamptz `json:"start"`
 	EndAt         pgtype.Timestamptz `json:"end_at"`
 	StripeRefunds []string           `json:"stripe_refunds"`
+	RowLimit      int32              `json:"row_limit"`
 }
 
 type ReconciliationRefundsRow struct {
@@ -141,7 +144,12 @@ type ReconciliationRefundsRow struct {
 }
 
 func (q *Queries) ReconciliationRefunds(ctx context.Context, arg ReconciliationRefundsParams) ([]ReconciliationRefundsRow, error) {
-	rows, err := q.db.Query(ctx, reconciliationRefunds, arg.Start, arg.EndAt, arg.StripeRefunds)
+	rows, err := q.db.Query(ctx, reconciliationRefunds,
+		arg.Start,
+		arg.EndAt,
+		arg.StripeRefunds,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

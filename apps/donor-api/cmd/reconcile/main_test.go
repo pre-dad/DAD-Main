@@ -91,17 +91,14 @@ func objects(t *testing.T, raws ...string) []payments.Object {
 
 func TestWindowResolution(t *testing.T) {
 	now := time.Date(2027, 3, 2, 5, 30, 0, 0, time.UTC) // 00:30 New York (EST)
-	// Default: yesterday in New York.
 	def, err := window("", "", "", 30*time.Minute, now)
 	if err != nil || def.NYDate != "2027-03-01" {
 		t.Fatalf("default window %+v err=%v", def, err)
 	}
-	// -date fixes the day deterministically.
 	byDate, err := window("2027-02-14", "", "", 30*time.Minute, now)
 	if err != nil || byDate.NYDate != "2027-02-14" {
 		t.Fatalf("dated window %+v err=%v", byDate, err)
 	}
-	// -since/-until must be given together and parse as RFC3339.
 	if _, err = window("", "2027-03-01T00:00:00Z", "", 0, now); err == nil {
 		t.Error("lone -since accepted")
 	}
@@ -123,7 +120,7 @@ func TestReconcileWindowAgainstSyntheticDB(t *testing.T) {
 	}
 	noon := time.Date(2027, 3, 1, 12, 0, 0, 0, reconcile.NewYork).Unix()
 
-	t.Run("clean day exits 0", func(t *testing.T) {
+	t.Run("clean day has no discrepancies", func(t *testing.T) {
 		// No seeded gifts in the window and no Stripe objects: a clean day.
 		report, err := reconcileWindow(context.Background(), win, fakeGateway{}, q)
 		if err != nil {
@@ -152,6 +149,92 @@ func TestReconcileWindowAgainstSyntheticDB(t *testing.T) {
 			t.Fatalf("want one missing gift, got %+v", report)
 		}
 	})
+}
+
+func TestWindowAboveTheRowBoundIsRejectedNotTruncated(t *testing.T) {
+	ctx := context.Background()
+	owner, reader := reconciliationDatabase(t)
+	newID := func() string {
+		uuid, err := store.NewID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return uuid.String()
+	}
+	donor, checkout := newID(), newID()
+	win, err := reconcile.DayWindow(time.Date(2036, 3, 1, 0, 0, 0, 0, reconcile.NewYork), 30*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := owner.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec("INSERT INTO donors(id,email) VALUES($1,$2)", donor, donor+"@reconciliation.invalid")
+	t.Cleanup(func() {
+		for _, sql := range []string{
+			"DELETE FROM donor_refunds WHERE gift_id IN (SELECT id FROM donor_gifts WHERE donor_id=$1)",
+			"DELETE FROM donor_gifts WHERE donor_id=$1", "DELETE FROM donor_checkouts WHERE donor_id=$1", "DELETE FROM donors WHERE id=$1",
+		} {
+			if _, err := owner.Exec(context.Background(), sql, donor); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	exec("INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency) VALUES($1,$2,3000,'MONTHLY')", checkout, donor)
+	for i := range 3 {
+		gift := newID()
+		exec(
+			"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,stripe_payment_intent_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,$5,3000,'USD','MONTHLY',$6)",
+			gift,
+			donor,
+			checkout,
+			"in_"+gift,
+			"pi_"+gift,
+			win.Start.Add(time.Duration(i+1)*time.Hour),
+		)
+		exec(
+			"INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,1000,'USD','SUCCEEDED',$4)",
+			newID(),
+			gift,
+			"re_"+gift,
+			win.Start.Add(time.Duration(i+1)*time.Hour),
+		)
+	}
+	q := queries.New(reader)
+	defer func(bound int32) { reconcileRowBound = bound }(reconcileRowBound)
+
+	reconcileRowBound = 3
+	if _, err := reconcileWindow(ctx, win, fakeGateway{}, q); err != nil && strings.Contains(err.Error(), "row bound") {
+		t.Fatalf("a window exactly at the bound was rejected: %v", err)
+	}
+	reconcileRowBound = 2
+	_, err = reconcileWindow(ctx, win, fakeGateway{}, q)
+	if err == nil || !strings.Contains(err.Error(), "exceeds the in-memory row bound") {
+		t.Fatalf("a window above the bound must fail loudly, got %v", err)
+	}
+}
+
+func TestChargeWithoutPaymentIntentIsNotQueriedByEmptyID(t *testing.T) {
+	_, reader := reconciliationDatabase(t)
+	win, err := reconcile.DayWindow(time.Date(2027, 3, 1, 12, 0, 0, 0, reconcile.NewYork), 30*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noon := strconv.FormatInt(time.Date(2027, 3, 1, 12, 0, 0, 0, reconcile.NewYork).Unix(), 10)
+	gw := fakeGateway{charges: objects(
+		t,
+		`{"id":"ch_nopi","amount":3000,"amount_captured":3000,"currency":"usd","status":"succeeded","paid":true,"captured":true,"livemode":false,"created":`+noon+`}`,
+	)}
+	report, err := reconcileWindow(context.Background(), win, gw, queries.New(reader))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.MissingGifts != 1 {
+		t.Fatalf("want the charge reported missing, got %+v", report)
+	}
 }
 
 func TestReconciliationMatchesAcrossCreationAndObservationDays(t *testing.T) {
