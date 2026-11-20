@@ -46,7 +46,7 @@ type StaffPartnerSource interface {
 	PendingApplications(ctx context.Context, token, after string) (store.PendingApplicationPage, error)
 	Approve(ctx context.Context, token string, appID pgtype.UUID) (pgtype.UUID, error)
 	Reject(ctx context.Context, token string, appID pgtype.UUID, reason string) error
-	LinkInitiative(ctx context.Context, token string, partnerID, initiativeID pgtype.UUID, commitment ...int64) error
+	LinkInitiative(ctx context.Context, token string, partnerID, initiativeID pgtype.UUID, commitment *int64) error
 	SetMatch(ctx context.Context, token string, partnerID pgtype.UUID, workforce, rateBP int32, capMinor int64) error
 	Partners(ctx context.Context, token string, offset int64) (store.StaffPartnerPage, error)
 	Partner(ctx context.Context, token string, partnerID pgtype.UUID) (store.StaffPartnerDetail, error)
@@ -549,11 +549,7 @@ func (a *api) staffPartnerLink(w http.ResponseWriter, r *http.Request, session s
 		return
 	}
 	a.staffPartner().serve(w, r, func(ctx context.Context) (any, error) {
-		var amount []int64
-		if body.CommittedMinor != nil {
-			amount = append(amount, *body.CommittedMinor)
-		}
-		return map[string]any{"linked": true}, a.StaffPartner.LinkInitiative(ctx, session, id, initiativeID, amount...)
+		return map[string]any{"linked": true}, a.StaffPartner.LinkInitiative(ctx, session, id, initiativeID, body.CommittedMinor)
 	})
 }
 
