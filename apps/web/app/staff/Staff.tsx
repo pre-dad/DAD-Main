@@ -9,6 +9,17 @@ import { ApiError, api, failureMessage, type ResponseBody, type Schema } from "@
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useKeysetResource } from "@/lib/useKeysetResource";
 
+const ROLES = [
+  "SUPER_ADMIN",
+  "OP_PARTNERSHIPS",
+  "OP_GROWTH",
+  "OP_IMPACT",
+] as const satisfies readonly Schema<"StaffView">["role"][];
+
+function RoleOptions() {
+  return ROLES.map((role) => <option key={role}>{role}</option>);
+}
+
 /** `q` is the submitted search, kept in the URL so Back from a donor record returns to it. */
 export default function Staff({ q }: { q: string | null }) {
   // "left" when this person chose to sign out, "expired" when the server ended the session.
@@ -155,7 +166,9 @@ export default function Staff({ q }: { q: string | null }) {
                                   action(async () => {
                                     const result = await api<
                                       ResponseBody<"/donor/staff/accounts/{staff_id}/recovery", "post">
-                                    >(`/donor/staff/accounts/${account.id}/recovery`, { method: "POST" });
+                                    >(`/donor/staff/accounts/${encodeURIComponent(account.id)}/recovery`, {
+                                      method: "POST",
+                                    });
                                     setInvitation(result.invitation_url);
                                     reloadAccounts();
                                   }, `Replacement invitation created for ${account.name}.`)
@@ -171,7 +184,7 @@ export default function Staff({ q }: { q: string | null }) {
                                   event.preventDefault();
                                   const chosen = new FormData(event.currentTarget).get("role");
                                   action(async () => {
-                                    await api(`/donor/staff/accounts/${account.id}/role`, {
+                                    await api(`/donor/staff/accounts/${encodeURIComponent(account.id)}/role`, {
                                       method: "POST",
                                       body: JSON.stringify({ role: chosen }),
                                     });
@@ -182,10 +195,7 @@ export default function Staff({ q }: { q: string | null }) {
                                 <label>
                                   New role for {account.name}
                                   <select name="role" defaultValue={account.role}>
-                                    <option>SUPER_ADMIN</option>
-                                    <option>OP_PARTNERSHIPS</option>
-                                    <option>OP_GROWTH</option>
-                                    <option>OP_IMPACT</option>
+                                    <RoleOptions />
                                   </select>
                                 </label>
                                 <p>A role change ends existing sessions and requires a new sign-in.</p>
@@ -206,7 +216,9 @@ export default function Staff({ q }: { q: string | null }) {
                               disabled={busy}
                               onClick={() =>
                                 action(async () => {
-                                  await api(`/donor/staff/accounts/${account.id}/disable`, { method: "POST" });
+                                  await api(`/donor/staff/accounts/${encodeURIComponent(account.id)}/disable`, {
+                                    method: "POST",
+                                  });
                                   reloadAccounts();
                                 }, `${account.name} disabled.`)
                               }
@@ -252,10 +264,7 @@ export default function Staff({ q }: { q: string | null }) {
                     <label>
                       Role
                       <select value={role} onChange={(event) => setRole(event.target.value)}>
-                        <option>SUPER_ADMIN</option>
-                        <option>OP_PARTNERSHIPS</option>
-                        <option>OP_GROWTH</option>
-                        <option>OP_IMPACT</option>
+                        <RoleOptions />
                       </select>
                     </label>
                     <button type="submit" className="button">
@@ -286,7 +295,9 @@ export default function Staff({ q }: { q: string | null }) {
           absent
             ? signedOut === "left"
               ? "You’ve signed out of DAD staff."
-              : ""
+              : signedOut === "expired"
+                ? "Your staff session ended. Sign in again."
+                : ""
             : busy
               ? "Working…"
               : done || messages.status || accountMessages.status

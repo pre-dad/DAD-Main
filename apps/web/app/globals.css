@@ -287,45 +287,6 @@ input[type="radio"] {
   font-weight: 400;
 }
 
-.segmented {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-1);
-  padding: var(--space-1);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: var(--field);
-}
-.segmented label {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 44px;
-  border-radius: var(--radius-pill);
-  cursor: pointer;
-}
-.segmented input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  cursor: pointer;
-}
-.segmented label:has(:checked) {
-  background: var(--ink);
-  color: var(--paper);
-}
-.segmented label:has(:focus-visible) {
-  outline: 3px solid var(--brand-ink);
-  outline-offset: 2px;
-}
-fieldset:disabled .segmented label {
-  opacity: 0.6;
-  cursor: default;
-}
-
 .presets {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -575,14 +536,14 @@ details[open] > summary::after {
   border-radius: var(--radius-card);
   background: var(--card);
 }
-.metric h2 {
+.metric :is(h2, h3) {
   font-family: var(--font-sans);
   font-size: var(--text-sm);
   font-weight: 600;
   letter-spacing: 0;
   color: var(--ink-soft);
 }
-.metric h2.initiativeTitle {
+.metric :is(h2, h3).initiativeTitle {
   font-family: var(--font-display);
   font-size: var(--text-xl);
   color: var(--ink);
@@ -998,6 +959,34 @@ footer .tagline {
 .previewBanner :focus-visible {
   outline-color: var(--brand);
 }
+.interestList {
+  padding: 0;
+  list-style: none;
+}
+.interestList > li {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 44px;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.interestAdd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-3);
+}
+.interestField {
+  flex: 1 1 14rem;
+}
+.interestRemove {
+  flex: none;
+  white-space: nowrap;
+}
+
 @media (min-width: 480px) {
   .previewMore {
     display: inline;
@@ -1387,32 +1376,4 @@ footer .tagline {
     border: 1px solid #bbb;
     break-inside: avoid;
   }
-}
-
-.interestList {
-  padding: 0;
-  list-style: none;
-}
-.interestList > li {
-  margin: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  min-height: 44px;
-  border-bottom: 1px solid var(--line);
-  overflow-wrap: anywhere;
-}
-.interestAdd {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: var(--space-3);
-}
-.interestField {
-  flex: 1 1 14rem;
-}
-.interestRemove {
-  flex: none;
-  white-space: nowrap;
 }

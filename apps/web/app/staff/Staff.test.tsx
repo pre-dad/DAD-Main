@@ -172,3 +172,79 @@ it("pages donor search results by cursor and returns to the previous page", asyn
   fireEvent.click(screen.getByRole("button", { name: "Previous donor page" }));
   expect(await screen.findByRole("link", { name: "page1@example.org" })).toBeVisible();
 });
+
+function serveAccounts(respond: (url: string, init?: RequestInit) => ReturnType<typeof reply>) {
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/api/donor/staff/me") return reply(200, admin);
+    if (url === "/api/donor/staff/accounts" && !init?.method) return reply(200, [admin, colleague]);
+    return respond(url, init);
+  });
+  vi.stubGlobal("fetch", fetch);
+  return fetch;
+}
+
+const posted = (fetch: ReturnType<typeof serveAccounts>, url: string) =>
+  fetch.mock.calls.find(([called, init]) => called === url && init?.method === "POST")?.[1];
+
+it("posts each account action to its own endpoint with the right body", async () => {
+  const fetch = serveAccounts((url) =>
+    url.endsWith("/recovery") || url === "/api/donor/staff/accounts"
+      ? reply(200, { invitation_url: "https://staff.example/activate#token=x" })
+      : reply(200, {}),
+  );
+  render(<Staff q={null} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Confirm replacement invitation" }));
+  expect(await screen.findByText("Replacement invitation created for Cy Colleague.")).toBeVisible();
+  expect(posted(fetch, "/api/donor/staff/accounts/staff-2/recovery")).toBeDefined();
+  expect(screen.getByText("https://staff.example/activate#token=x")).toBeVisible();
+
+  fireEvent.change(screen.getByRole("combobox", { name: "New role for Cy Colleague" }), {
+    target: { value: "OP_IMPACT" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Confirm role change" }));
+  await screen.findByText("Cy Colleague’s role changed to OP_IMPACT.");
+  expect(JSON.parse(String(posted(fetch, "/api/donor/staff/accounts/staff-2/role")?.body))).toEqual({
+    role: "OP_IMPACT",
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Confirm disable Cy Colleague" }));
+  await screen.findByText("Cy Colleague disabled.");
+  expect(posted(fetch, "/api/donor/staff/accounts/staff-2/disable")).toBeDefined();
+
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "New Person" } });
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@example.org" } });
+  fireEvent.change(screen.getByRole("combobox", { name: "Role" }), { target: { value: "OP_GROWTH" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create private invitation" }));
+  await screen.findByText("Invitation created.");
+  expect(JSON.parse(String(posted(fetch, "/api/donor/staff/accounts")?.body))).toEqual({
+    email: "new@example.org",
+    name: "New Person",
+    role: "OP_GROWTH",
+  });
+});
+
+it("offers every staff role from the schema in both role pickers", async () => {
+  serveAccounts(() => reply(200, {}));
+  render(<Staff q={null} />);
+  const roles = ["SUPER_ADMIN", "OP_PARTNERSHIPS", "OP_GROWTH", "OP_IMPACT"];
+  for (const name of ["New role for Cy Colleague", "Role"]) {
+    const select = await screen.findByRole("combobox", { name });
+    expect([...select.querySelectorAll("option")].map((option) => option.textContent)).toEqual(roles);
+  }
+});
+
+it("tells a staff member their session ended when an action returns 401", async () => {
+  serveAccounts(() => reply(401, { detail: "Staff sign-in required" }));
+  render(<Staff q={null} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Confirm disable Cy Colleague" }));
+  expect(await screen.findByText("Your staff session ended. Sign in again.")).toBeVisible();
+  expect(screen.getByRole("link", { name: "Staff sign-in" })).toHaveAttribute("href", "/staff/sign-in");
+});
+
+it("explains a 403 on an account action and keeps the page usable", async () => {
+  serveAccounts(() => reply(403, { detail: "Forbidden" }));
+  render(<Staff q={null} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Confirm disable Cy Colleague" }));
+  expect(await screen.findByText("Your staff role does not permit this action.")).toHaveAttribute("role", "alert");
+  expect(screen.getByRole("button", { name: "Confirm disable Cy Colleague" })).toBeEnabled();
+});
