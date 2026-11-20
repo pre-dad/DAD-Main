@@ -93,7 +93,11 @@ func TestAnalyticsBatchStoresEveryEventAndIgnoresDuplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 	pool := database(t)
-	rows, err := pool.Query(ctx, "SELECT id, source, journey_id, properties->>'source' FROM analytics_events WHERE id = ANY($1)", []pgtype.UUID{first, second})
+	rows, err := pool.Query(
+		ctx,
+		"SELECT id, source, journey_id, properties->>'source' FROM analytics_events WHERE id = ANY($1)",
+		[]pgtype.UUID{first, second},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -120,7 +120,12 @@ func TestLateCheckoutAfterDeletionIsReversed(t *testing.T) {
 		t.Fatal(err)
 	}
 	if gateway.refundAmounts[0] != 3000 || gateway.refundKeys[0] != refundJob {
-		t.Fatalf("refund sent %d under key %q; want 3000 under the reversal id %q", gateway.refundAmounts[0], gateway.refundKeys[0], refundJob)
+		t.Fatalf(
+			"refund sent %d under key %q; want 3000 under the reversal id %q",
+			gateway.refundAmounts[0],
+			gateway.refundKeys[0],
+			refundJob,
+		)
 	}
 	var lastError string
 	if err := f.db.QueryRow(ctx, "SELECT last_error FROM donor_deleted_account_reversals WHERE kind='CANCEL' AND completed_at IS NULL AND donor_id=$1", f.donorID).Scan(&lastError); err != nil ||

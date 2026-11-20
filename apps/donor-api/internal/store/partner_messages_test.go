@@ -105,7 +105,14 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 				t.Fatalf("%s: delivered to non-recipient %s", kind, m.To)
 			}
 			if m.Subject != test.subject || !strings.Contains(m.Subject+"\n"+m.Body, test.org) {
-				t.Fatalf("%s: subject %q, body %q; want subject %q and the organisation %q", kind, m.Subject, m.Body, test.subject, test.org)
+				t.Fatalf(
+					"%s: subject %q, body %q; want subject %q and the organisation %q",
+					kind,
+					m.Subject,
+					m.Body,
+					test.subject,
+					test.org,
+				)
 			}
 			if !strings.Contains(m.Body, "https://donor.example.org/partner") || !strings.HasSuffix(m.Body, partnerMessageFooter) {
 				t.Fatalf("%s: body lacks the portal link or footer: %q", kind, m.Body)

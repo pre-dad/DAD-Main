@@ -231,7 +231,13 @@ func TestStaffAccountDeletionsListIsReadOnlyAndAudited(t *testing.T) {
 	for i := range pageSize {
 		other, _ := donor(t, pool)
 		older[other] = true
-		mustExec(t, pool, "INSERT INTO donor_deletions (donor_id, deleted_at) VALUES ($1,$2)", other, deletedAt.Add(-time.Duration(i+1)*time.Second))
+		mustExec(
+			t,
+			pool,
+			"INSERT INTO donor_deletions (donor_id, deleted_at) VALUES ($1,$2)",
+			other,
+			deletedAt.Add(-time.Duration(i+1)*time.Second),
+		)
 	}
 	t.Cleanup(func() {
 		for _, sql := range []string{"DELETE FROM donor_deletions WHERE donor_id=$1", "DELETE FROM donor_gifts WHERE donor_id=$1", "DELETE FROM donor_checkouts WHERE donor_id=$1"} {
