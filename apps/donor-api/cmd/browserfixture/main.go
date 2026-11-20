@@ -16,8 +16,11 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"dad/donor-api/internal/store"
 	"dad/donor-api/internal/store/queries"
@@ -44,8 +47,9 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 		return errors.New("-origin is required")
 	}
 	dsn := getenv("DONOR_GO_DATABASE_URL")
-	if parsed, err := url.Parse(dsn); err != nil || parsed.Path != "/donor_go" {
-		return errors.New("DONOR_GO_DATABASE_URL must name the dedicated donor_go test database")
+	if parsed, err := url.Parse(dsn); err != nil || parsed.Path != "/donor_go" ||
+		!slices.Contains([]string{"localhost", "127.0.0.1", "::1"}, parsed.Hostname()) {
+		return errors.New("DONOR_GO_DATABASE_URL must name the dedicated donor_go test database on localhost")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -54,6 +58,10 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 		return err
 	}
 	defer pool.Close()
+	return prepare(ctx, pool, *kind, *origin, out)
+}
+
+func prepare(ctx context.Context, pool *pgxpool.Pool, kind, origin string, out io.Writer) error {
 	id, err := store.NewID()
 	if err != nil {
 		return err
@@ -65,7 +73,7 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 	secret := store.HashToken(token.String())
 	expires := time.Now().Add(15 * time.Minute)
 	email := "browser-" + id.String() + "@example.org"
-	if *kind == "donor" {
+	if kind == "donor" {
 		if err = queries.New(pool).InsertGuest(ctx, queries.InsertGuestParams{ID: id, Email: email}); err != nil {
 			return err
 		}
@@ -73,7 +81,7 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 			id, store.HashToken(secret), expires); err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(out, "%s/account/claim#token=%s\n", *origin, secret)
+		_, err = fmt.Fprintf(out, "%s/account/claim#token=%s\n", origin, secret)
 		return err
 	}
 	if _, err = pool.Exec(ctx,
@@ -88,6 +96,6 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 		id, email, store.HashToken(secret), expires); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(out, "%s/partner/accept#token=%s\n", *origin, secret)
+	_, err = fmt.Fprintf(out, "%s/partner/accept#token=%s\n", origin, secret)
 	return err
 }
