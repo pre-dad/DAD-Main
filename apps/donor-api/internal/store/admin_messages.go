@@ -60,7 +60,7 @@ func (s *StaffService) ResendMessage(ctx context.Context, token string, messageI
 			return QueuedMessage{}, err
 		}
 		if (source.Kind != "RECEIPT" && source.Kind != "ANNUAL") || source.SuppressedReason.Valid ||
-			(!source.CompletedAt.Valid && source.Attempts < maxDeliveryAttempts) {
+			(!source.CompletedAt.Valid && source.Attempts < MaxDeliveryAttempts) {
 			return QueuedMessage{}, ErrStaffConflict
 		}
 		recent, err := q.RecentDonorMessage(
