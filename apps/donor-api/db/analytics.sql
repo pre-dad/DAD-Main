@@ -5,6 +5,11 @@ VALUES ($1, $2, $3, $4, $5, $6);
 -- name: InsertObservedEvent :exec
 INSERT INTO analytics_events(id,name,donor_id,source,properties,occurred_at,journey_id,dedup_key)
 VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING;
+-- name: InsertServerGiftEvents :exec
+INSERT INTO analytics_events(id,name,donor_id,source,properties,occurred_at,dedup_key)
+SELECT unnest(sqlc.arg(ids)::uuid[]),'gift_completed',sqlc.arg(donor_id)::uuid,'SERVER','{}'::jsonb,
+ unnest(sqlc.arg(occurred_at)::timestamptz[]),unnest(sqlc.arg(dedup_keys)::text[])
+ON CONFLICT DO NOTHING;
 -- name: InsertObservedEvents :exec
 INSERT INTO analytics_events(id,name,donor_id,source,properties,occurred_at,journey_id)
 SELECT unnest(sqlc.arg(ids)::uuid[]),unnest(sqlc.arg(names)::text[]),sqlc.narg(donor_id)::uuid,sqlc.arg(source)::text,

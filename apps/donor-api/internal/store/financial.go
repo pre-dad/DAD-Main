@@ -121,7 +121,7 @@ func historicalBest(
 		byID[r.ID] = r
 	}
 	observed := map[string]bool{}
-	history := []recognition.Refund{}
+	refundHistory := []recognition.Refund{}
 	for _, o := range observations {
 		r, ok := byID[o.StripeRefundID]
 		if !ok {
@@ -130,14 +130,14 @@ func historicalBest(
 		r.Status = o.Status
 		r.UpdatedAt = o.ObservedAt.Time
 		observed[r.ID] = true
-		history = append(history, r)
+		refundHistory = append(refundHistory, r)
 	}
 	for _, r := range h.Refunds {
 		if !observed[r.ID] && !r.UpdatedAt.After(now) {
-			history = append(history, r)
+			refundHistory = append(refundHistory, r)
 		}
 	}
-	return replayBest(ctx, id.String(), h, history, now, previous, stops)
+	return replayBest(ctx, id.String(), h, refundHistory, now, previous, stops)
 }
 
 // refundsAsOf returns each refund's state as of asOf. A refund last updated
@@ -172,12 +172,12 @@ func replayBest(
 	ctx context.Context,
 	donorID string,
 	h history,
-	history []recognition.Refund,
+	refundHistory []recognition.Refund,
 	now time.Time,
 	previous int64,
 	stops []time.Time,
 ) (int64, error) {
-	slices.SortStableFunc(history, func(a, b recognition.Refund) int { return a.UpdatedAt.Compare(b.UpdatedAt) })
+	slices.SortStableFunc(refundHistory, func(a, b recognition.Refund) int { return a.UpdatedAt.Compare(b.UpdatedAt) })
 	gifts := slices.Clone(h.Gifts)
 	slices.SortStableFunc(gifts, func(a, b recognition.Gift) int { return a.PaidAt.Compare(b.PaidAt) })
 	points := map[time.Time]bool{}
@@ -186,7 +186,7 @@ func replayBest(
 			points[g.PaidAt.UTC()] = true
 		}
 	}
-	for _, r := range history {
+	for _, r := range refundHistory {
 		points[r.UpdatedAt.UTC()] = true
 	}
 	ordered := slices.SortedFunc(maps.Keys(points), time.Time.Compare)
@@ -198,8 +198,8 @@ func replayBest(
 		if err := ctx.Err(); err != nil {
 			return 0, err
 		}
-		for refundIndex < len(history) && !history[refundIndex].UpdatedAt.After(point) {
-			r := history[refundIndex]
+		for refundIndex < len(refundHistory) && !refundHistory[refundIndex].UpdatedAt.After(point) {
+			r := refundHistory[refundIndex]
 			latest[r.ID] = r
 			refundIndex++
 		}
@@ -382,13 +382,8 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 			out.CurrentMonthlyMinor = latestMonthlyMinor(h.Gifts)
 		}
 	}
-	for _, g := range h.Gifts {
-		if g.PaidAt.After(now) || g.PaidAt.Before(now.AddDate(0, -13, 0)) {
-			continue
-		}
-		if err := recordServerEvent(ctx, q, id, "gift_completed", "gift:"+g.ID, g.PaidAt); err != nil {
-			return projection{}, err
-		}
+	if err := recordGiftEvents(ctx, q, id, h.Gifts, now); err != nil {
+		return projection{}, err
 	}
 
 	if old.AtRisk != out.AtRisk && out.AtRisk {
@@ -414,7 +409,7 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 	if err = recomputeReferredTotals(ctx, q, id, &out); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
-	if err = applyReferralDelta(ctx, q, old, out, now); err != nil {
+	if err = applyReferralDelta(ctx, q, old, out, rules.Badges, now); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
 	// A donor converts at most one referral (R-3), so a later attribution
@@ -436,6 +431,26 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 		}
 	}
 	return projection{out, streak.Since, donor, zone}, q.SaveProjection(ctx, out)
+}
+
+// recordGiftEvents records a completed-gift event for each gift paid within the
+// last 13 months; a gift already recorded is left as it was.
+func recordGiftEvents(ctx context.Context, q *queries.Queries, donor pgtype.UUID, gifts []recognition.Gift, now time.Time) error {
+	batch := queries.InsertServerGiftEventsParams{DonorID: donor}
+	for _, g := range gifts {
+		if g.PaidAt.After(now) || g.PaidAt.Before(now.AddDate(0, -13, 0)) {
+			continue
+		}
+		id, err := NewID()
+		if err != nil {
+			return err
+		}
+		batch.Ids, batch.DedupKeys, batch.OccurredAt = append(batch.Ids, id), append(batch.DedupKeys, "gift:"+g.ID), append(batch.OccurredAt, timestamp(g.PaidAt))
+	}
+	if len(batch.Ids) == 0 {
+		return nil
+	}
+	return q.InsertServerGiftEvents(ctx, batch)
 }
 
 // recomputeReferredTotals reconciles the locked row with committed referred
@@ -487,6 +502,7 @@ func applyReferralDelta(
 	q *queries.Queries,
 	old queries.DonorMetricProjection,
 	out queries.SaveProjectionParams,
+	rules []BadgeRule,
 	now time.Time,
 ) error {
 	deltas := map[pgtype.UUID]queries.ApplyReferralDeltaParams{}
@@ -522,11 +538,7 @@ func applyReferralDelta(
 			ConvertedReferrals: counts.ReferredLinkCount + counts.ReferredIrlCount,
 			HasIRLReferral:     counts.ReferredIrlCount > 0,
 		}
-		rules, err := recognitionRules(ctx, q)
-		if err != nil {
-			return err
-		}
-		for _, rule := range rules.Badges {
+		for _, rule := range rules {
 			if !ruleEarned(rule, referrals) {
 				continue
 			}
@@ -547,15 +559,11 @@ func nextRefresh(
 	refundBoundaries, stops []time.Time,
 	now time.Time,
 	zone *time.Location,
-	configured ...[]int64,
+	milestones []int64,
 ) pgtype.Timestamptz {
 	boundaries := slices.Concat(refundBoundaries, stops)
 	if out.StreakSince.Valid {
 		run := recognition.Streak{Since: &out.StreakSince.Time}
-		milestones := recognition.LadderMilestones
-		if len(configured) > 0 {
-			milestones = configured[0]
-		}
 		if next := run.LadderWithMilestones(now, zone, milestones).NextMilestone; next != nil {
 			boundaries = append(boundaries, run.Reaches(*next, zone))
 		}

@@ -27,6 +27,9 @@ INSERT INTO donor_partner_teams (id, partner_id, name, created_at) VALUES ($1,$2
 ON CONFLICT (partner_id, name) DO NOTHING
 RETURNING id;
 
+-- name: CountPartnerTeams :one
+SELECT count(*) FROM donor_partner_teams WHERE partner_id = $1;
+
 -- name: TeamByID :one
 SELECT id, partner_id, name FROM donor_partner_teams WHERE id = $1;
 

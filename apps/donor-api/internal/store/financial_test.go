@@ -271,3 +271,31 @@ func TestProjectionKeepsContinuityAndHistoricalBest(t *testing.T) {
 		t.Fatal("later cancellation changed the historical best", got, err)
 	}
 }
+
+func TestRecordGiftEventsBatchesRecentGiftsAndIsIdempotent(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	id, _ := donor(t, pool)
+	accountCleanup(t, pool, id)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM analytics_events WHERE donor_id=$1", id) })
+	now := time.Now().UTC().Truncate(time.Second)
+	gifts := []recognition.Gift{
+		{ID: "recent-" + id.String(), PaidAt: now.AddDate(0, -1, 0)},
+		{ID: "older-" + id.String(), PaidAt: now.AddDate(0, -12, 0)},
+		{ID: "ancient-" + id.String(), PaidAt: now.AddDate(0, -14, 0)},
+		{ID: "future-" + id.String(), PaidAt: now.Add(time.Hour)},
+	}
+	q := queries.New(pool)
+	for range 2 {
+		if err := recordGiftEvents(ctx, q, id, gifts, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var stored int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM analytics_events WHERE donor_id=$1 AND name='gift_completed' AND source='SERVER'", id).Scan(&stored); err != nil || stored != 2 {
+		t.Fatalf("%d gift events stored after two refreshes, want the 2 inside the window: %v", stored, err)
+	}
+	if err := recordGiftEvents(ctx, q, id, nil, now); err != nil {
+		t.Fatal(err)
+	}
+}
