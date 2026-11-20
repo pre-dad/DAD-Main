@@ -37,3 +37,13 @@ it("never treats checkout navigation as financial completion or copies personal 
   expect(payload).not.toContain("gift_completed");
   expect(payload).not.toContain("private@example.org");
 });
+it("counts a single event page as event_viewed but not the invite-only list", () => {
+  const fetch = vi.fn().mockResolvedValue(new Response("{}"));
+  vi.stubGlobal("fetch", fetch);
+  analyticsChoice(true);
+  observeAPI("/donor/me/events/invite-only", "GET", {}, undefined);
+  expect(fetch).not.toHaveBeenCalled();
+  observeAPI("/donor/me/events/e1", "GET", {}, undefined);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(String(fetch.mock.calls[0][1].body)).toContain("event_viewed");
+});
