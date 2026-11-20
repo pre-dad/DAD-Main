@@ -115,11 +115,11 @@ func (i *Issuer) ApplePass(link string, now time.Time) ([]byte, error) {
 	}
 	pass, err := json.Marshal(map[string]any{
 		"formatVersion": 1, "passTypeIdentifier": a.PassType, "teamIdentifier": a.Team, "serialNumber": passID(link), "organizationName": "Dynamic Aid Delivery",
-		"description": "DAD sandbox referral code", "logoText": "DAD · Sandbox", "foregroundColor": "rgb(20, 66, 54)", "backgroundColor": "rgb(255, 255, 255)", "labelColor": "rgb(20, 66, 54)",
+		"description": passHeadline, "logoText": passLogoText, "foregroundColor": "rgb(20, 66, 54)", "backgroundColor": "rgb(255, 255, 255)", "labelColor": "rgb(20, 66, 54)",
 		"sharingProhibited": true, "barcodes": []map[string]string{{"format": "PKBarcodeFormatQR", "message": link, "messageEncoding": "iso-8859-1"}},
 		"generic": map[string]any{
 			"primaryFields":   []map[string]string{{"key": "invite", "label": "INVITE SOMEONE", "value": "Join the circle"}},
-			"auxiliaryFields": []map[string]string{{"key": "amount", "label": "ABOUT A DOLLAR A DAY", "value": "$30/month"}},
+			"auxiliaryFields": []map[string]string{{"key": "amount", "label": "ABOUT A DOLLAR A DAY", "value": monthlyAmount}},
 			"backFields": []map[string]string{
 				{"key": "giving", "label": "DAD", "value": disclosure},
 				{

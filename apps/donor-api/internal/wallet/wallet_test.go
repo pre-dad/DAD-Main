@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
@@ -15,6 +16,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
 	"math/big"
 	"os"
@@ -233,7 +235,7 @@ func TestWalletConfigurationLoadsPrivateFilesAndRejectsInsecureOrigin(t *testing
 		map[string]string{
 			"type":         "service_account",
 			"client_email": issuer.Google.Email,
-			"private_key":  string(files["DONOR_WALLET_APPLE_KEY_FILE"]),
+			"private_key":  string(pkcs8Pem(t, issuer.Apple.Key)),
 		},
 	)
 	if err != nil {
@@ -262,4 +264,49 @@ func TestWalletConfigurationLoadsPrivateFilesAndRejectsInsecureOrigin(t *testing
 	if _, err = newApple(issuer.Apple.Certificate.Raw, files["DONOR_WALLET_APPLE_KEY_FILE"], issuer.Apple.Certificate.Raw, now); err == nil {
 		t.Fatal("invalid certificate chain accepted")
 	}
+}
+
+func TestPrivateKeyFormats(t *testing.T) {
+	rsaKey := func(bits int) *rsa.PrivateKey {
+		key, err := rsa.GenerateKey(rand.Reader, bits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return key
+	}
+	pkcs8 := func(key any) []byte {
+		der, err := x509.MarshalPKCS8PrivateKey(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	}
+	_, edKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	small := rsaKey(1024)
+	good := rsaKey(2048)
+	if got, err := privateKey(pkcs8(good)); err != nil || !got.Equal(good) {
+		t.Fatal("PKCS#8 RSA key rejected", err)
+	}
+	for name, data := range map[string][]byte{
+		"1024-bit PKCS#8":  pkcs8(small),
+		"1024-bit PKCS#1":  pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(small)}),
+		"ed25519 PKCS#8":   pkcs8(edKey),
+		"unknown PEM type": pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(good)}),
+	} {
+		if _, err := privateKey(data); !errors.Is(err, ErrConfiguration) {
+			t.Errorf("%s: got %v, want ErrConfiguration", name, err)
+		}
+	}
+}
+
+func pkcs8Pem(t *testing.T, key *rsa.PrivateKey) []byte {
+	t.Helper()
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
 }
