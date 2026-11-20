@@ -32,6 +32,7 @@ func run(args []string, getenv func(string) string) error {
 	defer cancel()
 	pool, err := store.Open(ctx, dsn, 2)
 	if err != nil {
+		slog.Error("migration database unavailable", "cause", migrations.Cause(err))
 		return errors.New("migration database unavailable")
 	}
 	defer pool.Close()
