@@ -4999,7 +4999,7 @@ export interface operations {
                         name: "app_opened" | "role_selected" | "signup_started" | "signup_completed" | "attribution_captured" | "gift_started" | "gift_completed" | "gift_failed" | "gift_recovered" | "gift_lapsed" | "amount_changed" | "gift_cancelled" | "account_deleted" | "invite_shared" | "irl_code_shown" | "referral_converted" | "badge_earned" | "milestone_reached" | "rankings_toggled" | "volunteer_opted_in" | "event_viewed" | "event_reserved" | "event_waitlisted" | "event_checked_in" | "team_created" | "team_joined" | "partner_signup_submitted" | "partner_approved" | "partner_report_exported" | "push_opened";
                         /**
                          * Format: date-time
-                         * @description Client event time (RFC 3339). Rejected if missing or implausibly in the future.
+                         * @description Client event time (RFC 3339). Rejected if missing, implausibly in the future, or more than 30 days old.
                          */
                         occurred_at: string;
                         /** @description Typed payload for the events that carry one: attribution_captured requires {source: link|IRL|company}, invite_shared requires {channel}, push_opened requires {type}. All other events take no properties. */

@@ -393,3 +393,20 @@ func TestCheckoutRetryBelongsToTheDonorNotAReusedEmail(t *testing.T) {
 		t.Fatal("unauthorized retry reached the processor")
 	}
 }
+
+func TestHeldCheckoutReportsDatabaseFailureNotConflict(t *testing.T) {
+	pool := database(t)
+	id, _ := donor(t, pool)
+	accountCleanup(t, pool, id)
+	q := queries.New(pool)
+	held := queries.Donor{ID: id}
+	if err := heldCheckout(context.Background(), q, held, payments.CheckoutRequest{}, pgtype.UUID{}, time.Now()); !errors.Is(err, payments.ErrCheckoutConflict) {
+		t.Fatalf("no holder: %v, want a conflict", err)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := heldCheckout(cancelled, q, held, payments.CheckoutRequest{}, pgtype.UUID{}, time.Now())
+	if err == nil || errors.Is(err, payments.ErrCheckoutConflict) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("database failure reported as %v", err)
+	}
+}

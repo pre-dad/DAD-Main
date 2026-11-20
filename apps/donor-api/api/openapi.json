@@ -672,7 +672,7 @@
             "occurred_at": {
              "type": "string",
              "format": "date-time",
-             "description": "Client event time (RFC 3339). Rejected if missing or implausibly in the future."
+             "description": "Client event time (RFC 3339). Rejected if missing, implausibly in the future, or more than 30 days old."
             },
             "properties": {
              "type": "object",
