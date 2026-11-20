@@ -420,8 +420,10 @@ Monitor the oldest unprocessed `donor_stripe_events`, attempt counts, and worker
 A failed event waits before its next attempt, doubling from one minute up to an hour (an event whose worker crashed instead waits out the six-minute lease),
 so a provider outage or an event that arrives before its gift is retried later rather
 than immediately. Events park after ten failed attempts. Investigate the error class
-(`PaymentUnavailable`, `MissingRecord`, `InvalidFacts`, or `ProcessingError`) and current
-Stripe state before explicitly retrying:
+(`PaymentUnavailable`, `PaymentRejected`, `MissingRecord`, `InvalidFacts`, or `ProcessingError`) and current
+Stripe state before explicitly retrying. `PaymentUnavailable` is an outage or throttle worth retrying;
+`PaymentRejected` is a Stripe 4xx or an unusable checkout response, which another attempt will not change,
+so fix the cause first:
 
 ```sh
 cd apps/donor-api

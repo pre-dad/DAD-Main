@@ -23,11 +23,12 @@ type checkoutCall struct {
 }
 
 type checkoutGateway struct {
-	mu     sync.Mutex
-	calls  []checkoutCall
-	fail   bool
-	remote *payments.RemoteCheckout
-	pool   *pgxpool.Pool
+	mu      sync.Mutex
+	calls   []checkoutCall
+	fail    bool
+	failErr error
+	remote  *payments.RemoteCheckout
+	pool    *pgxpool.Pool
 	// expired lists the sessions ExpireCheckout was asked to close. It reports
 	// expireStatus, "expired" when unset, or expireErr if that is set. Each
 	// beforeExpire hook runs first, once, as the processor call begins.
@@ -63,6 +64,9 @@ func (g *checkoutGateway) CreateCheckout(ctx context.Context, params []byte, key
 	if err := g.pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM donor_stripe_checkouts WHERE id::text=$1)", key[len("dad-checkout-"):]).Scan(&exists); err != nil ||
 		!exists {
 		return payments.RemoteCheckout{}, errors.New("uncommitted checkout")
+	}
+	if g.failErr != nil {
+		return payments.RemoteCheckout{}, g.failErr
 	}
 	if g.fail {
 		g.fail = false
@@ -281,8 +285,9 @@ func TestUnexpectedProviderCheckoutIsNotAcknowledged(t *testing.T) {
 	ctx := context.Background()
 	live := true
 	gateway.remote = &payments.RemoteCheckout{ID: "cs_live_invalid", URL: "https://checkout.stripe.com/c/test", Livemode: &live}
-	if _, err := service.BeginCheckout(ctx, request); !errors.Is(err, payments.ErrProcessorUnavailable) {
-		t.Fatal("live response accepted")
+	if _, err := service.BeginCheckout(ctx, request); !errors.Is(err, payments.ErrCheckoutRejected) ||
+		errors.Is(err, payments.ErrProcessorUnavailable) {
+		t.Fatalf("live response: %v", err)
 	}
 	attempt, err := queries.New(pool).StripeCheckout(ctx, request.RequestID)
 	if err != nil || attempt.HostedUrl.Valid || attempt.StripeSessionID.Valid || attempt.Status != "PENDING" {
@@ -391,5 +396,31 @@ func TestCheckoutRetryBelongsToTheDonorNotAReusedEmail(t *testing.T) {
 	}
 	if len(gateway.calls) != 1 {
 		t.Fatal("unauthorized retry reached the processor")
+	}
+}
+
+func TestCheckoutKeepsProcessorRefusalDistinctFromOutage(t *testing.T) {
+	service, request, _, gateway := checkoutFixture(t)
+	ctx := context.Background()
+	refusal := &payments.ProcessorError{Status: 401, Code: "api_key_invalid", RequestID: "req_fixture"}
+	gateway.failErr = refusal
+	_, err := service.BeginCheckout(ctx, request)
+	if !errors.Is(err, payments.ErrProcessorRejected) || errors.Is(err, payments.ErrProcessorUnavailable) {
+		t.Fatalf("refusal reported as %v", err)
+	}
+	if eventFailure(err) != "PaymentRejected" {
+		t.Fatalf("refusal classified as %q", eventFailure(err))
+	}
+	gateway.failErr = errors.New("connection reset")
+	if _, err = service.BeginCheckout(ctx, request); !errors.Is(err, payments.ErrProcessorUnavailable) ||
+		eventFailure(err) != "PaymentUnavailable" {
+		t.Fatalf("outage reported as %v", err)
+	}
+	gateway.failErr = nil
+	if _, err = service.BeginCheckout(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	if len(gateway.calls) != 3 || gateway.calls[0].key != gateway.calls[2].key {
+		t.Fatal("attempts did not share one idempotency key")
 	}
 }

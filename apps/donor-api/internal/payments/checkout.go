@@ -20,6 +20,13 @@ var (
 	// ErrProcessorUnavailable reports a processor call that failed or could not
 	// be made; the caller may retry the same request.
 	ErrProcessorUnavailable = errors.New("payment processor is unavailable; retry the same request")
+	// ErrProcessorRejected reports that the processor refused a request with a
+	// client error; repeating the same request cannot succeed.
+	ErrProcessorRejected = errors.New("payment processor rejected the request")
+	// ErrCheckoutRejected reports a processor response, or saved request, that
+	// this service refuses to use. The same request gets the same answer, so
+	// retrying cannot help.
+	ErrCheckoutRejected = errors.New("checkout was rejected")
 	// ErrUnconfigured reports that this deployment has no payment processor
 	// configured; retrying cannot help.
 	ErrUnconfigured = errors.New("payments are not configured")
@@ -74,6 +81,21 @@ type CheckoutGateway interface {
 	ExpireCheckout(ctx context.Context, sessionID, idempotencyKey string) (string, error)
 }
 
+// ProcessorError is a processor's client-error verdict on a request. It holds
+// only the identifiers needed to find the call in the processor's logs, and
+// matches ErrProcessorRejected.
+type ProcessorError struct {
+	Status    int
+	Code      string
+	RequestID string
+}
+
+func (e *ProcessorError) Error() string {
+	return fmt.Sprintf("%v: status %d, code %q, request %q", ErrProcessorRejected, e.Status, e.Code, e.RequestID)
+}
+
+func (e *ProcessorError) Is(target error) bool { return target == ErrProcessorRejected }
+
 // ValidateOrigin accepts an exact HTTPS origin, or plain HTTP on a loopback
 // name for local runs. It must be written as browsers serialize it, in
 // lowercase without a default port, since request Origin headers and passkey
@@ -112,12 +134,14 @@ func loopback(host string) bool {
 
 func ValidateRemoteCheckout(remote RemoteCheckout) error {
 	u, err := url.Parse(remote.URL)
-	if err != nil || !strings.HasPrefix(remote.ID, "cs_test_") || len(remote.ID) > 255 || remote.Livemode == nil || *remote.Livemode ||
-		u.Scheme != "https" ||
-		u.Hostname() != "checkout.stripe.com" ||
-		u.User != nil ||
-		(u.Port() != "" && u.Port() != "443") {
-		return ErrProcessorUnavailable
+	switch {
+	case remote.Livemode == nil || *remote.Livemode:
+		return fmt.Errorf("%w: session is not confirmed test mode", ErrCheckoutRejected)
+	case !strings.HasPrefix(remote.ID, "cs_test_") || len(remote.ID) > 255:
+		return fmt.Errorf("%w: unexpected session id", ErrCheckoutRejected)
+	case err != nil || u.Scheme != "https" || u.Hostname() != "checkout.stripe.com" || u.User != nil ||
+		(u.Port() != "" && u.Port() != "443"):
+		return fmt.Errorf("%w: unexpected checkout url", ErrCheckoutRejected)
 	}
 	return nil
 }
