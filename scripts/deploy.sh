@@ -12,6 +12,7 @@ usage() { printf '%s\n' 'Usage: scripts/deploy.sh {build|migrate|adopt|provision
 # Both files are interpolation inputs. Keep database credentials in the database file
 # so operators can rotate them separately; Compose passes each process only its role URL.
 check_env_files() {
+  [[ -f "$ENV_FILE" ]] || { printf 'Missing %s.\n' "$ENV_FILE" >&2; exit 1; }
   [[ -f "$DATABASE_ENV_FILE" ]] || { printf 'Missing %s; copy .env.database.example.\n' "$DATABASE_ENV_FILE" >&2; exit 1; }
   if grep -Eq '^[[:space:]]*(export[[:space:]]+)?(POSTGRES_PASSWORD|DONOR_[A-Z_]*DATABASE_URL)=' "$ENV_FILE"; then
     printf 'Move database credentials from %s to %s.\n' "$ENV_FILE" "$DATABASE_ENV_FILE" >&2
@@ -34,7 +35,9 @@ ingress_config() {
   export INGRESS_CONFIG_HASH="${INGRESS_CONFIG_HASH%% *}"
 }
 workers_enabled() {
-  compose --profile workers config stripe-worker | grep -q 'DONOR_GO_WORKERS_ENABLED: "true"'
+  local rendered
+  rendered="$(compose --profile workers config stripe-worker)"
+  grep -Eq 'DONOR_GO_WORKERS_ENABLED:[[:space:]]*"?true"?' <<< "$rendered"
 }
 [[ "${1:-help}" =~ ^(help|-h|--help)$ ]] || check_env_files
 case "${1:-help}" in

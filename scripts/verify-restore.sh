@@ -15,7 +15,7 @@ if [[ $# != 1 || "$1" != /* || ! -f "$1" ]]; then
 fi
 # A fresh, server-generated name prevents restoring over an application database.
 name="restore_check_$(compose exec -T postgres sh -c 'psql -X -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT replace(gen_random_uuid()::text,chr(45),chr(95))"')"
-[[ "$name" =~ ^restore_check_[a-f0-9_]{36}$ ]] || exit 1
+[[ "$name" =~ ^restore_check_[a-f0-9_]{36}$ ]] || { printf '%s\n' 'could not generate a disposable database name' >&2; exit 1; }
 compose exec -T postgres sh -c 'createdb -U "$POSTGRES_USER" "$1"' sh "$name"
 cleanup() { compose exec -T postgres sh -c 'dropdb -U "$POSTGRES_USER" "$1"' sh "$name"; }
 trap cleanup EXIT
