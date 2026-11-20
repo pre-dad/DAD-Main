@@ -13,13 +13,13 @@ Stripe processes USD donations through hosted checkout. Giving is recurring only
 whole number of dollars a day, from $1 to $30, billed monthly as the daily amount × 30
 ($30 to $900 a month, G-1, G-2). The donor chooses $1, $3, or $5 a day or types another
 daily amount; larger gifts are arranged with DAD directly. The daily amount and the
-monthly charge always appear at equal visual weight; an amount set before this rule
-shows its daily figure as "about". DAD absorbs fees; there is no cover-fees prompt.
+monthly charge always appear at equal visual weight; a monthly amount that is not a
+whole number of dollars a day shows its daily figure as "about". DAD absorbs fees; there is no cover-fees prompt.
 
 Giving collects a private name, email, ZIP and city. Hosted checkout requires a verified, signed-in donor account. The receipt email must match that account; a checkout cannot select another address. Matching is case-insensitive and does not
 remove dots or plus tags. Different addresses are separate identities until an explicit
 merge verifies both. Never infer identity from a shared card, device, or postal address.
-The initial implementation accepts ASCII mailbox names and IDNA domains.
+Mailbox names must be ASCII; domains may be internationalized (IDNA).
 
 One email holds one role (PRD §3). Giving, a donor email change, a staff invitation, a
 partner invitation, and partner approval each refuse an address that already signs in as
