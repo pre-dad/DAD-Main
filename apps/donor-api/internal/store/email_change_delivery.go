@@ -85,9 +85,11 @@ func (w EmailChangeWorker) claim(ctx context.Context, site publicSite, now time.
 			return err
 		}
 		recipient := job.OldEmail
-		body := "Someone signed in to your DAD account requested changing its email to " + job.NewEmail + ". Confirm only if you requested this change."
+		expiry := "after it was requested"
+		body := "Someone signed in to your DAD account and requested changing its email to " + job.NewEmail + ". Confirm only if you requested this change."
 		if job.Stage == "NEW" {
 			recipient = job.NewEmail
+			expiry = "after you confirmed your current address"
 			body = "Confirm this address to finish changing your DAD account email. This will sign out every existing session and remove your passkeys."
 		}
 		if err = q.ClaimEmailChangeDelivery(ctx, queries.ClaimEmailChangeDeliveryParams{ID: job.ID, AvailableAt: timestamp(now.Add(deliveryLease))}); err != nil {
@@ -100,7 +102,7 @@ func (w EmailChangeWorker) claim(ctx context.Context, site publicSite, now time.
 			Subject: "Confirm your DAD account email change",
 			Body: body + "\n\n" + site.emailChange(
 				string(proof),
-			) + "\n\nConfirm on the page. This link is single-use and expires 15 minutes after it was requested. If you did not request this, ignore this message. No change will be made without both confirmations.\n",
+			) + "\n\nConfirm on the page. This link is single-use and expires " + proofMinutes + " " + expiry + ". If you did not request this, ignore this message. No change will be made without both confirmations.\n",
 		}
 		send = &emailChangeSend{id: job.ID, stage: job.Stage, message: message}
 		return nil
