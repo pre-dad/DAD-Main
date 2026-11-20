@@ -19,11 +19,12 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
-image=dad/nginx:check
+image="dad/nginx:check-$$"
 name="dad-nginx-check-$$"
 work="$(mktemp -d "${TMPDIR:-/tmp}/nginx-image-check.XXXXXX")"
 cleanup() {
   docker rm -f "$name" >/dev/null 2>&1 || true
+  docker rmi "$image" >/dev/null 2>&1 || true
   rm -rf -- "$work"
 }
 trap cleanup EXIT
@@ -42,7 +43,6 @@ dockerfile_image="$(sed -n 's/^FROM \(nginx:.*\)$/\1/p' deploy/nginx/Dockerfile)
 
 docker build -q -t "$image" deploy/nginx >/dev/null
 
-# 2. Throwaway certificate and key.
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 \
   -subj /CN=ingress-check -addext 'subjectAltName=DNS:public.test,DNS:staff.test,DNS:native.test' \
   -keyout "$work/privkey.pem" -out "$work/fullchain.pem" 2>/dev/null
@@ -86,8 +86,6 @@ done
 docker exec "$name" cat /etc/nginx/tls/privkey.pem | cmp -s - "$work/privkey.pem" ||
   fail "the key on disk does not match the one supplied"
 
-
-# 4. The two rewrites and the removed default site.
 docker exec "$name" test ! -e /etc/nginx/conf.d/default.conf || fail "default.conf must be removed"
 docker exec "$name" sh -c "! grep -q 'resolver' /etc/nginx/nginx.conf" ||
   fail "nginx.conf still has a resolver (Docker's 127.0.0.11 does not exist on Fargate)"
@@ -100,7 +98,7 @@ docker exec "$name" sh -c "! grep -q ' resolve;' /etc/nginx/conf.d/ingress.conf"
   fail "native upstream must not require Docker's runtime resolver"
 
 # 5. Half a certificate must be refused, not silently ignored.
-if docker run --rm "${common[@]}" -e "INGRESS_TLS_FULLCHAIN=x" "$image" >"$work/half.log" 2>&1; then
+if timeout 30 docker run --rm "${common[@]}" -e "INGRESS_TLS_FULLCHAIN=x" "$image" >"$work/half.log" 2>&1; then
   fail "starting with only INGRESS_TLS_FULLCHAIN must fail"
 fi
 grep -q 'set both INGRESS_TLS_FULLCHAIN and INGRESS_TLS_PRIVKEY' "$work/half.log" ||

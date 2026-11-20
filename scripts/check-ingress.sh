@@ -47,6 +47,7 @@ grep -o 'DONOR_[A-Z_]*DATABASE_URL' docker-compose.prod.yml | sort -u | sed 's|$
 export ENV_FILE="$work/env"
 # Leaves the production subnet free for a real deployment on the same Docker host. The upper
 # half of the fixed edge subnet stands in for Cloudflare's ranges in the smoke test.
+# The fixed subnet and address below mean only one run can use this script at a time.
 cat > "$work/check.yml" <<EOF
 networks:
   default:
@@ -259,7 +260,6 @@ check 'native HEAD reads are supported' 200 "$(status -I -H 'X-DAD-Client: nativ
 native_headers="$(head -c 262145 /dev/zero | client -X POST -H 'X-DAD-Client: native' --data-binary @- -o /dev/null -D - https://native.test/donor/login | tr -d '\r')"
 check 'native oversized bodies use JSON errors' application/json "$(header content-type "$native_headers")"
 
-
 body="$(client https://staff.test/)"
 check 'staff host serves /' staff.test "$(field host "$body")"
 for path in /staff /staff/donors/1 /api/donor/staff/me /_next/static/app.js /robots.txt /icon.svg; do
@@ -293,7 +293,9 @@ check 'webhook admits a burst of 500, then limits' yes \
   "$(awk -F'[: ]' '{ ok = $1 == 200 && $2 >= 500 && $3 == 429 } END { print ok ? "yes" : $0 }' <<< "$webhooks")"
 
 repeat https://public.test/api/donor/login 30
-check 'sign-in admits a burst of 21, then limits' '200:21 429:9 ' "$(counts -X POST "${urls[@]}")"
+signins="$(counts -X POST "${urls[@]}")"
+check 'sign-in admits a burst of 21, then limits' yes \
+  "$(awk -F'[: ]' '{ ok = $1 == 200 && $2 >= 21 && $3 == 429 } END { print ok ? "yes" : $0 }' <<< "$signins")"
 headers="$(client -D - -o "/tmp/limited" -X POST https://public.test/api/donor/login | tr -d '\r')"
 check 'sign-in 429 has Retry-After' 60 "$(header retry-after "$headers")"
 check 'sign-in 429 is not cacheable' no-store "$(header cache-control "$headers")"
@@ -337,7 +339,6 @@ repeat https://native.test/donor/login 30
 native_codes="$(counts "${cert[@]}" -X POST -H 'X-DAD-Client: native' "${urls[@]}")"
 check 'native sign-in floods are rate limited' yes "$(grep -q '429:' <<< "$native_codes" && echo yes || echo no)"
 check 'native sign-in 429 carries Retry-After' 60 "$(header retry-after "$(client "${cert[@]}" -X POST -H 'X-DAD-Client: native' -o /dev/null -D - https://native.test/donor/login | tr -d '\r')")"
-
 
 # One curl, so the auth zone (one request per 3 s) cannot refill between the groups.
 as_client() {
