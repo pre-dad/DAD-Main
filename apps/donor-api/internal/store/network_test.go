@@ -33,7 +33,7 @@ func referredDonor(
 			t.Fatal(err)
 		}
 	}
-	pid, _ := NewID()
+	pid := mustNewID(t)
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO donor_metric_projections
 		 (id,donor_id,referrer_id,referral_kind,first_gift_id,best_streak,current_streak,
@@ -43,7 +43,7 @@ func referredDonor(
 		monthlyMinor, active); err != nil {
 		t.Fatal(err)
 	}
-	prefID, _ := NewID()
+	prefID := mustNewID(t)
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO donor_preferences (id,donor_id,version,referral_emails,marketing_emails,network_visible)
 		 VALUES ($1,$2,1,true,true,$3)`, prefID, id, visible); err != nil {
@@ -58,7 +58,7 @@ func TestNetworkTotalsActiveOnlyAnnualizedAndInviteeVisibility(t *testing.T) {
 
 	referrer, _ := donor(t, pool)
 	// The referrer needs a projection so the converted-referral count (N-2) reads.
-	rpid, _ := NewID()
+	rpid := mustNewID(t)
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO donor_metric_projections
 		 (id,donor_id,best_streak,current_streak,computed_at,next_refresh_at,referred_link_count)
@@ -93,10 +93,8 @@ func TestNetworkTotalsActiveOnlyAnnualizedAndInviteeVisibility(t *testing.T) {
 	if got.AnnualizedMinor != 72000 {
 		t.Fatalf("annualized_minor: got %d want 72000", got.AnnualizedMinor)
 	}
-	// N-3: only the opted-in active donor is listed by name; the other active
-	// donor (not visible) is counted anonymously. The lapsed donor, though
-	// visible, is inactive so it is neither listed as active nor in the anon
-	// active tail.
+	// N-3: every visible donor is listed by name, lapsed or not; an active donor
+	// who is not visible is not listed and is counted only in the anonymous tail.
 	if len(got.Invitees) != 3 {
 		t.Fatalf("invitees: got %d want 3 (every visible donor, regardless of active)", len(got.Invitees))
 	}
@@ -116,7 +114,7 @@ func TestNetworkTotalsActiveOnlyAnnualizedAndInviteeVisibility(t *testing.T) {
 	if named != 3 || namedActive != 2 {
 		t.Fatalf("invitee names: got named=%d active=%d want named=3 active=2", named, namedActive)
 	}
-	// 3 active total - 2 visible-active = 1 anonymous active.
+	// 3 active donors - 2 listed active donors = 1 anonymous active donor.
 	if got.AnonymousActive != 1 {
 		t.Fatalf("anonymous_active: got %d want 1", got.AnonymousActive)
 	}

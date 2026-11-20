@@ -83,7 +83,7 @@ func TestQueueHealthCountsParkedAndIgnoresFutureAndCompleted(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(rows) != 9 {
-		t.Fatal(rows)
+		t.Fatalf("queue health rows = %d, want 9: %+v", len(rows), rows)
 	}
 	for queue, want := range map[string]struct{ due, parked, oldest int64 }{
 		"messages":      {2, 1, 3600},

@@ -1276,6 +1276,43 @@ func TestEscapeICSNeutralisesEveryLineBreak(t *testing.T) {
 	}
 }
 
+func TestFoldICSKeepsLinesShortAndRunesWhole(t *testing.T) {
+	for name, line := range map[string]string{
+		"short":         "SUMMARY:Food bank",
+		"exactly 75":    strings.Repeat("a", 75),
+		"one over":      strings.Repeat("a", 76),
+		"long ascii":    "DESCRIPTION:" + strings.Repeat("word ", 60),
+		"multibyte":     "SUMMARY:" + strings.Repeat("é", 100),
+		"four byte":     "SUMMARY:" + strings.Repeat("🙂", 40),
+		"straddles cut": strings.Repeat("a", 74) + "é" + strings.Repeat("b", 80),
+	} {
+		t.Run(name, func(t *testing.T) {
+			folded := foldICS(line)
+			if !strings.HasSuffix(folded, "\r\n") {
+				t.Fatalf("content line not terminated: %q", folded)
+			}
+			physical := strings.Split(strings.TrimSuffix(folded, "\r\n"), "\r\n")
+			for i, part := range physical {
+				if len(part) > 75 {
+					t.Errorf("physical line %d is %d octets", i, len(part))
+				}
+				if !utf8.ValidString(part) {
+					t.Errorf("physical line %d splits a UTF-8 sequence: %q", i, part)
+				}
+				if i > 0 && !strings.HasPrefix(part, " ") {
+					t.Errorf("continuation %d lacks its leading space", i)
+				}
+			}
+			if unfolded := strings.ReplaceAll(strings.TrimSuffix(folded, "\r\n"), "\r\n ", ""); unfolded != line {
+				t.Errorf("unfolding does not restore the line: %q", unfolded)
+			}
+			if len(line) <= 75 && len(physical) != 1 {
+				t.Errorf("a line of %d octets was folded", len(line))
+			}
+		})
+	}
+}
+
 func TestEventUpdateRejectsADifferentSlug(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()

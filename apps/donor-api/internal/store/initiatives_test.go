@@ -240,11 +240,11 @@ func TestInitiativeSpendByCategoryTotalsAndPublishedOnlyRead(t *testing.T) {
 
 	// Set two spend categories; upsert the first to prove it replaces, not appends.
 	for _, in := range []SpendInput{
-		{Category: "Direct aid", AmountMinor: 100_00},
-		{Category: "Logistics", AmountMinor: 40_00},
-		{Category: "Direct aid", AmountMinor: 150_00}, // upsert replaces 100_00
+		{Category: "Direct aid", AmountMinor: 100_00, VerificationNote: "Verified against finance records", VerifiedOn: "2026-10-01"},
+		{Category: "Logistics", AmountMinor: 40_00, VerificationNote: "Verified against finance records", VerifiedOn: "2026-10-01"},
+		{Category: "Direct aid", AmountMinor: 150_00, VerificationNote: "Verified against finance records", VerifiedOn: "2026-10-01"}, // upsert replaces 100_00
 	} {
-		if err := s.SetSpend(ctx, adminToken, id, SpendInput{Category: in.Category, AmountMinor: in.AmountMinor, VerificationNote: "Verified against finance records", VerifiedOn: "2026-10-01"}); err != nil {
+		if err := s.SetSpend(ctx, adminToken, id, in); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -521,7 +521,6 @@ func TestInitiativeExposureAwardsBadgeWithoutReadingBadges(t *testing.T) {
 		notices != 1 {
 		t.Fatalf("badge push must be queued once by exposure: count=%d error=%v", notices, err)
 	}
-
 }
 
 func TestInitiativeMetricAndSpendInputLimits(t *testing.T) {
