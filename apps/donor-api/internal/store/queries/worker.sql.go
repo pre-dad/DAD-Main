@@ -548,7 +548,7 @@ func (q *Queries) InsertRefundObservation(ctx context.Context, arg InsertRefundO
 
 const invoiceAmountChange = `-- name: InvoiceAmountChange :one
 SELECT amount_minor FROM donor_amount_changes WHERE checkout_id=$1 AND confirmed_at IS NOT NULL
-AND effective_at<=$2 ORDER BY effective_at DESC,created_at DESC LIMIT 1
+AND effective_at<=$2 ORDER BY effective_at DESC,created_at DESC,id DESC LIMIT 1
 `
 
 type InvoiceAmountChangeParams struct {
@@ -564,7 +564,7 @@ func (q *Queries) InvoiceAmountChange(ctx context.Context, arg InvoiceAmountChan
 }
 
 const latestAmountChange = `-- name: LatestAmountChange :one
-SELECT donor_id, checkout_id, previous_minor, amount_minor, effective_at, item_id, product_id, confirmed_at, id, created_at FROM donor_amount_changes WHERE checkout_id=$1 ORDER BY created_at DESC LIMIT 1
+SELECT donor_id, checkout_id, previous_minor, amount_minor, effective_at, item_id, product_id, confirmed_at, id, created_at FROM donor_amount_changes WHERE checkout_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1
 `
 
 func (q *Queries) LatestAmountChange(ctx context.Context, checkoutID pgtype.UUID) (DonorAmountChange, error) {
@@ -689,7 +689,7 @@ func (q *Queries) PaymentUpdateSnapshot(ctx context.Context, id pgtype.UUID) (Do
 
 const pendingAmountChange = `-- name: PendingAmountChange :one
 SELECT (confirmed_at IS NULL)::boolean AS pending FROM donor_amount_changes WHERE checkout_id=$1
-ORDER BY created_at DESC LIMIT 1
+ORDER BY created_at DESC,id DESC LIMIT 1
 `
 
 func (q *Queries) PendingAmountChange(ctx context.Context, checkoutID pgtype.UUID) (bool, error) {

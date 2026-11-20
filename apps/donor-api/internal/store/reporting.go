@@ -168,9 +168,8 @@ func (s *ReportingService) Report(ctx context.Context, token string, start, end 
 		}
 		report.FirstGiftBySource = make([]SourceConversions, 0, len(sources))
 		for _, row := range sources {
-			source, _ := row.Source.(string)
 			report.FirstGiftBySource = append(report.FirstGiftBySource, SourceConversions{
-				Source:     source,
+				Source:     row.Source,
 				Frequency:  row.Frequency,
 				Donors:     row.Donors,
 				GrossMinor: row.GrossMinor,

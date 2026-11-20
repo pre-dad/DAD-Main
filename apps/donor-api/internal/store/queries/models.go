@@ -366,27 +366,6 @@ type DonorPartnerPushNotification struct {
 	SuppressedReason pgtype.Text        `json:"suppressed_reason"`
 }
 
-type DonorPartnerSignup struct {
-	Organization   string             `json:"organization"`
-	Name           string             `json:"name"`
-	Email          string             `json:"email"`
-	Website        string             `json:"website"`
-	Message        string             `json:"message"`
-	RequestHash    string             `json:"request_hash"`
-	ConsentVersion string             `json:"consent_version"`
-	ID             pgtype.UUID        `json:"id"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
-	PartnerType    string             `json:"partner_type"`
-	WorkforceSize  int32              `json:"workforce_size"`
-	MatchRateBp    int32              `json:"match_rate_bp"`
-	MatchCapMinor  int64              `json:"match_cap_minor"`
-	CompanyCode    pgtype.Text        `json:"company_code"`
-	LogoUrl        string             `json:"logo_url"`
-	Description    string             `json:"description"`
-	LogoPng        []byte             `json:"logo_png"`
-}
-
 type DonorPartnerUser struct {
 	ID              pgtype.UUID        `json:"id"`
 	PartnerID       pgtype.UUID        `json:"partner_id"`

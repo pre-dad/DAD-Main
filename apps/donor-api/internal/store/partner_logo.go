@@ -110,6 +110,6 @@ func (s PartnerApplicationService) Logo(ctx context.Context, token string, partn
 			if !org.ApprovedAt.Valid {
 				return nil, pgx.ErrNoRows
 			}
-			return org.LogoPng, nil
+			return q.PartnerLogo(ctx, partnerID)
 		})
 }

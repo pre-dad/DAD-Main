@@ -1191,6 +1191,79 @@ func TestReminderSweepSkipsWaitlistedAndCancelledHolders(t *testing.T) {
 	}
 }
 
+func TestReminderSweepSkipsCancelledEventsWithLiveReservations(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	eventID, err := events.Create(ctx, adminToken, eventInput("reminder-cancelled", "San Francisco", "94103", "VOLUNTEER", 90*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+	donorID, _ := signedInDonor(t, pool)
+	pushCleanupDonor(t, pool, donorID)
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_event_reservations (id, event_id, donor_id, status, reserved_at, created_at, updated_at) VALUES (gen_random_uuid(),$1,$2,'RESERVED',now(),now(),now())",
+		eventID,
+		donorID,
+	)
+	mustExec(t, pool, "UPDATE donor_events SET cancelled_at=now() WHERE id=$1", eventID)
+	if n, err := (EventReminderService{DB: pool}).QueueDueReminders(ctx, time.Now().UTC()); err != nil || n != 0 {
+		t.Fatalf("sweep queued %d reminders (%v) for a cancelled event", n, err)
+	}
+}
+
+func TestCheckInQueryStampsOnlyConfirmedReservations(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	in := eventInput("checkin-waitlisted", "San Francisco", "94103", "VOLUNTEER", -1*time.Hour)
+	in.EndsAt = time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	eventID, err := events.Create(ctx, adminToken, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+	donorID, _ := signedInDonor(t, pool)
+	pushCleanupDonor(t, pool, donorID)
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_event_reservations (id, event_id, donor_id, status, reserved_at, created_at, updated_at) VALUES (gen_random_uuid(),$1,$2,'WAITLISTED',now(),now(),now())",
+		eventID,
+		donorID,
+	)
+	q := queries.New(pool)
+	stamp := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+	if err := q.CheckInReservation(ctx, queries.CheckInReservationParams{EventID: eventID, DonorID: donorID, CheckedInAt: stamp}); err != nil {
+		t.Fatal(err)
+	}
+	var stamped int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_event_reservations WHERE donor_id=$1 AND checked_in_at IS NOT NULL", donorID).
+		Scan(&stamped); err != nil || stamped != 0 {
+		t.Fatalf("a waitlisted reservation was checked in (%d, %v)", stamped, err)
+	}
+	mustExec(t, pool, "UPDATE donor_event_reservations SET status='RESERVED' WHERE donor_id=$1", donorID)
+	if err := q.CheckInReservation(ctx, queries.CheckInReservationParams{EventID: eventID, DonorID: donorID, CheckedInAt: stamp}); err != nil {
+		t.Fatal(err)
+	}
+	if stats, err := q.DonorVolunteerStats(ctx, donorID); err != nil || stats.Events != 1 {
+		t.Fatalf("volunteer stats after a confirmed check-in = %+v (%v)", stats, err)
+	}
+}
+
 func TestEscapeICSNeutralisesEveryLineBreak(t *testing.T) {
 	for in, want := range map[string]string{
 		"a\rX-FOO:bar": "a\\nX-FOO:bar",

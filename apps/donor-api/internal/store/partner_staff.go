@@ -102,7 +102,7 @@ func (s PartnerApplicationService) Partner(ctx context.Context, token string, pa
 					ApprovedAt: org.ApprovedAt, UserCount: int64(len(users)), InitiativeCount: int64(len(initiatives)),
 				},
 				Website:     org.Website,
-				HasLogo:     len(org.LogoPng) > 0,
+				HasLogo:     org.HasLogo,
 				Initiatives: make([]StaffPartnerInitiative, 0, len(initiatives)),
 				Users:       make([]StaffPartnerUser, 0, len(users)),
 			}

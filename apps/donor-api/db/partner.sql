@@ -34,7 +34,11 @@ INSERT INTO donor_partner_signups
 VALUES ($1,$2,$3,$4,$5,'','','r1-partner-approved-v1',$6,$7,$8,$9);
 
 -- name: PartnerOrgByID :one
-SELECT * FROM donor_partner_signups WHERE id=$1;
+-- Excludes the logo bytes (up to 1 MiB); PartnerLogo reads them on their own.
+SELECT organization, name, email, website, message, request_hash, consent_version, id, created_at, approved_at,
+  partner_type, workforce_size, match_rate_bp, match_cap_minor, company_code, logo_url, description,
+  (logo_png IS NOT NULL)::boolean AS has_logo
+FROM donor_partner_signups WHERE id=$1;
 
 -- name: LockPartnerOrg :one
 SELECT id FROM donor_partner_signups WHERE id=$1 AND approved_at IS NOT NULL FOR UPDATE;

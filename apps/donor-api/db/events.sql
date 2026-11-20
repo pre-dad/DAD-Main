@@ -176,11 +176,11 @@ LIMIT 100;
 
 -- name: CheckInReservation :exec
 -- Stamps the donor's reservation as checked in (E-8). Only sets it when a
--- reservation exists and is not already checked in; cancelled reservations do
--- not qualify.
+-- confirmed reservation exists and is not already checked in; cancelled and
+-- waitlisted reservations do not qualify.
 UPDATE donor_event_reservations
 SET checked_in_at=$3, updated_at=$3
-WHERE event_id=$1 AND donor_id=$2 AND status<>'CANCELLED' AND checked_in_at IS NULL;
+WHERE event_id=$1 AND donor_id=$2 AND status='RESERVED' AND checked_in_at IS NULL;
 
 -- name: DonorVolunteerStats :one
 -- "Events volunteered" and volunteer hours (EM-8): the count of a donor's
@@ -191,7 +191,7 @@ SELECT
   coalesce(sum(EXTRACT(EPOCH FROM (e.ends_at - e.starts_at)) / 60), 0)::bigint AS minutes
 FROM donor_event_reservations r
 JOIN donor_events e ON e.id = r.event_id
-WHERE r.donor_id=$1 AND r.checked_in_at IS NOT NULL;
+WHERE r.donor_id=$1 AND r.status='RESERVED' AND r.checked_in_at IS NOT NULL;
 
 -- name: QueueEventReminders :execrows
 -- E-7: queue an EVENT_REMINDER push for every reserved (non-cancelled) donor of
@@ -208,11 +208,11 @@ SELECT gen_random_uuid(), r.donor_id, 'EVENT_REMINDER',
 FROM donor_events e
 JOIN donor_event_reservations r ON r.event_id = e.id
 WHERE e.publish_state = 'PUBLISHED'
+  AND e.cancelled_at IS NULL
   AND r.status = 'RESERVED'
   AND e.starts_at > sqlc.arg(as_of)::timestamptz
   AND e.starts_at <= sqlc.arg(until)::timestamptz
 ON CONFLICT (dedup_key) DO NOTHING;
-
 
 -- name: QueueEventAlertJob :execrows
 INSERT INTO donor_event_alert_jobs(event_id,updated_at)

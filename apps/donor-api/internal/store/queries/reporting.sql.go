@@ -13,7 +13,7 @@ import (
 
 const reportFirstGiftBySource = `-- name: ReportFirstGiftBySource :many
 SELECT
- CASE WHEN p.referral_kind IS NULL THEN 'DIRECT' ELSE p.referral_kind END AS source,
+ coalesce(p.referral_kind, 'DIRECT')::text AS source,
  g.frequency,
  count(*)::bigint AS donors,
  coalesce(sum(g.amount_minor), 0)::bigint AS gross_minor
@@ -30,10 +30,10 @@ type ReportFirstGiftBySourceParams struct {
 }
 
 type ReportFirstGiftBySourceRow struct {
-	Source     interface{} `json:"source"`
-	Frequency  string      `json:"frequency"`
-	Donors     int64       `json:"donors"`
-	GrossMinor int64       `json:"gross_minor"`
+	Source     string `json:"source"`
+	Frequency  string `json:"frequency"`
+	Donors     int64  `json:"donors"`
+	GrossMinor int64  `json:"gross_minor"`
 }
 
 // First-gift conversions grouped by frozen source (DIRECT/LINK/IRL). A "first

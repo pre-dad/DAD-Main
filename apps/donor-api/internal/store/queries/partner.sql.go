@@ -894,12 +894,37 @@ func (q *Queries) PartnerLogo(ctx context.Context, id pgtype.UUID) ([]byte, erro
 }
 
 const partnerOrgByID = `-- name: PartnerOrgByID :one
-SELECT organization, name, email, website, message, request_hash, consent_version, id, created_at, approved_at, partner_type, workforce_size, match_rate_bp, match_cap_minor, company_code, logo_url, description, logo_png FROM donor_partner_signups WHERE id=$1
+SELECT organization, name, email, website, message, request_hash, consent_version, id, created_at, approved_at,
+  partner_type, workforce_size, match_rate_bp, match_cap_minor, company_code, logo_url, description,
+  (logo_png IS NOT NULL)::boolean AS has_logo
+FROM donor_partner_signups WHERE id=$1
 `
 
-func (q *Queries) PartnerOrgByID(ctx context.Context, id pgtype.UUID) (DonorPartnerSignup, error) {
+type PartnerOrgByIDRow struct {
+	Organization   string             `json:"organization"`
+	Name           string             `json:"name"`
+	Email          string             `json:"email"`
+	Website        string             `json:"website"`
+	Message        string             `json:"message"`
+	RequestHash    string             `json:"request_hash"`
+	ConsentVersion string             `json:"consent_version"`
+	ID             pgtype.UUID        `json:"id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
+	PartnerType    string             `json:"partner_type"`
+	WorkforceSize  int32              `json:"workforce_size"`
+	MatchRateBp    int32              `json:"match_rate_bp"`
+	MatchCapMinor  int64              `json:"match_cap_minor"`
+	CompanyCode    pgtype.Text        `json:"company_code"`
+	LogoUrl        string             `json:"logo_url"`
+	Description    string             `json:"description"`
+	HasLogo        bool               `json:"has_logo"`
+}
+
+// Excludes the logo bytes (up to 1 MiB); PartnerLogo reads them on their own.
+func (q *Queries) PartnerOrgByID(ctx context.Context, id pgtype.UUID) (PartnerOrgByIDRow, error) {
 	row := q.db.QueryRow(ctx, partnerOrgByID, id)
-	var i DonorPartnerSignup
+	var i PartnerOrgByIDRow
 	err := row.Scan(
 		&i.Organization,
 		&i.Name,
@@ -918,7 +943,7 @@ func (q *Queries) PartnerOrgByID(ctx context.Context, id pgtype.UUID) (DonorPart
 		&i.CompanyCode,
 		&i.LogoUrl,
 		&i.Description,
-		&i.LogoPng,
+		&i.HasLogo,
 	)
 	return i, err
 }
