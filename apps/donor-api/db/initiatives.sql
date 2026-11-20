@@ -101,6 +101,7 @@ SELECT i.id, i.slug, i.title, i.summary, i.type, i.location, i.status, i.started
 FROM donor_initiatives i
 WHERE i.publish_state = 'PUBLISHED'
 ORDER BY i.status, i.started_on, i.title
+-- Hard cap: published initiatives beyond 500 are silently dropped from the list.
 LIMIT 500;
 
 -- name: PublishedInitiativeBySlug :one

@@ -395,6 +395,7 @@ type PublishedInitiativesRow struct {
 	Partner   string      `json:"partner"`
 }
 
+// Hard cap: published initiatives beyond 500 are silently dropped from the list.
 func (q *Queries) PublishedInitiatives(ctx context.Context) ([]PublishedInitiativesRow, error) {
 	rows, err := q.db.Query(ctx, publishedInitiatives)
 	if err != nil {

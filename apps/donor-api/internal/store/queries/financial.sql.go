@@ -49,7 +49,7 @@ func (q *Queries) ApplyReferralDelta(ctx context.Context, arg ApplyReferralDelta
 }
 
 const foundingClaimed = `-- name: FoundingClaimed :one
-SELECT EXISTS(SELECT 1 FROM donor_founding_grants WHERE donor_id = $1)::bool
+SELECT EXISTS(SELECT 1 FROM donor_founding_grants WHERE donor_id = $1)::boolean
 `
 
 // Whether the donor holds a waitlist grant (D-6).
@@ -359,13 +359,10 @@ type ReferralTotalsRow struct {
 }
 
 // The totals are maintained incrementally on the referrer's own row (see
-// ApplyReferralDelta), so this reads them directly instead of scanning every
-// referred row. Readiness stays a bounded freshness check over the referred
-// rows: it is inherently a property of the set of referred rows (it flips when
-// any one's next_refresh_at moves), so denormalizing it would risk changing the
-// observable "show referrals only when all referred projections are fresh" rule;
-// per the plan we keep it exact rather than trade correctness for marginal perf.
-// dashboard() reads the referrer's own row first and returns "preparing" before
+// ApplyReferralDelta), so they are read directly. Readiness is a live freshness
+// check over the referred rows, since it flips when any one's next_refresh_at
+// moves. dashboard() reads the referrer's own row first and returns
+// "preparing" before
 // calling this, so own-row always exists here.
 func (q *Queries) ReferralTotals(ctx context.Context, arg ReferralTotalsParams) (ReferralTotalsRow, error) {
 	row := q.db.QueryRow(ctx, referralTotals, arg.ReferrerID, arg.NextRefreshAt)

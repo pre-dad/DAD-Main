@@ -1,6 +1,3 @@
--- name: LockPushInstallation :exec
-SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(token)::text, 0));
-
 -- name: ReleasePartnerPushToken :exec
 UPDATE donor_partner_sessions SET push_token=NULL,push_environment=NULL WHERE push_token=$1;
 

@@ -47,5 +47,6 @@ UPDATE donor_sessions SET revoked_at=$2, push_token=NULL, push_environment=NULL 
 
 -- name: RecordSessionEvent :exec
 INSERT INTO donor_session_events (id, donor_id, session_id, action) VALUES ($1, $2, $3, $4);
+
 -- name: DatabaseNow :one
 SELECT clock_timestamp()::timestamptz AS now;

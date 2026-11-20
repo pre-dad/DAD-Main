@@ -84,15 +84,6 @@ func (q *Queries) FailPartnerPush(ctx context.Context, arg FailPartnerPushParams
 	return err
 }
 
-const lockPushInstallation = `-- name: LockPushInstallation :exec
-SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
-`
-
-func (q *Queries) LockPushInstallation(ctx context.Context, token string) error {
-	_, err := q.db.Exec(ctx, lockPushInstallation, token)
-	return err
-}
-
 const nativePartnerSession = `-- name: NativePartnerSession :one
 SELECT id FROM donor_partner_sessions WHERE token_hash=$1 AND app AND revoked_at IS NULL AND expires_at>clock_timestamp()
 `
