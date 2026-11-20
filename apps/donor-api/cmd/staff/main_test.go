@@ -28,14 +28,15 @@ func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
 		name  string
 		args  []string
 		unset string
+		want  string
 	}{
-		{"missing name", []string{"--email=admin@example.org"}, ""},
-		{"missing email", []string{"--name=Admin"}, ""},
-		{"stray argument", []string{"--email=admin@example.org", "--name=Admin", "extra"}, ""},
-		{"recovery with a name", []string{"--recover", "--email=admin@example.org", "--name=Admin"}, ""},
-		{"recovery without an email", []string{"--recover"}, ""},
-		{"no staff origin", []string{"--email=admin@example.org", "--name=Admin"}, "DONOR_STAFF_ORIGIN"},
-		{"no database", []string{"--email=admin@example.org", "--name=Admin"}, "DONOR_STAFF_CLI_DATABASE_URL"},
+		{"missing name", []string{"--email=admin@example.org"}, "", "--email and --name are required"},
+		{"missing email", []string{"--name=Admin"}, "", "--email and --name are required"},
+		{"stray argument", []string{"--email=admin@example.org", "--name=Admin", "extra"}, "", "--email and --name are required"},
+		{"recovery with a name", []string{"--recover", "--email=admin@example.org", "--name=Admin"}, "", "--email and --name are required"},
+		{"recovery without an email", []string{"--recover"}, "", "--email and --name are required"},
+		{"no staff origin", []string{"--email=admin@example.org", "--name=Admin"}, "DONOR_STAFF_ORIGIN", "DONOR_STAFF_ORIGIN"},
+		{"no database", []string{"--email=admin@example.org", "--name=Admin"}, "DONOR_STAFF_CLI_DATABASE_URL", "DONOR_STAFF_CLI_DATABASE_URL is required"},
 	} {
 		getenv := func(name string) string {
 			if name == tc.unset {
@@ -43,8 +44,8 @@ func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
 			}
 			return env[name]
 		}
-		if err := run(tc.args, getenv, io.Discard); err == nil || err.Error() == "database is unavailable" {
-			t.Errorf("%s: got %v, want an invocation error", tc.name, err)
+		if err := run(tc.args, getenv, io.Discard); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want an error containing %q", tc.name, err, tc.want)
 		}
 	}
 }

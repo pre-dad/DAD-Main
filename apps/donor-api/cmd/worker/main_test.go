@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"os"
 	"strings"
@@ -77,12 +78,17 @@ func isConfigError(err error) bool {
 }
 
 func TestWorkersRunAsTheirRoles(t *testing.T) {
-	for _, kind := range []string{"projections", "push"} {
+	for _, kind := range []string{"projections", "push", "messages", "login-email", "email-changes"} {
 		role := dbroles.Workers[kind]
 		env := map[string]string{
-			"DONOR_GO_WORKERS_ENABLED": "true",
-			role.Variable():            dbrolestest.URL(t, role),
-			dbroles.AllowOwnerVariable: "true",
+			"DONOR_GO_WORKERS_ENABLED":   "true",
+			role.Variable():              dbrolestest.URL(t, role),
+			dbroles.AllowOwnerVariable:   "true",
+			"DONOR_SMTP_HOST":            "smtp.example.org",
+			"DONOR_EMAIL_FROM":           "DAD <sender@example.org>",
+			"DONOR_EMAIL_ENCRYPTION_KEY": base64.URLEncoding.EncodeToString(make([]byte, 32)),
+			"DONOR_STAFF_ORIGIN":         "https://staff.dad.example.org",
+			"DONOR_PUBLIC_ORIGIN":        "https://dad.example.org",
 		}
 		if err := run(context.Background(), []string{"--kind=" + kind, "--once"}, func(name string) string { return env[name] }); err != nil {
 			t.Errorf("%s: %v", kind, err)
