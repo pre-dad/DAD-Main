@@ -5,6 +5,7 @@ import { PasswordAccess } from "@/components/donor/PasswordAccess";
 import { PhoneSignIn } from "@/components/donor/PhoneSignIn";
 import { SignInForm } from "@/components/donor/SignInForm";
 import { AlreadySignedIn } from "./AlreadySignedIn";
+import { SocialSignInError } from "./SocialSignInError";
 
 export const metadata: Metadata = { title: "Claim your account or sign in" };
 
@@ -12,6 +13,7 @@ export default function SignInPage() {
   return (
     <Page eyebrow="My account" title="Your donor account">
       <AlreadySignedIn />
+      <SocialSignInError />
       <p className="lead">Use your verified donor email. We’ll email a single-use sign-in link.</p>
       <SignInForm />
       <p className="note">The link expires after 15 minutes. You don’t need a password.</p>

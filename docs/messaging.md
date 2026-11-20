@@ -30,13 +30,13 @@ failed, and suppressed messages; queued does not mean received.
 
 The donor app receives push notifications through APNs and FCM
 (`internal/store/push.go`), queued with the same facts as the messages above. Each is
-optional (event cancellations excepted), start on, and are rechecked against current
+optional (event cancellations excepted), starts on, and is rechecked against current
 preferences before sending. They name no one and no amount, and open the given app path.
 
 | Notification | Trigger and audience | Text | Opens |
 |---|---|---|---|
 | Gift processed | Recent verified gift; giving donor, once per gift | "Your gift was processed" / "Your test gift was processed. Open the app to see your giving history." | `/account/gifts` |
-| Referral converted | First qualifying referred gift; direct referrer | "Your invitation worked" / "Someone you invited through a Link Referral (an IRL Referral) just made their first test gift." | `/account/dashboard` |
+| Referral converted | First qualifying referred gift; direct referrer | "Your invitation worked" / "Someone you invited through {a Link Referral / an IRL Referral} just made their first test gift." | `/account/dashboard` |
 | Streak at risk | Failed latest renewal while the streak is at risk, initially and on grace day 5; giving donor | "Your giving streak is at risk" / "Your monthly test payment was declined. Update your payment method to keep your streak going." | `/account/payment-method` |
 | Streak milestone | Streak reaches an R1 day milestone, once per run; giving donor | "Your 100-day giving streak" / "You have kept your giving streak going for 100 days. Thank you for showing up every day." (staff may replace the wording per milestone) | `/account/dashboard` |
 | Streak ended | Latest renewal still failed when grace ended; giving donor | "Your giving streak ended" / "Your monthly test payment did not recover in time, so your streak reset. Start a new streak whenever you are ready." | `/account/payment-method` |

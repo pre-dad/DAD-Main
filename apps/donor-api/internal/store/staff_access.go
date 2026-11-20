@@ -15,6 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const staffInviteLifetime = 24 * time.Hour
+
 func createStaffInvite(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) (string, error) {
 	token, err := randomToken(32)
 	if err != nil {
@@ -24,7 +26,13 @@ func createStaffInvite(ctx context.Context, q *queries.Queries, id pgtype.UUID, 
 	if err != nil {
 		return "", err
 	}
-	if err = q.InsertStaffInvite(ctx, queries.InsertStaffInviteParams{ID: inviteID, StaffID: id, TokenHash: HashToken(token), ExpiresAt: timestamp(now.Add(24 * time.Hour))}); err != nil {
+	err = q.InsertStaffInvite(ctx, queries.InsertStaffInviteParams{
+		ID:        inviteID,
+		StaffID:   id,
+		TokenHash: HashToken(token),
+		ExpiresAt: timestamp(now.Add(staffInviteLifetime)),
+	})
+	if err != nil {
 		return "", err
 	}
 	return token, nil

@@ -19,8 +19,8 @@ type partnerPortalDouble struct {
 	signOutError error
 }
 
-func (d *partnerPortalDouble) AcceptInvite(_ context.Context, _ string, app ...bool) (string, error) {
-	d.acceptedApp = append(d.acceptedApp, len(app) == 1 && app[0])
+func (d *partnerPortalDouble) AcceptInvite(_ context.Context, _ string, app bool) (string, error) {
+	d.acceptedApp = append(d.acceptedApp, app)
 	return strings.Repeat("p", 43), nil
 }
 

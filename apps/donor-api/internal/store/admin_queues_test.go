@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -261,5 +263,21 @@ func TestStaffAccountDeletionsListIsReadOnlyAndAudited(t *testing.T) {
 	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE actor_id=$1 AND action='deletions.list'", staff).Scan(&audited); err != nil ||
 		audited != 1 {
 		t.Fatal("deletion log read not audited", audited, err)
+	}
+}
+
+func TestDecodeCursorRejectsOversizedAndMalformedValues(t *testing.T) {
+	if _, paged, err := decodeCursor(""); err != nil || paged {
+		t.Fatalf("empty cursor: paged %v, err %v", paged, err)
+	}
+	for name, value := range map[string]string{
+		"oversized":   strings.Repeat("A", 201),
+		"not base64":  "!!!",
+		"not json":    base64.RawURLEncoding.EncodeToString([]byte("nope")),
+		"no position": base64.RawURLEncoding.EncodeToString([]byte(`{}`)),
+	} {
+		if _, _, err := decodeCursor(value); !errors.Is(err, ErrStaffInput) {
+			t.Errorf("%s cursor: %v; want ErrStaffInput", name, err)
+		}
 	}
 }

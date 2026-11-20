@@ -42,7 +42,7 @@ export default function EmailChange() {
         <Link className="button" href="/account/sign-in">
           Sign in using your new address
         </Link>
-      ) : stage === "NEW" ? null : (
+      ) : stage ? null : (
         <>
           <p>
             Continue only if you requested this email change. Both your current and new addresses must be verified.
@@ -60,7 +60,7 @@ export default function EmailChange() {
           </p>
         </>
       )}
-      <Announcer status={outcomes[stage] ?? ""} alert={error} />
+      <Announcer status={stage ? (outcomes[stage] ?? "Your confirmation was received.") : ""} alert={error} />
     </Page>
   );
 }

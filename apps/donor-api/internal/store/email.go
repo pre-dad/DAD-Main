@@ -108,7 +108,7 @@ func (w LoginEmailWorker) claim(ctx context.Context, site publicSite, id pgtype.
 				token,
 				job.ReturnPath.String,
 			) + "\n\n" +
-				"Confirm on the page to continue. This single-use link expires in 15 minutes.\n" +
+				"Confirm on the page to continue. This single-use link expires in " + proofMinutes + ".\n" +
 				"If you did not request it, ignore this email. No account access is granted until you confirm. This is an account access message, not a tax receipt.\n",
 		}
 		return nil

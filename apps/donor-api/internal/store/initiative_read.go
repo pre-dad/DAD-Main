@@ -56,16 +56,9 @@ func (reader InitiativeReader) Spend(ctx context.Context, id pgtype.UUID) (Initi
 	if err != nil {
 		return InitiativeSpend{}, err
 	}
-	total, err := q.InitiativeSpendTotal(ctx, id)
-	if err != nil {
-		return InitiativeSpend{}, err
-	}
-	out := InitiativeSpend{
-		InitiativeID: id.String(),
-		TotalMinor:   total,
-		Categories:   make([]SpendCategory, 0, len(rows)),
-	}
+	out := InitiativeSpend{InitiativeID: id.String(), Categories: make([]SpendCategory, 0, len(rows))}
 	for _, row := range rows {
+		out.TotalMinor += row.AmountMinor
 		out.Categories = append(out.Categories, SpendCategory{Category: row.Category, AmountMinor: row.AmountMinor})
 	}
 	return out, nil

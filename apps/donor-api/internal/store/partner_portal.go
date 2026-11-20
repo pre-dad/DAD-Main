@@ -133,19 +133,28 @@ func (s PartnerPortalService) SaveProfile(ctx context.Context, token, organizati
 	return err
 }
 
-// Invite adds a partner user by email and emails them a sign-in link (P-4).
-// Admin-only. Re-inviting refreshes the role and re-enables a removed user.
-func (s PartnerPortalService) Invite(ctx context.Context, token, email, name, role string) error {
+// validPartnerUser normalizes and validates the details of a partner user to invite.
+func validPartnerUser(email, name, role string) (string, string, error) {
 	if role != "ADMIN" && role != "VIEWER" {
-		return ErrPartnerApplication
+		return "", "", ErrPartnerApplication
 	}
 	email, err := identity.NormalizeEmail(email)
 	if err != nil {
-		return ErrPartnerApplication
+		return "", "", ErrPartnerApplication
 	}
 	name = identity.TrimSpace(name)
 	if utf8.RuneCountInString(name) > 100 || !plainText(name, false) {
-		return ErrPartnerApplication
+		return "", "", ErrPartnerApplication
+	}
+	return email, name, nil
+}
+
+// Invite adds a partner user by email and emails them a sign-in link (P-4).
+// Admin-only. Re-inviting refreshes the role and re-enables a removed user.
+func (s PartnerPortalService) Invite(ctx context.Context, token, email, name, role string) error {
+	email, name, err := validPartnerUser(email, name, role)
+	if err != nil {
+		return err
 	}
 	_, err = partnerAdminWrite(ctx, s.DB, token, func(tx pgx.Tx, actor PartnerActor, now time.Time) (struct{}, error) {
 		if email == actor.Email && role != "ADMIN" {
@@ -173,7 +182,7 @@ func (s PartnerPortalService) Invite(ctx context.Context, token, email, name, ro
 
 // AcceptInvite exchanges an emailed sign-in link, whether an invitation or a
 // requested sign-in, for a partner session token. Each link works once.
-func (s PartnerPortalService) AcceptInvite(ctx context.Context, invite string, app ...bool) (string, error) {
+func (s PartnerPortalService) AcceptInvite(ctx context.Context, invite string, app bool) (string, error) {
 	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (string, error) {
 		q := queries.New(tx)
 		user, err := q.PartnerUserByInvite(ctx, pgtype.Text{String: HashToken(invite), Valid: true})
@@ -190,7 +199,7 @@ func (s PartnerPortalService) AcceptInvite(ctx context.Context, invite string, a
 		if err = q.AcceptPartnerInvite(ctx, queries.AcceptPartnerInviteParams{ID: user.ID, AcceptedAt: timestamp(now)}); err != nil {
 			return "", err
 		}
-		return s.issueSession(ctx, q, user.ID, now, len(app) == 1 && app[0])
+		return s.issueSession(ctx, q, user.ID, now, app)
 	})
 }
 

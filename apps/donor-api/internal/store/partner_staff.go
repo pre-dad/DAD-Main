@@ -3,9 +3,7 @@ package store
 import (
 	"context"
 	"time"
-	"unicode/utf8"
 
-	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -125,16 +123,9 @@ func (s PartnerApplicationService) Partner(ctx context.Context, token string, pa
 // InviteUser adds a user to a partner org on its behalf (§8 "manage partner
 // users"), for example when the org's only admin has left. Audited.
 func (s PartnerApplicationService) InviteUser(ctx context.Context, token string, partnerID pgtype.UUID, email, name, role string) error {
-	if role != "ADMIN" && role != "VIEWER" {
-		return ErrPartnerApplication
-	}
-	email, err := identity.NormalizeEmail(email)
+	email, name, err := validPartnerUser(email, name, role)
 	if err != nil {
-		return ErrPartnerApplication
-	}
-	name = identity.TrimSpace(name)
-	if utf8.RuneCountInString(name) > 100 || !plainText(name, false) {
-		return ErrPartnerApplication
+		return err
 	}
 	_, err = staffWrite(ctx, s.Staff, token, partnerPermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {

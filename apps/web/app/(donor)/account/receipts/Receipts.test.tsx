@@ -72,3 +72,53 @@ it("says when a linked gift record does not exist, rather than blaming the year"
     await screen.findByText("There is no gift record at this link. Choose a gift from My giving."),
   ).toHaveAttribute("role", "alert");
 });
+
+const refunded = {
+  ...gift,
+  refunded_minor: 1000,
+  net_minor: 2000,
+  refunds: [
+    { id: "r1", amount_minor: 1000, status: "succeeded", observed_at: "2026-10-03T12:00:00Z" },
+    { id: "r2", amount_minor: 500, status: "pending", observed_at: "2026-10-04T12:00:00Z" },
+    { id: "r3", amount_minor: 300, status: "reversed", observed_at: "2026-10-05T12:00:00Z" },
+  ],
+};
+
+it("shows each refund with a readable status and the net amount", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(response({ as_of: "2026-10-05T12:00:00Z", receipt_id: "R-2", gift: refunded })),
+  );
+  render(<Receipts gift="g1" defaultYear={2026} latestYear={2026} />);
+  expect(await screen.findByText(/^Refund · Completed · observed/)).toBeVisible();
+  expect(screen.getByText(/^Refund · Pending · observed/)).toBeVisible();
+  expect(screen.getByText(/^Refund · reversed · observed/)).toBeVisible();
+  expect(screen.queryByText(/succeeded/)).not.toBeInTheDocument();
+  expect(screen.getByText("Successful refunds").closest("li")).toHaveTextContent("$10.00");
+  expect(screen.getByText("Net test amount").closest("li")).toHaveTextContent("$20.00");
+});
+
+it("asks a signed-out donor to sign in to view a record", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) }));
+  render(<Receipts gift="g1" defaultYear={2026} latestYear={2026} />);
+  expect(await screen.findByRole("link", { name: "Sign in to view your gift records" })).toBeVisible();
+});
+
+it("says when a year has no confirmed gifts", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      response({
+        as_of: "2028-01-04T12:00:00Z",
+        year: 2027,
+        timezone: "America/New_York",
+        gifts: [],
+        amount_minor: 0,
+        refunded_minor: 0,
+        net_minor: 0,
+      }),
+    ),
+  );
+  render(<Receipts year={2027} defaultYear={2027} latestYear={2028} />);
+  expect(await screen.findByText("No confirmed gifts in this year.")).toBeVisible();
+});

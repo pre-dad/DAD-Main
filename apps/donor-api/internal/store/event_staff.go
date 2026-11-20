@@ -150,6 +150,8 @@ func (s EventService) CheckInAttendee(ctx context.Context, token string, eventID
 			if err != nil {
 				return struct{}{}, err
 			}
+			// Re-read the clock after the locks: waiting for them can take long, and the
+			// check-in window must be judged when the event is actually locked.
 			now := time.Now().UTC()
 			if e.CancelledAt.Valid {
 				return struct{}{}, ErrEventCancelled

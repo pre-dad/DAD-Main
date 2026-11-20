@@ -293,3 +293,105 @@ func TestOperatorsActOnlyInTheirArea(t *testing.T) {
 		}
 	}
 }
+
+func TestChangeAccessDisablesAndChangesRolesWithSessionsRevokedAndAudited(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	s := staffService(t, dbroles.API)
+	_, adminKey := activatedStaff(t, pool, s, "SUPER_ADMIN")
+	admin, err := signIn(t, s, adminKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, targetKey := activatedStaff(t, pool, s, "SUPER_ADMIN")
+	session, err := signIn(t, s, targetKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audited := func(action string) int {
+		var n int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE target=$1 AND action=$2", target.String(), action).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	if _, err = s.ChangeAccess(ctx, admin, target, "role", "bogus"); !errors.Is(err, ErrStaffInput) {
+		t.Fatal("unknown role accepted", err)
+	}
+	if _, err = s.ChangeAccess(ctx, admin, target, "promote", ""); !errors.Is(err, ErrStaffInput) {
+		t.Fatal("unknown action accepted", err)
+	}
+	if _, err = s.ChangeAccess(ctx, admin, testID(t), "disable", ""); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatal("unknown account accepted", err)
+	}
+
+	change, err := s.ChangeAccess(ctx, admin, target, "role", "OP_PARTNERSHIPS")
+	if err != nil || change.Staff == nil || change.Staff.Role != "OP_PARTNERSHIPS" {
+		t.Fatal("role not changed", change, err)
+	}
+	if _, err = s.Me(ctx, session); !errors.Is(err, ErrStaffDenied) {
+		t.Fatal("role change left a session usable", err)
+	}
+	if audited("staff.role_changed") != 1 {
+		t.Fatal("role change not audited")
+	}
+	if _, err = s.ChangeAccess(ctx, admin, target, "role", "OP_PARTNERSHIPS"); err != nil || audited("staff.role_changed") != 1 {
+		t.Fatal("repeating a role change must be a silent no-op", err)
+	}
+
+	session, err = signIn(t, s, targetKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change, err = s.ChangeAccess(ctx, admin, target, "disable", "")
+	if err != nil || !change.Disabled {
+		t.Fatal("account not disabled", change, err)
+	}
+	if _, err = s.Me(ctx, session); !errors.Is(err, ErrStaffDenied) {
+		t.Fatal("disabling left a session usable", err)
+	}
+	if _, err = signIn(t, s, targetKey); !errors.Is(err, ErrStaffDenied) {
+		t.Fatal("disabled account signed in", err)
+	}
+	if audited("staff.disabled") != 1 {
+		t.Fatal("disabling not audited")
+	}
+}
+
+func TestChangeAccessRefusesSelfAndKeepsAnActiveAdministrator(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	s := staffService(t, dbroles.API)
+	_, adminKey := activatedStaff(t, pool, s, "SUPER_ADMIN")
+	admin, err := signIn(t, s, adminKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	self, err := s.Me(ctx, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selfID := pgtype.UUID{Valid: true}
+	if err = selfID.Scan(self.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"disable", "role", "recovery"} {
+		if _, err = s.ChangeAccess(ctx, admin, selfID, action, "OP_PARTNERSHIPS"); !errors.Is(err, ErrStaffConflict) {
+			t.Fatal("administrator changed their own access", action, err)
+		}
+	}
+
+	// An administrator with no passkey is not an active administrator, so
+	// acting as one must not allow removing the only account that can sign in.
+	_, dormantSession := staffFixture(t, pool, "SUPER_ADMIN")
+	if _, err = s.ChangeAccess(ctx, dormantSession, selfID, "disable", ""); !errors.Is(err, ErrStaffConflict) {
+		t.Fatal("last active administrator disabled", err)
+	}
+	if _, err = s.ChangeAccess(ctx, dormantSession, selfID, "role", "OP_PARTNERSHIPS"); !errors.Is(err, ErrStaffConflict) {
+		t.Fatal("last active administrator demoted", err)
+	}
+	if _, err = s.Me(ctx, admin); err != nil {
+		t.Fatal("refused change still revoked the session", err)
+	}
+}

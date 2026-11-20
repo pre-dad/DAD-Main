@@ -26,6 +26,10 @@ var ErrDenied = errors.New("donor access denied")
 // uniqueViolation is PostgreSQL's SQLSTATE for a duplicate key.
 const uniqueViolation = "23505"
 
+// processorMode is the payment processor mode every response reports. The
+// sandbox only ever talks to Stripe's test mode.
+const processorMode = "test"
+
 // commandRetryWindow bounds a command's processor retries inside Stripe's
 // 24-hour idempotency window. An older unfinished command needs
 // reconciliation, never a fresh request that could act twice.

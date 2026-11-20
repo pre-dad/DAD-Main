@@ -13,8 +13,8 @@ architecture, operations, the product contract, and the like.
 
 Follow the [README](README.md) setup, then run `make test`, `make lint`, and
 `make test-browser-e2e`; after changing `deploy/`, `scripts/`, or a Dockerfile, also run
-`make check-ingress smoke-ingress check-images`. CI runs the same `make` targets. Database integration tests use only the dedicated `donor_go`
-database. They do not replace Stripe test-account acceptance or real-device checks.
+`make check-ingress smoke-ingress check-images`. CI runs the same `make` targets.
+Database integration tests use only the dedicated `donor_go` database. They do not replace Stripe test-account acceptance or real-device checks.
 Never weaken assertions, skip a failing test, or fabricate production facts to pass CI.
 
 Change SQL sources and regenerate with `make generate`; never hand-edit generated query

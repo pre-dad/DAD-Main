@@ -65,6 +65,8 @@ func claim(ctx context.Context, tx pgx.Tx, proof string, client Client) (Tokens,
 	}
 	tokens, err := issueSession(ctx, q, donor.ID, client, now)
 	if err == nil {
+		// The emailed link proves control of the account, so it stands in for the current password during the
+		// reauthentication window and lets a donor with no password set one.
 		err = q.MarkPasswordReauthenticated(
 			ctx,
 			queries.MarkPasswordReauthenticatedParams{TokenHash: HashToken(tokens.Access), PasswordVerifiedAt: timestamp(now)},

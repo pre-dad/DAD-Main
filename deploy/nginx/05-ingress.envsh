@@ -20,7 +20,7 @@ host_of() {
             ;;
     esac
     case "$host" in
-        "" | *[!A-Za-z0-9.-]*) echo "ingress: $1 must be a bare https origin" >&2; return 1 ;;
+        "" | .* | *. | -* | *..* | *[!A-Za-z0-9.-]*) echo "ingress: $1 must be a bare https origin" >&2; return 1 ;;
     esac
     printf '%s' "$host" | tr '[:upper:]' '[:lower:]'
 }

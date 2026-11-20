@@ -31,12 +31,12 @@ func (s RecurringService) PaymentMethodStatus(ctx context.Context, token string)
 	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (PaymentMethodStatus, error) {
 		row, err := q.LatestPaymentUpdate(ctx, d.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return PaymentMethodStatus{Mode: "test", Status: "NONE"}, nil
+			return PaymentMethodStatus{Mode: processorMode, Status: "NONE"}, nil
 		}
 		if err != nil {
 			return PaymentMethodStatus{}, err
 		}
-		return PaymentMethodStatus{Mode: "test", Status: row.Status, CompletedAt: row.CompletedAt}, nil
+		return PaymentMethodStatus{Mode: processorMode, Status: row.Status, CompletedAt: row.CompletedAt}, nil
 	})
 }
 
@@ -87,7 +87,7 @@ func (s RecurringService) BeginPaymentUpdate(ctx context.Context, token string, 
 	if !ValidRequestID(requestID) {
 		return PaymentUpdate{}, payments.ErrFacts
 	}
-	site, err := site(s.Origin)
+	origin, err := site(s.Origin)
 	if err != nil {
 		return PaymentUpdate{}, err
 	}
@@ -100,7 +100,7 @@ func (s RecurringService) BeginPaymentUpdate(ctx context.Context, token string, 
 			owner := donorOwner(token)
 			var updateID pgtype.UUID
 			finished, err := donorWrite(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (*PaymentUpdate, error) {
-				id, finished, err := s.stagePaymentUpdate(ctx, queries.New(tx), d, requestID, prefetch, site, now)
+				id, finished, err := s.stagePaymentUpdate(ctx, queries.New(tx), d, requestID, prefetch, origin, now)
 				updateID = id
 				return finished, err
 			})

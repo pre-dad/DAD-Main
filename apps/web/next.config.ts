@@ -46,9 +46,14 @@ const nextConfig: NextConfig = {
       fallback: [],
     };
   },
-  // The impact ledger became the spend-by-category page; keep old links working.
+  // The impact ledger became the spend-by-category page; keep old links working. The
+  // gift-processed push opens /account/gifts in the app, so a browser follows it to the
+  // giving history instead of a 404.
   async redirects() {
-    return [{ source: "/ledger", destination: "/spend", permanent: true }];
+    return [
+      { source: "/ledger", destination: "/spend", permanent: true },
+      { source: "/account/gifts", destination: "/account/giving", permanent: false },
+    ];
   },
   async headers() {
     return [

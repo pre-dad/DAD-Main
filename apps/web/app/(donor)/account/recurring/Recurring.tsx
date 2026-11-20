@@ -17,15 +17,19 @@ const cancellable = (status: string) => ["active", "past_due", "unpaid"].include
 const settingUp = (status: string) => status === "incomplete";
 const preparingCopy = "We’re confirming your new monthly gift with Stripe. This usually takes a few seconds.";
 const date = (instant: string) => <time dateTime={instant}>{formatDate(instant)}</time>;
-const endingCopy = (stops: string) =>
-  `Renewals cancelled. Your last monthly gift period ends ${formatDate(stops)}; no further gifts will be charged.`;
+const ENDING = [
+  "Renewals cancelled. Your last monthly gift period ends ",
+  "; no further gifts will be charged.",
+] as const;
+const endingCopy = (stops: string) => `${ENDING[0]}${formatDate(stops)}${ENDING[1]}`;
 
 function Status({ subscription }: { subscription: Subscription }) {
   if (subscription.stops_at)
     return (
       <p>
-        Renewals cancelled. Your last monthly gift period ends {date(subscription.stops_at)}; no further gifts will be
-        charged.
+        {ENDING[0]}
+        {date(subscription.stops_at)}
+        {ENDING[1]}
       </p>
     );
   if (settingUp(subscription.status)) return <p>Your monthly gift is still being set up. Refresh in a moment.</p>;

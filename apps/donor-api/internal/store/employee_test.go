@@ -467,6 +467,9 @@ func TestSetWorkforceIsAdminOnlyAndNonNegative(t *testing.T) {
 	if err := emp.SetWorkforce(ctx, admin, -1); !errors.Is(err, ErrPartnerApplication) || size() != 250 {
 		t.Fatalf("negative workforce: size=%d err=%v", size(), err)
 	}
+	if err := emp.SetWorkforce(ctx, admin, maxWorkforceSize+1); !errors.Is(err, ErrPartnerApplication) || size() != 250 {
+		t.Fatalf("workforce above the cap: %v size %d", err, size())
+	}
 	if err := emp.SetWorkforce(ctx, viewer, 9); !errors.Is(err, ErrPartnerForbidden) || size() != 250 {
 		t.Fatalf("viewer changed the workforce: size=%d err=%v", size(), err)
 	}

@@ -304,7 +304,7 @@ func (s EmployeeService) Match(ctx context.Context, token string, partnerID pgty
 	if s.Staff == nil {
 		return MatchStatus{}, ErrStaffDenied
 	}
-	return staffWrite(ctx, s.Staff, token, partnerPermission, func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (MatchStatus, error) {
+	return staffRead(ctx, s.Staff, token, partnerPermission, func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (MatchStatus, error) {
 		q := queries.New(tx)
 		terms, err := q.PartnerMatchTerms(ctx, partnerID)
 		if err != nil {
@@ -393,9 +393,12 @@ func (s EmployeeService) RecordMatchPayment(
 	return err
 }
 
+// maxWorkforceSize bounds the self-reported workforce size to a plausible headcount.
+const maxWorkforceSize = 1_000_000
+
 // SetWorkforce updates a partner's workforce size (EM-9). Partner admin only.
 func (s EmployeeService) SetWorkforce(ctx context.Context, token string, size int32) error {
-	if size < 0 {
+	if size < 0 || size > maxWorkforceSize {
 		return ErrPartnerApplication
 	}
 	_, err := partnerAdminWrite(ctx, s.DB, token, func(tx pgx.Tx, actor PartnerActor, _ time.Time) (struct{}, error) {

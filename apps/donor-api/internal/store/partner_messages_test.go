@@ -3,11 +3,14 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"dad/donor-api/internal/dbroles"
 	"dad/donor-api/internal/mail"
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -76,6 +79,9 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 			if m.Subject == "" || m.Body == "" {
 				t.Fatalf("%s: empty subject/body", kind)
 			}
+			if !strings.Contains(m.Body, "https://donor.example.org/partner") || !strings.HasSuffix(m.Body, partnerMessageFooter) {
+				t.Fatalf("%s: body lacks the portal link or footer: %q", kind, m.Body)
+			}
 		}
 		// Idempotent: the intent is completed, so a second drain finds nothing
 		// and re-queuing the same key is a no-op.
@@ -83,6 +89,10 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 			t.Fatalf("%s: redelivered a completed intent in %d steps", kind, steps)
 		}
 		queuePartnerIntent(t, partnerID, kind, key)
+		if _, _, err := renderPartnerMessage(ctx, queries.New(pool), queries.DonorPartnerMessage{PartnerID: partnerID, Kind: "UNKNOWN"},
+			publicSite("https://donor.example.org")); !errors.Is(err, payments.ErrFacts) || !messageDataError(err) {
+			t.Fatalf("unknown partner message kind: %v", err)
+		}
 		var pending int
 		if err := pool.QueryRow(ctx,
 			"SELECT count(*) FROM donor_partner_messages WHERE dedup_key=$1 AND completed_at IS NULL", key).Scan(&pending); err != nil {

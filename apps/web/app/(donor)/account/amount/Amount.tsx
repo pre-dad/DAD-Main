@@ -26,6 +26,8 @@ export default function Amount() {
   const [confirmation, setConfirmation] = useState<Change | null>(null);
   const [requestKey, setRequestKey] = useState<string | null>(null);
   const [signedOut, setSignedOut] = useState(false);
+  const [error, setError] = useState("");
+  const [amountInvalid, setAmountInvalid] = useState(false);
   const { resource, data, failed, reload, setData } = useApiResource<Schema<"AmountOptions">>(
     signedOut ? null : "/donor/me/recurring/amount",
     {
@@ -43,9 +45,7 @@ export default function Amount() {
       },
     },
   );
-  const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [amountInvalid, setAmountInvalid] = useState(false);
   const [busy, setBusy] = useState(false);
   const amountInput = useRef<HTMLInputElement>(null);
   const step = useStepFocus(confirmation !== null);
@@ -212,7 +212,7 @@ export default function Amount() {
           )}
           <p className="note">Sandbox only. This changes future test gifts, with no charge or proration today.</p>
           <Announcer id="amount-error" status={messages.status || message} alert={error || messages.alert} />
-          {(failed || error) && (
+          {(failed || (requestKey !== null && error)) && (
             <button type="button" className="secondary" disabled={busy} onClick={reload}>
               Refresh amount details
             </button>

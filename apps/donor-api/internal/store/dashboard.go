@@ -85,7 +85,7 @@ func dashboard(ctx context.Context, q *queries.Queries, donor queries.Donor, now
 	id := donor.ID
 	row, err := q.Projection(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return DonorDashboard{Mode: "test", State: "preparing"}, nil
+		return DonorDashboard{Mode: processorMode, State: "preparing"}, nil
 	}
 	if err != nil {
 		return DonorDashboard{}, err
@@ -102,7 +102,12 @@ func dashboard(ctx context.Context, q *queries.Queries, donor queries.Donor, now
 	irlAmount, irlErr := referred.IrlMinor.Int64Value()
 	ready := !missing && referred.Ready && linkErr == nil && irlErr == nil && linkAmount.Valid && irlAmount.Valid
 	linkMinor, irlMinor := linkAmount.Int64, irlAmount.Int64
-	result := DonorDashboard{Mode: "test", State: "ready", ComputedAt: row.ComputedAt.Time, FoundingDonor: row.FoundingAwardedAt.Valid}
+	result := DonorDashboard{
+		Mode:          processorMode,
+		State:         "ready",
+		ComputedAt:    row.ComputedAt.Time,
+		FoundingDonor: row.FoundingAwardedAt.Valid,
+	}
 	if ready && irlMinor <= math.MaxInt64-linkMinor {
 		result.Referrals = &ReferralSummary{
 			Link:       referred.LinkCount,
@@ -129,7 +134,7 @@ func dashboard(ctx context.Context, q *queries.Queries, donor queries.Donor, now
 		result.Streak.Ladder = &ladder
 	}
 	// Rank line under the streak (S-4): the donor's own position only.
-	rank, err := ForDonor(ctx, q, id)
+	rank, err := RankingForDonor(ctx, q, id)
 	if err != nil {
 		return DonorDashboard{}, err
 	}

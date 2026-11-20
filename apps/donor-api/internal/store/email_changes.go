@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"dad/donor-api/internal/credentials"
@@ -18,6 +19,9 @@ var ErrEmailChangeConflict = errors.New("this address cannot replace the account
 
 // proofLifetime is how long an emailed sign-in or confirmation link works.
 const proofLifetime = 15 * time.Minute
+
+// proofMinutes is proofLifetime as it reads in an email.
+var proofMinutes = fmt.Sprintf("%d minutes", int(proofLifetime/time.Minute))
 
 type EmailChangeService struct {
 	DB             *pgxpool.Pool
