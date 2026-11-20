@@ -68,7 +68,8 @@ func (s EmailChangeService) Request(ctx context.Context, session, email string) 
 		}
 		q := queries.New(tx)
 		if err = reserveEmailIdentity(ctx, q, email, identityDonor, pgtype.UUID{}); errors.Is(err, EmailRoleError{}) {
-			return struct{}{}, ErrEmailChangeConflict
+			// Answer like any other address, so the response does not reveal that a staff or partner holds it.
+			return struct{}{}, nil
 		} else if err != nil {
 			return struct{}{}, err
 		}

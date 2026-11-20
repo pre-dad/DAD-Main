@@ -352,6 +352,10 @@ UPDATE donor_partner_login_emails SET completed_at=$2, encrypted_token=NULL, las
 -- name: FailPartnerLoginEmail :exec
 UPDATE donor_partner_login_emails SET last_error=$2, available_at=$3 WHERE id=$1 AND completed_at IS NULL;
 
+-- name: FailUnreadablePartnerLoginEmail :exec
+-- The stored link cannot be decrypted, so no send was attempted; count the try so the job parks.
+UPDATE donor_partner_login_emails SET attempts=attempts+1, last_error=$2, available_at=$3 WHERE id=$1 AND completed_at IS NULL;
+
 -- name: PartnerCompanyCode :one
 SELECT company_code FROM donor_partner_signups WHERE id=$1;
 

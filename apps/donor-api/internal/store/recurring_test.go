@@ -1043,3 +1043,16 @@ func TestStoppingGiftRefusesFurtherCommands(t *testing.T) {
 		t.Fatalf("refused commands reached the processor: %v", r.sub.keys[mutations:])
 	}
 }
+
+func TestCancellationQuoteWithoutSubscriptionReportsStoredState(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	_, token := staffFixture(t, pool, "SUPER_ADMIN")
+	id, _ := donor(t, pool)
+	accountCleanup(t, pool, id)
+	staff := StaffFinanceService{Staff: &StaffService{DB: as(t, dbroles.API)}}
+	quote, err := staff.CancellationQuote(ctx, token, id)
+	if err != nil || quote.Subscription != nil || quote.State != "ready" || quote.Mode != "test" {
+		t.Fatalf("quote for a donor with no monthly gift: %+v %v", quote, err)
+	}
+}

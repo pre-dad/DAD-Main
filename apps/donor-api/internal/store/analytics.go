@@ -38,6 +38,10 @@ type Event struct {
 // validSource is the closed set matching the ck_analytics_source constraint.
 func validSource(s string) bool { return s == "WEB" || s == "IOS" || s == "ANDROID" }
 
+// maxEventAge bounds how old a client event may be, which covers a device that
+// buffered events while offline for weeks.
+const maxEventAge = 30 * 24 * time.Hour
+
 // Record validates and stores a batch of events for the given platform source.
 // token is the caller's donor session if any: a valid token attributes the
 // events to that donor, and an empty or invalid token records them anonymously
@@ -81,9 +85,9 @@ func (s AnalyticsService) Record(ctx context.Context, source, token string, even
 		if err := analytics.ValidateProperties(e.Name, e.Properties); err != nil {
 			return ErrAnalytics
 		}
-		// A missing time, or one implausibly in the future, is clock abuse;
-		// modest skew is allowed.
-		if e.OccurredAt.IsZero() || e.OccurredAt.After(now.Add(5*time.Minute)) {
+		// A missing time, or one implausibly in the future or far in the past, is
+		// clock abuse; modest skew and a long offline spell are allowed.
+		if e.OccurredAt.IsZero() || e.OccurredAt.After(now.Add(5*time.Minute)) || e.OccurredAt.Before(now.Add(-maxEventAge)) {
 			return ErrAnalytics
 		}
 		payload := []byte("{}")

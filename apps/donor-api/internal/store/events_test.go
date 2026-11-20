@@ -1190,3 +1190,36 @@ func TestReminderSweepSkipsWaitlistedAndCancelledHolders(t *testing.T) {
 		}
 	}
 }
+
+func TestEscapeICSNeutralisesEveryLineBreak(t *testing.T) {
+	for in, want := range map[string]string{
+		"a\rX-FOO:bar": "a\\nX-FOO:bar",
+		"a\r\nb\nc":    "a\\nb\\nc",
+		`a;b,c\d`:      `a\;b\,c\\d`,
+	} {
+		if got := escapeICS(in); got != want {
+			t.Errorf("escapeICS(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestEventUpdateRejectsADifferentSlug(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	events := EventService{Staff: &StaffService{DB: as(t, dbroles.API)}}
+	in := eventInput("slug-fixed", "San Francisco", "94103", "VOLUNTEER", 48*time.Hour)
+	id, err := events.Create(ctx, adminToken, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed := in
+	renamed.Slug = "slug-renamed"
+	if err = events.Update(ctx, adminToken, id, renamed); !errors.Is(err, ErrStaffInput) {
+		t.Fatalf("update with another slug: %v", err)
+	}
+	if err = events.Update(ctx, adminToken, id, in); err != nil {
+		t.Fatalf("update with the stored slug: %v", err)
+	}
+}

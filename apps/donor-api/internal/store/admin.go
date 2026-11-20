@@ -223,6 +223,8 @@ func storedSubscription(ctx context.Context, q *queries.Queries, donor pgtype.UU
 	}, nil
 }
 
+// AuditEvents is not itself audited: each page read would append a row and the
+// next page would then see its own trail.
 func (s *StaffService) AuditEvents(ctx context.Context, token, after string) (AuditPage, error) {
 	at, id, err := keysetBounds(after, true)
 	if err != nil {
@@ -283,8 +285,12 @@ func (s *StaffService) DonorActions(ctx context.Context, token string, id pgtype
 	if err != nil {
 		return ActionPage{}, err
 	}
-	return staffRead(ctx, s, token, "donor.read", func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (ActionPage, error) {
-		rows, err := queries.New(tx).StaffActionPage(ctx, queries.StaffActionPageParams{DonorID: id, CursorAt: at, CursorID: last})
+	return staffRead(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (ActionPage, error) {
+		q := queries.New(tx)
+		if _, err := q.StaffDonorByID(ctx, id); err != nil {
+			return ActionPage{}, err
+		}
+		rows, err := q.StaffActionPage(ctx, queries.StaffActionPageParams{DonorID: id, CursorAt: at, CursorID: last})
 		if err != nil {
 			return ActionPage{}, err
 		}
@@ -293,6 +299,9 @@ func (s *StaffService) DonorActions(ctx context.Context, token string, id pgtype
 			rows,
 			func(row queries.StaffActionPageRow) *string { return encodeCursor(row.CreatedAt.Time, row.ID) },
 		)
+		if err = auditStaff(ctx, q, actor.ID, "action.list", id.String(), nil, now); err != nil {
+			return ActionPage{}, err
+		}
 		return out, nil
 	})
 }

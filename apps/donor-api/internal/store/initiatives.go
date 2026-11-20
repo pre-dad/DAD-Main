@@ -255,7 +255,7 @@ func (s InitiativeService) SetMetric(
 ) error {
 	_, err := staffWrite(ctx, s.Staff, token, initiativePermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
-			if in.Position < 0 || in.Position >= MetricSlots {
+			if in.Position < 0 || in.Position >= MetricSlots || in.Value < 0 {
 				return struct{}{}, ErrStaffInput
 			}
 			if identity.TrimSpace(in.Label) == "" || utf8.RuneCountInString(in.Label) > 150 ||
@@ -410,7 +410,7 @@ func (s InitiativeService) SetSpend(ctx context.Context, token string, initiativ
 				return struct{}{}, err
 			}
 			var verified pgtype.Date
-			if len(in.VerificationNote) > 2000 || !plainText(in.VerificationNote, true) {
+			if utf8.RuneCountInString(in.VerificationNote) > 2000 || !plainText(in.VerificationNote, true) {
 				return struct{}{}, ErrStaffInput
 			}
 			if in.VerifiedOn != "" {

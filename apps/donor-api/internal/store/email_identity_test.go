@@ -64,7 +64,12 @@ func TestOneEmailOneRole(t *testing.T) {
 	}
 
 	changes, _, _, _, session, _ := changeFixture(t)
-	if err := changes.Request(ctx, session, staffEmail); !errors.Is(err, ErrEmailChangeConflict) {
-		t.Fatalf("moving a donor account to a staff address: %v; want ErrEmailChangeConflict", err)
+	if err := changes.Request(ctx, session, staffEmail); err != nil {
+		t.Fatalf("moving a donor account to a staff address: %v; want the same answer as any other address", err)
+	}
+	var started int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_email_changes WHERE new_email=$1", staffEmail).Scan(&started); err != nil ||
+		started != 0 {
+		t.Fatalf("%d email changes started for a staff address, err %v", started, err)
 	}
 }

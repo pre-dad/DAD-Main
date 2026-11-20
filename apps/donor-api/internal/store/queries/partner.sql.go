@@ -267,6 +267,22 @@ func (q *Queries) FailPartnerMessage(ctx context.Context, arg FailPartnerMessage
 	return err
 }
 
+const failUnreadablePartnerLoginEmail = `-- name: FailUnreadablePartnerLoginEmail :exec
+UPDATE donor_partner_login_emails SET attempts=attempts+1, last_error=$2, available_at=$3 WHERE id=$1 AND completed_at IS NULL
+`
+
+type FailUnreadablePartnerLoginEmailParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	LastError   pgtype.Text        `json:"last_error"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+}
+
+// The stored link cannot be decrypted, so no send was attempted; count the try so the job parks.
+func (q *Queries) FailUnreadablePartnerLoginEmail(ctx context.Context, arg FailUnreadablePartnerLoginEmailParams) error {
+	_, err := q.db.Exec(ctx, failUnreadablePartnerLoginEmail, arg.ID, arg.LastError, arg.AvailableAt)
+	return err
+}
+
 const fanOutPartnerMessage = `-- name: FanOutPartnerMessage :execrows
 INSERT INTO donor_partner_message_deliveries (id,message_id,partner_user_id,ordinal,available_at)
 SELECT gen_random_uuid(),$1,u.id,(row_number() OVER (ORDER BY u.email,u.id))::int-1,$2

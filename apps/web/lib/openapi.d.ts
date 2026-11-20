@@ -2950,7 +2950,7 @@ export interface paths {
         put?: never;
         /**
          * /donor/me/password
-         * @description Sets or changes the signed-in donor's password. `current_password` is required unless the session proved its password within the last 15 minutes; leave it empty when setting a first password right after signing in by email link. 401 means the session is missing, expired or revoked: sign in again. 422 with `code` `CURRENT_PASSWORD_INCORRECT` means the session is fine but `current_password` was missing or wrong: keep the donor signed in and let them retry (attempts are rate limited). Contract versions before 2.4 answered 401 with the same `detail` ("The email or password is incorrect"); a client that must still talk to such a server should treat that 401 on this route as a wrong current password when the access token is otherwise valid.
+         * @description Sets or changes the signed-in donor's password. `current_password` is required unless the session proved its password within the last 15 minutes; leave it empty when setting a first password right after signing in by email link. A successful change signs out the donor's other sessions and keeps the calling one. 401 means the session is missing, expired or revoked: sign in again. 422 with `code` `CURRENT_PASSWORD_INCORRECT` means the session is fine but `current_password` was missing or wrong: keep the donor signed in and let them retry (attempts are rate limited). Contract versions before 2.4 answered 401 with the same `detail` ("The email or password is incorrect"); a client that must still talk to such a server should treat that 401 on this route as a wrong current password when the access token is otherwise valid.
          */
         post: operations["postDonorMePassword"];
         delete?: never;
@@ -4996,7 +4996,7 @@ export interface operations {
                         name: "app_opened" | "role_selected" | "signup_started" | "signup_completed" | "attribution_captured" | "gift_started" | "gift_completed" | "gift_failed" | "gift_recovered" | "gift_lapsed" | "amount_changed" | "gift_cancelled" | "account_deleted" | "invite_shared" | "irl_code_shown" | "referral_converted" | "badge_earned" | "milestone_reached" | "rankings_toggled" | "volunteer_opted_in" | "event_viewed" | "event_reserved" | "event_waitlisted" | "event_checked_in" | "team_created" | "team_joined" | "partner_signup_submitted" | "partner_approved" | "partner_report_exported" | "push_opened";
                         /**
                          * Format: date-time
-                         * @description Client event time (RFC 3339). Rejected if missing or implausibly in the future.
+                         * @description Client event time (RFC 3339). Rejected if missing, implausibly in the future, or more than 30 days old.
                          */
                         occurred_at: string;
                         /** @description Typed payload for the events that carry one: attribution_captured requires {source: link|IRL|company}, invite_shared requires {channel}, push_opened requires {type}. All other events take no properties. */

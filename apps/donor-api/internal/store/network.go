@@ -20,9 +20,9 @@ import (
 // referrals, never a population scan.
 type NetworkService struct{ DB *pgxpool.Pool }
 
-// NetworkInvitee is one person the donor brought in, shown only when they opted
-// in to visibility (N-3). Anonymous invitees are not listed; they are counted in
-// AnonymousActive instead.
+// NetworkInvitee is one person the donor brought in, listed unless they opted
+// out of visibility (N-3; visible by default, migration 0048). Invitees who
+// opted out are not listed; their active ones are counted in AnonymousActive.
 type NetworkInvitee struct {
 	Name   string `json:"name"`
 	Active bool   `json:"active"`
@@ -64,39 +64,40 @@ func buildNetwork(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) 
 	// N-2: the converted-referral count drives the milestone ladder. Use the
 	// lifetime converted count (link+irl), not the active count -- a referral who
 	// later lapsed still counts toward "people you brought in".
+	var converted int64
 	proj, err := q.Projection(ctx, donorID)
 	if err == nil {
-		converted := int64(proj.ReferredLinkCount + proj.ReferredIrlCount)
-		rules, err := recognitionRules(ctx, q)
-		if err != nil {
-			return out, err
-		}
-		catalog, err := badgeWording(ctx, q)
-		if err != nil {
-			return out, err
-		}
-		titles := make(map[string]string, len(catalog))
-		for _, b := range catalog {
-			titles[b.Code] = b.Title
-		}
-		for _, rule := range rules.Badges {
-			if rule.Signal != "referrals" || rule.Threshold <= converted {
-				continue
-			}
-			if out.NextMilestone == nil || rule.Threshold < out.NextMilestone.Target {
-				out.NextMilestone = &NetworkMilestone{
-					Label:     titles[rule.Code],
-					Target:    rule.Threshold,
-					Remaining: rule.Threshold - converted,
-				}
-			}
-		}
+		converted = int64(proj.ReferredLinkCount + proj.ReferredIrlCount)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
 	}
+	rules, err := recognitionRules(ctx, q)
+	if err != nil {
+		return out, err
+	}
+	catalog, err := badgeWording(ctx, q)
+	if err != nil {
+		return out, err
+	}
+	titles := make(map[string]string, len(catalog))
+	for _, b := range catalog {
+		titles[b.Code] = b.Title
+	}
+	for _, rule := range rules.Badges {
+		if rule.Signal != "referrals" || rule.Threshold <= converted {
+			continue
+		}
+		if out.NextMilestone == nil || rule.Threshold < out.NextMilestone.Target {
+			out.NextMilestone = &NetworkMilestone{
+				Label:     titles[rule.Code],
+				Target:    rule.Threshold,
+				Remaining: rule.Threshold - converted,
+			}
+		}
+	}
 
-	// N-3: opted-in invitees are listed by name; the rest of the active network
-	// is reported anonymously.
+	// N-3: invitees are listed by name unless they opted out; the rest of the
+	// active network is reported anonymously.
 	invitees, err := q.NetworkInviteeList(ctx, donorID)
 	if err != nil {
 		return out, err

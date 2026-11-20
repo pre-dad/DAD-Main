@@ -117,6 +117,9 @@ func readPreferences(ctx context.Context, q *queries.Queries, donor pgtype.UUID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return defaultPreferences(), nil
 	}
+	if err != nil {
+		return Preferences{}, err
+	}
 	interests := pref.VolunteerInterests
 	if interests == nil {
 		interests = []string{}
@@ -128,7 +131,7 @@ func readPreferences(ctx context.Context, q *queries.Queries, donor pgtype.UUID)
 		PushEventNearby: pref.PushEventNearby, PushEventReminder: pref.PushEventReminder, PushEventPromoted: pref.PushEventPromoted,
 		RankingsOptedOut: pref.RankingsOptedOut, NetworkVisible: pref.NetworkVisible,
 		Volunteer: pref.Volunteer, VolunteerInterests: interests,
-	}, err
+	}, nil
 }
 
 type Sharing struct {
@@ -153,13 +156,16 @@ type GiftsPage struct {
 
 func readProfile(ctx context.Context, q *queries.Queries, donor queries.Donor) (Profile, error) {
 	pref, err := readPreferences(ctx, q, donor.ID)
+	if err != nil {
+		return Profile{}, err
+	}
 	return Profile{
 		Email: donor.Email, PublicName: textPointer(donor.PublicName), AccountRole: donor.AccountRole,
 		Zip: textPointer(donor.Zip), City: textPointer(donor.City), Timezone: textPointer(donor.Timezone),
 		TimezoneOverride: textPointer(
 			donor.TimezoneOverride,
 		), Phone: textPointer(donor.Phone), ConsentVersion: consentVersion, Preferences: pref,
-	}, err
+	}, nil
 }
 
 func (s DonorService) Profile(ctx context.Context, token string) (Profile, error) {
@@ -293,7 +299,7 @@ func (s DonorService) SavePreferences(ctx context.Context, token string, change 
 }
 
 var (
-	ErrZip   = fmt.Errorf("%w", geo.ErrZip)
+	ErrZip   = geo.ErrZip
 	ErrPhone = errors.New("enter a valid phone number in international format, e.g. +14155550123")
 	ErrCity  = errors.New("enter a city of 1 to 80 characters")
 )
@@ -798,4 +804,38 @@ func (s DonorService) AnnualSummary(ctx context.Context, token string, year int)
 	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (AnnualSummary, error) {
 		return readAnnualSummary(ctx, q, d.ID, year, now)
 	})
+}
+
+// lockGuest returns the donor for email, created as an unclaimed guest if
+// new, locked, granted any waitlist claim on the address, and with a
+// projection row for the refresh worker to find.
+func lockGuest(ctx context.Context, q *queries.Queries, claims FoundingClaimKey, email string, now time.Time) (queries.Donor, error) {
+	id, err := NewID()
+	if err != nil {
+		return queries.Donor{}, err
+	}
+	if err = reserveEmailIdentity(ctx, q, email, identityDonor, pgtype.UUID{}); err != nil {
+		return queries.Donor{}, err
+	}
+	if err = q.InsertGuest(ctx, queries.InsertGuestParams{ID: id, Email: email}); err != nil {
+		return queries.Donor{}, err
+	}
+	donor, err := q.DonorByEmail(ctx, email)
+	if err != nil {
+		return queries.Donor{}, err
+	}
+	if donor, err = q.LockDonor(ctx, donor.ID); err != nil {
+		return queries.Donor{}, err
+	}
+	if donor.Disabled {
+		return queries.Donor{}, ErrDenied
+	}
+	if err = claims.grant(ctx, q, donor.ID, email, now); err != nil {
+		return queries.Donor{}, err
+	}
+	projection, err := NewID()
+	if err != nil {
+		return queries.Donor{}, err
+	}
+	return donor, q.SeedProjection(ctx, queries.SeedProjectionParams{ID: projection, DonorID: donor.ID, ComputedAt: timestamp(now)})
 }

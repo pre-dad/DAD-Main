@@ -237,6 +237,9 @@ func heldCheckout(
 	now time.Time,
 ) error {
 	held, err := q.ReservedAttempt(ctx, donor.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
 	if err != nil || held.Status != "OPEN" || !held.HostedUrl.Valid || !held.StripeSessionID.Valid {
 		return payments.ErrCheckoutConflict
 	}
@@ -415,40 +418,6 @@ func prepareAttempt(
 		}
 	}
 	return q.StripeCheckout(ctx, request.RequestID)
-}
-
-// lockGuest returns the donor for email, created as an unclaimed guest if
-// new, locked, granted any waitlist claim on the address, and with a
-// projection row for the refresh worker to find.
-func lockGuest(ctx context.Context, q *queries.Queries, claims FoundingClaimKey, email string, now time.Time) (queries.Donor, error) {
-	id, err := NewID()
-	if err != nil {
-		return queries.Donor{}, err
-	}
-	if err = reserveEmailIdentity(ctx, q, email, identityDonor, pgtype.UUID{}); err != nil {
-		return queries.Donor{}, err
-	}
-	if err = q.InsertGuest(ctx, queries.InsertGuestParams{ID: id, Email: email}); err != nil {
-		return queries.Donor{}, err
-	}
-	donor, err := q.DonorByEmail(ctx, email)
-	if err != nil {
-		return queries.Donor{}, err
-	}
-	if donor, err = q.LockDonor(ctx, donor.ID); err != nil {
-		return queries.Donor{}, err
-	}
-	if donor.Disabled {
-		return queries.Donor{}, ErrDenied
-	}
-	if err = claims.grant(ctx, q, donor.ID, email, now); err != nil {
-		return queries.Donor{}, err
-	}
-	projection, err := NewID()
-	if err != nil {
-		return queries.Donor{}, err
-	}
-	return donor, q.SeedProjection(ctx, queries.SeedProjectionParams{ID: projection, DonorID: donor.ID, ComputedAt: timestamp(now)})
 }
 
 // checkoutDraft is a new checkout carrying the visitor's referral, if its

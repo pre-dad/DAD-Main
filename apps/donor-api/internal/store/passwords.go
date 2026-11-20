@@ -88,10 +88,6 @@ func (s PasswordService) Set(ctx context.Context, token, current, password strin
 	if len(password) < 12 || len(password) > 72 {
 		return ErrPassword
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), passwordCost)
-	if err != nil {
-		return err
-	}
 	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
 		u, err := lockSignedIn(ctx, q, token)
@@ -115,9 +111,21 @@ func (s PasswordService) Set(ctx context.Context, token, current, password strin
 		if !u.ClaimedAt.Valid {
 			return ErrDenied
 		}
-		return q.SetDonorPassword(
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), passwordCost)
+		if err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		if err = q.SetDonorPassword(
 			ctx,
-			queries.SetDonorPasswordParams{DonorID: u.ID, PasswordHash: string(hash), UpdatedAt: timestamp(time.Now().UTC())},
+			queries.SetDonorPasswordParams{DonorID: u.ID, PasswordHash: string(hash), UpdatedAt: timestamp(now)},
+		); err != nil {
+			return err
+		}
+		// A changed password ends every other sign-in, in case it was set because the old one leaked.
+		return q.RevokeOtherSessions(
+			ctx,
+			queries.RevokeOtherSessionsParams{DonorID: u.ID, TokenHash: HashToken(token), RevokedAt: timestamp(now)},
 		)
 	})
 }
