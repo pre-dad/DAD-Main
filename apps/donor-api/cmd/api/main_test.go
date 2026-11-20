@@ -38,46 +38,47 @@ func TestConfigureRejectsInvalidEnvironmentBeforeTheDatabase(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		env  map[string]string
+		want string
 	}{
-		{"proxy range", map[string]string{"DONOR_TRUSTED_PROXY_CIDRS": "0.0.0.0/0"}},
-		{"plain HTTP origin", map[string]string{"DONOR_PUBLIC_ORIGIN": "http://dad.example.org"}},
-		{"origin with path", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org/app"}},
-		{"half of Stripe", map[string]string{"STRIPE_SECRET_KEY": "sk_test_123"}},
-		{"Stripe ceiling", map[string]string{"DONOR_STRIPE_REQUESTS_PER_SECOND": "0"}},
-		{"retired staff key without a staff origin", map[string]string{"DONOR_STAFF_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="}},
-		{"plain HTTP staff origin", map[string]string{"DONOR_STAFF_ORIGIN": "http://staff.dad.example.org"}},
-		{"staff origin with path", map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org/staff"}},
-		{"public origin in capitals", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://DAD.example.org"}},
-		{"public origin with its default port", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org:443"}},
-		{"staff origin in capitals", map[string]string{"DONOR_STAFF_ORIGIN": "https://Staff.dad.example.org"}},
-		{"staff origin with its default port", map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org:443"}},
-		{"staff origin with a trailing slash", map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org/"}},
-		{"staff on the public host", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_STAFF_ORIGIN": "https://dad.example.org:8443"}},
-		{"staff on a parent of the public host", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_STAFF_ORIGIN": "https://example.org"}},
-		{"local staff on the public host", map[string]string{"DONOR_STAFF_ORIGIN": "http://localhost:3001"}},
-		{"content key", map[string]string{"DONOR_CONTENT_ENCRYPTION_KEY": "short"}},
-		{"retired content key", map[string]string{"DONOR_CONTENT_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=,short"}},
-		{"short waitlist key", map[string]string{"DONOR_FOUNDING_CLAIM_KEY": "c2hvcnQ="}},
-		{"partial SMTP", map[string]string{"DONOR_SMTP_HOST": "smtp.example.org"}},
-		{"partial APNs", map[string]string{"DONOR_PUSH_APNS_TEAM_ID": "TEAM123456"}},
-		{"unreadable FCM key", map[string]string{"DONOR_PUSH_FCM_KEY_FILE": "/nonexistent/firebase.json"}},
+		{"proxy range", map[string]string{"DONOR_TRUSTED_PROXY_CIDRS": "0.0.0.0/0"}, "too broad"},
+		{"plain HTTP origin", map[string]string{"DONOR_PUBLIC_ORIGIN": "http://dad.example.org"}, "DONOR_PUBLIC_ORIGIN must be an HTTPS"},
+		{"origin with path", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org/app"}, "DONOR_PUBLIC_ORIGIN must be an HTTPS"},
+		{"half of Stripe", map[string]string{"STRIPE_SECRET_KEY": "sk_test_123"}, "set both STRIPE_SECRET_KEY"},
+		{"Stripe ceiling", map[string]string{"DONOR_STRIPE_REQUESTS_PER_SECOND": "0"}, "DONOR_STRIPE_REQUESTS_PER_SECOND"},
+		{"retired staff key without a staff origin", map[string]string{"DONOR_STAFF_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="}, "set DONOR_STAFF_ORIGIN"},
+		{"plain HTTP staff origin", map[string]string{"DONOR_STAFF_ORIGIN": "http://staff.dad.example.org"}, "DONOR_STAFF_ORIGIN must be an HTTPS"},
+		{"staff origin with path", map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org/staff"}, "DONOR_STAFF_ORIGIN must be an HTTPS"},
+		{"public origin in capitals", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://DAD.example.org"}, "DONOR_PUBLIC_ORIGIN must be written as browsers send it"},
+		{"public origin with its default port", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org:443"}, "DONOR_PUBLIC_ORIGIN must be written as browsers send it"},
+		{"staff origin in capitals", map[string]string{"DONOR_STAFF_ORIGIN": "https://Staff.dad.example.org"}, "DONOR_STAFF_ORIGIN must be written as browsers send it"},
+		{"staff origin with its default port", map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org:443"}, "DONOR_STAFF_ORIGIN must be written as browsers send it"},
+		{"staff origin with a trailing slash", map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org/"}, "DONOR_STAFF_ORIGIN must be an HTTPS"},
+		{"staff on the public host", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_STAFF_ORIGIN": "https://dad.example.org:8443"}, "must use its own host"},
+		{"staff on a parent of the public host", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_STAFF_ORIGIN": "https://example.org"}, "must use its own host"},
+		{"local staff on the public host", map[string]string{"DONOR_STAFF_ORIGIN": "http://localhost:3001"}, "must use its own host"},
+		{"content key", map[string]string{"DONOR_CONTENT_ENCRYPTION_KEY": "short"}, "DONOR_CONTENT_ENCRYPTION_KEY key 1 of 1"},
+		{"retired content key", map[string]string{"DONOR_CONTENT_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=,short"}, "DONOR_CONTENT_ENCRYPTION_KEY key 2 of 2"},
+		{"short waitlist key", map[string]string{"DONOR_FOUNDING_CLAIM_KEY": "c2hvcnQ="}, "DONOR_FOUNDING_CLAIM_KEY"},
+		{"partial SMTP", map[string]string{"DONOR_SMTP_HOST": "smtp.example.org"}, "invalid email configuration"},
+		{"partial APNs", map[string]string{"DONOR_PUSH_APNS_TEAM_ID": "TEAM123456"}, "DONOR_PUSH_APNS_KEY_FILE"},
+		{"unreadable FCM key", map[string]string{"DONOR_PUSH_FCM_KEY_FILE": "/nonexistent/firebase.json"}, "DONOR_PUSH_FCM_KEY_FILE"},
 		{"SMS stub off this machine", map[string]string{
 			"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_SMS_PROVIDER": "stub", "DONOR_SMS_FROM": "DAD",
-		}},
+		}, "DONOR_ALLOW_SIGN_IN_STUBS"},
 		{"OIDC stub off this machine", map[string]string{
 			"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_OIDC_MODE": "stub", "DONOR_OIDC_STUB_KEY": "k",
 			"DONOR_OIDC_GOOGLE_CLIENT_ID": "g.apps",
-		}},
-		{"native return origin with a path", map[string]string{"DONOR_NATIVE_RETURN_ORIGIN": "https://dad.example.org/app"}},
-		{"native return origin over plain HTTP", map[string]string{"DONOR_NATIVE_RETURN_ORIGIN": "http://dad.example.org"}},
-		{"invalid SMS settings", map[string]string{"DONOR_SMS_PROVIDER": "twilio"}},
-		{"invalid OIDC settings", map[string]string{"DONOR_OIDC_MODE": "live"}},
+		}, "DONOR_ALLOW_SIGN_IN_STUBS"},
+		{"native return origin with a path", map[string]string{"DONOR_NATIVE_RETURN_ORIGIN": "https://dad.example.org/app"}, "DONOR_NATIVE_RETURN_ORIGIN must be an HTTPS"},
+		{"native return origin over plain HTTP", map[string]string{"DONOR_NATIVE_RETURN_ORIGIN": "http://dad.example.org"}, "DONOR_NATIVE_RETURN_ORIGIN must be an HTTPS"},
+		{"invalid SMS settings", map[string]string{"DONOR_SMS_PROVIDER": "twilio"}, "invalid SMS configuration"},
+		{"invalid OIDC settings", map[string]string{"DONOR_OIDC_MODE": "live"}, "invalid OIDC configuration"},
 	} {
 		getenv := func(name string) string { return cmp.Or(tc.env[name], base[name]) }
 		_, release, err := configure(context.Background(), getenv)
 		release()
-		if err == nil || err.Error() == "donor database startup failed" {
-			t.Errorf("%s: got %v, want a configuration error", tc.name, err)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want an error containing %q", tc.name, err, tc.want)
 		}
 	}
 }
