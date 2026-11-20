@@ -134,7 +134,7 @@ func dashboard(ctx context.Context, q *queries.Queries, donor queries.Donor, now
 		result.Streak.Ladder = &ladder
 	}
 	// Rank line under the streak (S-4): the donor's own position only.
-	rank, err := ForDonor(ctx, q, id)
+	rank, err := RankingForDonor(ctx, q, id)
 	if err != nil {
 		return DonorDashboard{}, err
 	}

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"sync"
@@ -59,6 +60,28 @@ func TestRankingScheduleSurvivesEmptyPopulationAndSerializesWorkers(t *testing.T
 	}
 }
 
+func TestFailedManualRefreshLeavesTheScheduleDue(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	mustExec(t, pool, "DELETE FROM donor_projection_schedules WHERE id='rankings'")
+	cleanup(t, "DELETE FROM donor_projection_schedules WHERE id='rankings'")
+	cleanup(t, "DELETE FROM donor_rankings")
+	rankDonor(t, pool, 5, time.Now().UTC().AddDate(0, 0, -5), "Austin", false)
+	now := time.Now().UTC()
+	failing := RankingService{
+		DB:         as(t, dbroles.ProjectionWorker),
+		ChunkSize:  1,
+		afterChunk: func(int) error { return errors.New("write interrupted") },
+	}
+	if err := failing.Refresh(ctx, now); err == nil {
+		t.Fatal("interrupted refresh reported success")
+	}
+	svc := RankingService{DB: as(t, dbroles.ProjectionWorker)}
+	if worked, err := svc.RefreshIfDue(ctx, now); err != nil || !worked {
+		t.Fatalf("scheduled refresh after a failed manual one: %t %v", worked, err)
+	}
+}
+
 // rankDonor seeds a donor with a projection carrying a streak and start, and an
 // optional city + opt-out, for ranking tests.
 func rankDonor(t *testing.T, pool *pgxpool.Pool, streak int32, since time.Time, city string, optedOut bool) pgtype.UUID {
@@ -108,18 +131,18 @@ func TestRankingsUseLocalDaysAndImmediateOptOut(t *testing.T) {
 	}
 	q := queries.New(as(t, dbroles.API))
 	for id, want := range map[pgtype.UUID]int{longer: 1, shorter: 2} {
-		rank, err := ForDonor(ctx, q, id)
+		rank, err := RankingForDonor(ctx, q, id)
 		if err != nil || rank == nil || rank.CityRank == nil || *rank.CityRank != want {
 			t.Fatalf("daily ranking for %s = %+v (%v), want city rank %d", id, rank, err, want)
 		}
 	}
-	if rank, err := ForDonor(ctx, q, stale); err != nil || rank != nil {
+	if rank, err := RankingForDonor(ctx, q, stale); err != nil || rank != nil {
 		t.Fatalf("stale recognition was ranked: %+v %v", rank, err)
 	}
 	pref := mustNewID(t)
 	mustExec(t, pool, `INSERT INTO donor_preferences(id,donor_id,version,referral_emails,marketing_emails,rankings_opted_out)
 		VALUES($1,$2,1,false,false,true)`, pref, longer)
-	if rank, err := ForDonor(ctx, q, longer); err != nil || rank != nil {
+	if rank, err := RankingForDonor(ctx, q, longer); err != nil || rank != nil {
 		t.Fatalf("opt-out waited for the next rollup: %+v %v", rank, err)
 	}
 }
@@ -134,7 +157,7 @@ func TestSingleEligibleDonorIsTopPercentile(t *testing.T) {
 	if err := (RankingService{DB: as(t, dbroles.ProjectionWorker)}).Refresh(ctx, now); err != nil {
 		t.Fatal(err)
 	}
-	rank, err := ForDonor(ctx, queries.New(as(t, dbroles.API)), id)
+	rank, err := RankingForDonor(ctx, queries.New(as(t, dbroles.API)), id)
 	if err != nil || rank == nil || rank.NationalPercentile != 1 {
 		t.Fatalf("single eligible donor rank = %+v %v; want top 1%%", rank, err)
 	}
@@ -255,7 +278,7 @@ func TestRankBadgesWaitForTheirMinimumPopulation(t *testing.T) {
 	if err := svc.Refresh(ctx, now); err != nil {
 		t.Fatal(err)
 	}
-	rank, err := ForDonor(ctx, queries.New(pool), id)
+	rank, err := RankingForDonor(ctx, queries.New(pool), id)
 	if err != nil || rank == nil || rank.NationalPercentile != 1 || rank.CityRank == nil || *rank.CityRank != 1 {
 		t.Fatalf("the rank line is hidden in a small population: %+v %v", rank, err)
 	}

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"dad/donor-api/internal/store/queries"
@@ -49,9 +50,9 @@ func (s RankingService) Refresh(ctx context.Context, now time.Time) error {
 	return err
 }
 
-// ForDonor returns a donor's own ranking, or (nil, nil) when they are unranked
+// RankingForDonor returns a donor's own ranking, or (nil, nil) when they are unranked
 // (no streak, opted out, or not yet computed).
-func ForDonor(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) (*Ranking, error) {
+func RankingForDonor(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) (*Ranking, error) {
 	row, err := q.DonorRanking(ctx, donorID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -129,12 +130,13 @@ FROM ranked
 ORDER BY donor_id`
 
 // rankingUpsert writes a chunk, skipping rows whose rank is unchanged so an
-// unchanged population writes nothing. Arguments: see rankedChunk.args.
+// unchanged population writes nothing. Arguments: the first four of
+// rankedChunk.args, then the computation time.
 const rankingUpsert = `
 INSERT INTO donor_rankings AS r (donor_id, national_percentile, city, city_rank, computed_at)
-SELECT donor_id, national_percentile, city, city_rank, $7::timestamptz
-FROM unnest($1::uuid[], $2::int[], $3::varchar[], $4::int[], $5::int[], $6::int[])
-  AS t(donor_id, national_percentile, city, city_rank, national_population, city_population)
+SELECT donor_id, national_percentile, city, city_rank, $5::timestamptz
+FROM unnest($1::uuid[], $2::int[], $3::varchar[], $4::int[])
+  AS t(donor_id, national_percentile, city, city_rank)
 ON CONFLICT (donor_id) DO UPDATE SET
   national_percentile = EXCLUDED.national_percentile,
   city = EXCLUDED.city,
@@ -244,17 +246,17 @@ func (s RankingService) refresh(ctx context.Context, now time.Time, due bool) (r
 		if claimErr != nil || claimed == 0 {
 			return false, claimErr
 		}
-		defer func() {
-			if err != nil {
-				_ = schedule.SaveProjectionSchedule(
-					context.WithoutCancel(ctx),
-					queries.SaveProjectionScheduleParams{ID: "rankings", NextRunAt: timestamp(now)},
-				)
-			}
-		}()
 	} else if err := schedule.SaveProjectionSchedule(ctx, queries.SaveProjectionScheduleParams{ID: "rankings", NextRunAt: next}); err != nil {
 		return false, err
 	}
+	defer func() {
+		if err != nil {
+			_ = schedule.SaveProjectionSchedule(
+				context.WithoutCancel(ctx),
+				queries.SaveProjectionScheduleParams{ID: "rankings", NextRunAt: timestamp(now)},
+			)
+		}
+	}()
 	return true, s.writeSnapshot(ctx, snapshot, now)
 }
 
@@ -330,7 +332,7 @@ func (s RankingService) writeSnapshot(ctx context.Context, snapshot pgx.Tx, now 
 func (s RankingService) writeChunk(ctx context.Context, c *rankedChunk, low pgtype.UUID, now time.Time) error {
 	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		args := append(c.args(), timestamp(now))
-		if _, err := tx.Exec(ctx, rankingUpsert, args...); err != nil {
+		if _, err := tx.Exec(ctx, rankingUpsert, append(slices.Clone(c.args()[:4]), timestamp(now))...); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, rankingPruneRange, nilIfInvalid(low), c.last(), c.ids); err != nil {
