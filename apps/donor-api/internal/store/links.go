@@ -28,7 +28,8 @@ func ValidReturnPath(next string) bool {
 	return next == "/donate" || next == "/account/payment-method" || next == "/account/dashboard"
 }
 
-// claim is a sign-in link, which returns the donor to next if it is set.
+// claim is a sign-in link, which returns the donor to next if it is set. next is
+// appended unescaped, so it must satisfy ValidReturnPath.
 func (s publicSite) claim(token, next string) string {
 	link := string(s) + "/account/claim#token=" + token
 	if next != "" {
@@ -36,6 +37,8 @@ func (s publicSite) claim(token, next string) string {
 	}
 	return link
 }
+
+func (s publicSite) partnerPortal() string { return string(s) + "/partner" }
 
 func (s publicSite) partnerSignIn(token string) string {
 	return string(s) + "/partner/accept#token=" + token
@@ -60,12 +63,8 @@ func (s publicSite) donate() string         { return string(s) + "/donate" }
 // checkoutReturn is where hosted checkout returns a donor; Stripe substitutes
 // the session placeholder.
 func (s publicSite) checkoutReturn(amount int64, frequency string) string {
-	return string(
-		s,
-	) + "/donate/thanks?session_id={CHECKOUT_SESSION_ID}&amount_minor=" + strconv.FormatInt(
-		amount,
-		10,
-	) + "&frequency=" + frequency
+	base := string(s) + "/donate/thanks?session_id={CHECKOUT_SESSION_ID}"
+	return base + "&amount_minor=" + strconv.FormatInt(amount, 10) + "&frequency=" + frequency
 }
 
 // nativeReturnPath is where a native client's hosted checkout returns. The page
