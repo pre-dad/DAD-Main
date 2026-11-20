@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
-	"regexp"
 	"sync"
 	"time"
 
@@ -29,9 +28,6 @@ var ErrSignInUnavailable = errors.New("this sign-in method is not available")
 // a caller cannot tell "no account" from "wrong code" — neither reveals whether
 // an account exists.
 var ErrSignInCode = errors.New("that code is incorrect or has expired")
-
-// phonePatternStore mirrors the ck_donor_phone constraint (E.164).
-var phonePatternStore = regexp.MustCompile(`^\+[1-9][0-9]{1,14}$`)
 
 const (
 	phoneCodeTTL      = 10 * time.Minute
@@ -64,7 +60,7 @@ func (s PhoneService) BeginSignIn(ctx context.Context, phone string) error {
 	if s.Sender == nil {
 		return ErrSignInUnavailable
 	}
-	if !phonePatternStore.MatchString(phone) {
+	if !phonePattern.MatchString(phone) {
 		return nil
 	}
 	code, err := numericCode(6)
@@ -129,7 +125,7 @@ func (s PhoneService) FinishSignIn(ctx context.Context, phone, code string, clie
 	if s.Sender == nil {
 		return Tokens{}, ErrSignInUnavailable
 	}
-	if !phonePatternStore.MatchString(phone) {
+	if !phonePattern.MatchString(phone) {
 		return Tokens{}, ErrSignInCode
 	}
 	rejected := false

@@ -117,6 +117,9 @@ func readPreferences(ctx context.Context, q *queries.Queries, donor pgtype.UUID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return defaultPreferences(), nil
 	}
+	if err != nil {
+		return Preferences{}, err
+	}
 	interests := pref.VolunteerInterests
 	if interests == nil {
 		interests = []string{}
@@ -128,7 +131,7 @@ func readPreferences(ctx context.Context, q *queries.Queries, donor pgtype.UUID)
 		PushEventNearby: pref.PushEventNearby, PushEventReminder: pref.PushEventReminder, PushEventPromoted: pref.PushEventPromoted,
 		RankingsOptedOut: pref.RankingsOptedOut, NetworkVisible: pref.NetworkVisible,
 		Volunteer: pref.Volunteer, VolunteerInterests: interests,
-	}, err
+	}, nil
 }
 
 type Sharing struct {
@@ -153,13 +156,16 @@ type GiftsPage struct {
 
 func readProfile(ctx context.Context, q *queries.Queries, donor queries.Donor) (Profile, error) {
 	pref, err := readPreferences(ctx, q, donor.ID)
+	if err != nil {
+		return Profile{}, err
+	}
 	return Profile{
 		Email: donor.Email, PublicName: textPointer(donor.PublicName), AccountRole: donor.AccountRole,
 		Zip: textPointer(donor.Zip), City: textPointer(donor.City), Timezone: textPointer(donor.Timezone),
 		TimezoneOverride: textPointer(
 			donor.TimezoneOverride,
 		), Phone: textPointer(donor.Phone), ConsentVersion: consentVersion, Preferences: pref,
-	}, err
+	}, nil
 }
 
 func (s DonorService) Profile(ctx context.Context, token string) (Profile, error) {
@@ -293,7 +299,7 @@ func (s DonorService) SavePreferences(ctx context.Context, token string, change 
 }
 
 var (
-	ErrZip   = fmt.Errorf("%w", geo.ErrZip)
+	ErrZip   = geo.ErrZip
 	ErrPhone = errors.New("enter a valid phone number in international format, e.g. +14155550123")
 	ErrCity  = errors.New("enter a city of 1 to 80 characters")
 )
