@@ -86,8 +86,8 @@ func containsNUL(v reflect.Value) bool {
 				return true
 			}
 		}
-	case reflect.Slice:
-		if v.Type().Elem().Kind() == reflect.Uint8 {
+	case reflect.Slice, reflect.Array:
+		if v.Kind() == reflect.Slice && v.Type().Elem().Kind() == reflect.Uint8 {
 			return bytes.Contains(v.Bytes(), []byte(`\u0000`))
 		}
 		for i := range v.Len() {

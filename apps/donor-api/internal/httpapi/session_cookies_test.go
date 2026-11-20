@@ -148,8 +148,8 @@ func TestPartnerBearerStillRequiresTheNativeMarker(t *testing.T) {
 	if got := partnerSession(r); got != "cookie-session" {
 		t.Fatalf("partnerSession = %q, want the cookie to win over the bearer", got)
 	}
-	native := appRequest("GET", "/donor/partner/overview", "")
-	if got := partnerSession(native); got != appSession {
+	app := appRequest("GET", "/donor/partner/overview", "")
+	if got := partnerSession(app); got != appSession {
 		t.Fatalf("native partnerSession = %q, want the bearer", got)
 	}
 }

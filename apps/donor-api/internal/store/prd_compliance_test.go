@@ -32,7 +32,7 @@ func TestCofundersKeepIndependentCommitmentsAndVerifiedSpend(t *testing.T) {
 		id     pgtype.UUID
 		amount int64
 	}{{a, 10000}, {b, 20000}} {
-		if err := partners.LinkInitiative(ctx, admin, p.id, id, p.amount); err != nil {
+		if err := partners.LinkInitiative(ctx, admin, p.id, id, &p.amount); err != nil {
 			t.Fatal(err)
 		}
 	}
