@@ -39,7 +39,10 @@ func TestCheckoutUsesPinnedSDKAndSavedParameters(t *testing.T) {
 			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
 		},
 	)
-	gateway := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends)), budget: DefaultRateBudget()}
+	gateway := &StripeGateway{
+		client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends)),
+		budget: DefaultRateBudget(),
+	}
 	raw := []byte(
 		`{"mode":"payment","customer_email":"donor@example.org","allowed_payment_method_types":["card"],"line_items":[{"price_data":{"currency":"usd","unit_amount":3000,"product_data":{"name":"DAD one-time gift"}},"quantity":1}]}`,
 	)
@@ -154,7 +157,10 @@ func TestSubscriptionMutationsNeverProrate(t *testing.T) {
 			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
 		},
 	)
-	gateway := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends)), budget: DefaultRateBudget()}
+	gateway := &StripeGateway{
+		client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends)),
+		budget: DefaultRateBudget(),
+	}
 	ctx := context.Background()
 	for _, err := range []error{
 		gateway.ScheduleCancellation(ctx, "sub_fixture", 1800000000, "key"),
@@ -209,7 +215,10 @@ func TestExpireCheckoutReportsWhoWonTheRace(t *testing.T) {
 			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
 		},
 	)
-	gateway := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends)), budget: DefaultRateBudget()}
+	gateway := &StripeGateway{
+		client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends)),
+		budget: DefaultRateBudget(),
+	}
 	ctx := context.Background()
 	if status, err := gateway.ExpireCheckout(ctx, "cs_test_open", "key"); err != nil || status != "expired" {
 		t.Fatalf("open session: %q %v", status, err)
