@@ -207,8 +207,9 @@ type subscriptionLease struct {
 	subscription     string
 }
 
-// Even an identical retry must wait: otherwise it can release the lease while
-// the original request is still in flight. Crash recovery waits for expiry.
+// leaseSubscription takes the subscription lease for a command. Even an
+// identical retry must wait: otherwise it can release the lease while the
+// original request is still in flight. Crash recovery waits for expiry.
 func leaseSubscription(
 	ctx context.Context,
 	q *queries.Queries,
