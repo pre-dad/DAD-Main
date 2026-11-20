@@ -44,13 +44,14 @@ export default function Wording() {
     const submit = (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
-      return save(
-        kind,
-        entry,
-        String(form.get("title") ?? "").trim(),
-        String(form.get("text") ?? "").trim(),
-        `Saved the wording for ${label}.`,
-      );
+      const title = String(form.get("title") ?? "").trim();
+      const text = String(form.get("text") ?? "").trim();
+      if (!title || !text) {
+        setStatus("");
+        setError(`Enter both a title and text for ${label}. To go back to the standard wording, restore the default.`);
+        return;
+      }
+      return save(kind, entry, title, text, `Saved the wording for ${label}.`);
     };
     return (
       <form key={`${entry.key}:${entry.title}:${entry.text}`} onSubmit={submit}>

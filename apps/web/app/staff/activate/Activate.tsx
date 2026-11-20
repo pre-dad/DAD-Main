@@ -50,6 +50,7 @@ export default function Activate() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [used, setUsed] = useState(false);
+  const [done, setDone] = useState(false);
   // A refused invitation is forgotten, so this tab no longer offers it.
   const refused = useCallback(
     (cause: unknown) => {
@@ -88,15 +89,25 @@ export default function Activate() {
     if (busy || !invitation) return;
     setBusy(true);
     setError("");
+    let value = invitation.value;
+    if (Date.now() - invitation.at >= FRESH_FOR_MS) {
+      try {
+        value = (await load()).value;
+      } catch (cause) {
+        setBusy(false);
+        refused(cause);
+        return;
+      }
+    }
     let answered = false;
     try {
-      const { value } = Date.now() - invitation.at < FRESH_FOR_MS ? invitation : await load();
       const credential = await createPasskey(value.options);
       answered = true;
       await api("/donor/staff/activate", {
         method: "POST",
         body: JSON.stringify({ ceremony: value.ceremony, credential }),
       });
+      setDone(true);
       clear();
       window.location.assign("/staff");
     } catch (cause) {
@@ -108,7 +119,9 @@ export default function Activate() {
   }
   return (
     <Page eyebrow="Staff" title="Activate your staff account">
-      {used ? null : token === "" ? (
+      {done ? (
+        <p>Account activated, redirecting…</p>
+      ) : used ? null : token === "" ? (
         <p className="callout">
           Open this page from the private invitation link a DAD administrator sent you. If the link has expired, ask
           them for a replacement invitation.

@@ -27,26 +27,65 @@ const wording = {
   ],
 };
 
-it("saves a badge's new wording and restores a milestone's default", async () => {
+function serve() {
   const fetch = vi
     .fn()
-    .mockImplementation(async (_url: string, init?: RequestInit) =>
+    .mockImplementation(async (url: string, init?: RequestInit) =>
       init?.method === "POST"
         ? Response.json({ saved: true })
-        : Response.json(_url.endsWith("/rules") ? { badges: [], milestones: [7, 30] } : wording),
+        : Response.json(url.endsWith("/rules") ? { badges: [], milestones: [7, 30] } : wording),
+    );
+  vi.stubGlobal("fetch", fetch);
+  return fetch;
+}
+
+const saves = (fetch: ReturnType<typeof serve>) =>
+  fetch.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(init.body));
+
+it("saves a badge's trimmed wording", async () => {
+  const fetch = serve();
+  render(<Wording />);
+  fireEvent.change((await screen.findAllByLabelText("Title"))[0], { target: { value: " Top Team " } });
+  fireEvent.click(screen.getByRole("button", { name: "Save badge WT" }));
+  expect(await screen.findByText("Saved the wording for badge WT.")).toBeVisible();
+  expect(saves(fetch)).toEqual([
+    { kind: "BADGE", key: "WT", title: "Top Team", text: "Your team finishes a month at #1" },
+  ]);
+});
+
+it("restores a milestone's default wording", async () => {
+  const fetch = serve();
+  render(<Wording />);
+  expect(await screen.findByText(/Default: Your 30-day giving streak/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Restore default for 30-day milestone" }));
+  expect(await screen.findByText("Restored the default wording for 30-day milestone.")).toBeVisible();
+  expect(saves(fetch)).toEqual([{ kind: "MILESTONE", key: "30", title: "", text: "" }]);
+});
+
+it.each([
+  ["Title", "   "],
+  ["How to earn it", "\t "],
+])("rejects whitespace-only %s instead of silently restoring the default", async (label, value) => {
+  const fetch = serve();
+  render(<Wording />);
+  fireEvent.change((await screen.findAllByLabelText(label))[0], { target: { value } });
+  fireEvent.click(screen.getByRole("button", { name: "Save badge WT" }));
+  expect(await screen.findByText(/Enter both a title and text for badge WT/)).toBeVisible();
+  expect(saves(fetch)).toEqual([]);
+});
+
+it("keeps the form and says nothing changed when saving fails", async () => {
+  const fetch = vi
+    .fn()
+    .mockImplementation(async (url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Response.json({ detail: "Unavailable" }, { status: 503 })
+        : Response.json(url.endsWith("/rules") ? { badges: [], milestones: [7, 30] } : wording),
     );
   vi.stubGlobal("fetch", fetch);
   render(<Wording />);
-  const title = (await screen.findAllByLabelText("Title"))[0];
-  fireEvent.change(title, { target: { value: " Top Team " } });
+  fireEvent.change((await screen.findAllByLabelText("Title"))[0], { target: { value: "Top Team" } });
   fireEvent.click(screen.getByRole("button", { name: "Save badge WT" }));
-  expect(await screen.findByText("Saved the wording for badge WT.")).toBeTruthy();
-  const saves = () =>
-    fetch.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(init.body));
-  expect(saves()).toEqual([{ kind: "BADGE", key: "WT", title: "Top Team", text: "Your team finishes a month at #1" }]);
-
-  expect(screen.getByText(/Default: Your 30-day giving streak/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Restore default for 30-day milestone" }));
-  expect(await screen.findByText("Restored the default wording for 30-day milestone.")).toBeTruthy();
-  expect(saves()[1]).toEqual({ kind: "MILESTONE", key: "30", title: "", text: "" });
+  expect(await screen.findByText("The wording could not be saved. Nothing was changed.")).toBeVisible();
+  expect(screen.getAllByLabelText("Title")[0]).toHaveValue("Top Team");
 });

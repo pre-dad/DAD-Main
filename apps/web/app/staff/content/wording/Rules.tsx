@@ -1,18 +1,78 @@
 "use client";
 import Image from "next/image";
-import { useState } from "react";
+import { type FormEvent, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { api, failureMessage, type Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 export function Rules() {
   const { resource, data, reload } = useApiResource<Schema<"RecognitionRules">>("/donor/staff/content/rules");
-  const [busy, setBusy] = useState(false),
-    [status, setStatus] = useState(""),
-    [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [formVersion, setFormVersion] = useState(0);
+  const [seen, setSeen] = useState(data);
   const messages = resourceMessages(resource, {
     loading: "Loading earning rules…",
     failure: "Earning rules could not be loaded.",
   });
+  // The form is uncontrolled, so it remounts onto fresh defaults only when new data arrives.
+  if (data !== seen) {
+    setSeen(data);
+    setFormVersion((version) => version + 1);
+  }
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy || !data) return;
+    const values = new FormData(event.currentTarget);
+    const milestones = String(values.get("milestones"))
+      .split(",")
+      .map((value) => Number(value.trim()));
+    const increasing = milestones.every(
+      (day, index) => Number.isInteger(day) && day >= 1 && (index === 0 || day > milestones[index - 1]),
+    );
+    if (!increasing) {
+      setStatus("");
+      setError("Milestone days must be whole numbers from 1, each larger than the one before.");
+      return;
+    }
+    setBusy(true);
+    setStatus("");
+    setError("");
+    try {
+      const badges = await Promise.all(
+        data.badges.map(async (badge) => {
+          const file = values.get(`art:${badge.code}`);
+          let artwork = badge.artwork;
+          if (file instanceof File && file.size) {
+            if (file.size > 256 * 1024) throw new Error("Choose an image under 256 KB.");
+            artwork = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(String(reader.result));
+              reader.onerror = () => reject(new Error("Image could not be read."));
+              reader.readAsDataURL(file);
+            });
+          }
+          if (values.get(`clear:${badge.code}`)) artwork = "";
+          const population = values.get(`population:${badge.code}`);
+          return {
+            ...badge,
+            threshold: Number(values.get(`threshold:${badge.code}`)),
+            min_population: population === null ? badge.min_population : Number(population),
+            artwork,
+          };
+        }),
+      );
+      await api("/donor/staff/content/rules", { method: "POST", body: JSON.stringify({ badges, milestones }) });
+      setStatus("Rules and artwork saved.");
+      reload();
+    } catch (cause) {
+      setError(failureMessage(cause, "Rules could not be saved. Check the thresholds and images."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section>
       <h2>Earning rules and artwork</h2>
@@ -21,57 +81,7 @@ export function Rules() {
         every 365 days after the final threshold.
       </p>
       {data && (
-        <form
-          key={JSON.stringify(data)}
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (busy) return;
-            const form = e.currentTarget,
-              f = new FormData(form);
-            setBusy(true);
-            setError("");
-            try {
-              const badges = await Promise.all(
-                data.badges.map(async (b) => {
-                  const file = f.get(`art:${b.code}`);
-                  let artwork = b.artwork;
-                  if (file instanceof File && file.size) {
-                    if (file.size > 256 * 1024) throw new Error("Choose an image under 256 KB.");
-                    artwork = await new Promise<string>((resolve, reject) => {
-                      const reader = new FileReader();
-                      reader.onload = () => resolve(String(reader.result));
-                      reader.onerror = () => reject(new Error("Image could not be read."));
-                      reader.readAsDataURL(file);
-                    });
-                  }
-                  if (f.get(`clear:${b.code}`)) artwork = "";
-                  const population = f.get(`population:${b.code}`);
-                  return {
-                    ...b,
-                    threshold: Number(f.get(`threshold:${b.code}`)),
-                    min_population: population === null ? b.min_population : Number(population),
-                    artwork,
-                  };
-                }),
-              );
-              await api("/donor/staff/content/rules", {
-                method: "POST",
-                body: JSON.stringify({
-                  badges,
-                  milestones: String(f.get("milestones"))
-                    .split(",")
-                    .map((v) => Number(v.trim())),
-                }),
-              });
-              setStatus("Rules and artwork saved.");
-              reload();
-            } catch (c) {
-              setError(failureMessage(c, "Rules could not be saved. Check the thresholds and images."));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
+        <form key={formVersion} onSubmit={save}>
           <fieldset disabled={busy}>
             <legend>Milestone thresholds</legend>
             <label>
