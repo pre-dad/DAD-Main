@@ -163,9 +163,9 @@ func mustCheckoutOf(t *testing.T, f *workerFixture, attempt string) string {
 }
 
 func TestNativeCheckoutPaidWhileRestartingIsAnActiveGift(t *testing.T) {
-	for name, arrange := range map[string]func(*workerFixture, *checkoutGateway){
-		"processor reports the session complete": func(_ *workerFixture, g *checkoutGateway) { g.expireStatus = "complete" },
-		"webhook completes it as the expiry runs": func(f *workerFixture, g *checkoutGateway) {
+	for name, arrange := range map[string]func(*testing.T, *workerFixture, *checkoutGateway){
+		"processor reports the session complete": func(_ *testing.T, _ *workerFixture, g *checkoutGateway) { g.expireStatus = "complete" },
+		"webhook completes it as the expiry runs": func(t *testing.T, f *workerFixture, g *checkoutGateway) {
 			g.beforeExpire = func() {
 				mustExec(t, f.db, "UPDATE donor_stripe_checkouts SET status='COMPLETE' WHERE id=$1", f.request.RequestID)
 			}
@@ -173,7 +173,7 @@ func TestNativeCheckoutPaidWhileRestartingIsAnActiveGift(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, gateway, token, _ := nativeRestartFixture(t)
-			arrange(f, gateway)
+			arrange(t, f, gateway)
 			id, err := NewID()
 			if err != nil {
 				t.Fatal(err)
@@ -353,21 +353,7 @@ func TestNativeCheckoutCreditsTheAppsReferral(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	referrer, _ := donor(t, pool)
-	// Registered after referrer cleanup so dependent rows disappear first.
-	t.Cleanup(func() {
-		for _, sql := range []string{
-			"DELETE FROM donor_recurring_reservations WHERE donor_id=$1",
-			"DELETE FROM donor_stripe_checkouts WHERE checkout_id IN (SELECT id FROM donor_checkouts WHERE donor_id=$1)",
-			"DELETE FROM donor_checkouts WHERE donor_id=$1",
-		} {
-			if _, err := pool.Exec(ctx, sql, id); err != nil {
-				t.Error(err)
-			}
-		}
-		if _, err := pool.Exec(ctx, "DELETE FROM donor_referral_touches WHERE referrer_id=$1", referrer); err != nil {
-			t.Error(err)
-		}
-	})
+	cleanReferralCheckout(t, pool, id, referrer)
 	visitor := "native-visitor-" + testID(t).String()
 	if _, err := pool.Exec(
 		ctx,

@@ -92,12 +92,12 @@ func TestAnalyticsBatchStoresEveryEventAndIgnoresDuplicates(t *testing.T) {
 	if err := svc.Record(ctx, "ANDROID", "", events); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := database(
-		t,
-	).Query(ctx, "SELECT id, source, journey_id, properties->>'source' FROM analytics_events WHERE id = ANY($1)", []pgtype.UUID{first, second})
+	pool := database(t)
+	rows, err := pool.Query(ctx, "SELECT id, source, journey_id, properties->>'source' FROM analytics_events WHERE id = ANY($1)", []pgtype.UUID{first, second})
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 	type stored struct {
 		source, property string
 		journey          pgtype.UUID

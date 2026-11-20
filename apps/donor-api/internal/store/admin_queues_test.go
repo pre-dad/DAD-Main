@@ -104,7 +104,7 @@ func TestStaffFailedPaymentsListStatesAndAudit(t *testing.T) {
 		t.Helper()
 		out := map[pgtype.UUID]FailedPayment{}
 		after := ""
-		for range 20 {
+		for range 200 {
 			got, err := s.FailedPayments(ctx, token, state, after)
 			if err != nil {
 				t.Fatal(err)
@@ -226,9 +226,21 @@ func TestStaffAccountDeletionsListIsReadOnlyAndAudited(t *testing.T) {
 		deletedAt,
 	)
 	mustExec(t, pool, "INSERT INTO donor_deletions (donor_id, deleted_at) VALUES ($1,$2)", id, deletedAt)
+	// Older than the first donor but newer than any other deletion, so a full first page and a second page are ours.
+	older := map[pgtype.UUID]bool{}
+	for i := range pageSize {
+		other, _ := donor(t, pool)
+		older[other] = true
+		mustExec(t, pool, "INSERT INTO donor_deletions (donor_id, deleted_at) VALUES ($1,$2)", other, deletedAt.Add(-time.Duration(i+1)*time.Second))
+	}
 	t.Cleanup(func() {
 		for _, sql := range []string{"DELETE FROM donor_deletions WHERE donor_id=$1", "DELETE FROM donor_gifts WHERE donor_id=$1", "DELETE FROM donor_checkouts WHERE donor_id=$1"} {
 			if _, err := pool.Exec(ctx, sql, id); err != nil {
+				t.Error(err)
+			}
+		}
+		for other := range older {
+			if _, err := pool.Exec(ctx, "DELETE FROM donor_deletions WHERE donor_id=$1", other); err != nil {
 				t.Error(err)
 			}
 		}
@@ -248,20 +260,24 @@ func TestStaffAccountDeletionsListIsReadOnlyAndAudited(t *testing.T) {
 		!got.Deletions[0].DeletedAt.Equal(deletedAt) {
 		t.Fatalf("newest deletion not first with its retained gifts: %+v", got.Deletions)
 	}
-	if got.NextCursor != nil {
-		next, err := s.AccountDeletions(ctx, token, *got.NextCursor)
-		if err != nil || len(next.Deletions) > pageSize {
-			t.Fatal("second page", err)
-		}
-		for _, d := range next.Deletions {
-			if d.DonorID == id {
-				t.Fatal("row repeated on the next page")
-			}
+	if len(got.Deletions) != pageSize || got.NextCursor == nil {
+		t.Fatalf("a full first page must carry a cursor: %d rows, cursor %v", len(got.Deletions), got.NextCursor)
+	}
+	next, err := s.AccountDeletions(ctx, token, *got.NextCursor)
+	if err != nil || len(next.Deletions) == 0 || len(next.Deletions) > pageSize {
+		t.Fatal("second page", len(next.Deletions), err)
+	}
+	if !older[next.Deletions[0].DonorID] {
+		t.Fatal("second page does not continue after the first", next.Deletions[0].DonorID)
+	}
+	for _, d := range next.Deletions {
+		if d.DonorID == id {
+			t.Fatal("row repeated on the next page")
 		}
 	}
 	var audited int
 	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE actor_id=$1 AND action='deletions.list'", staff).Scan(&audited); err != nil ||
-		audited != 1 {
+		audited != 2 {
 		t.Fatal("deletion log read not audited", audited, err)
 	}
 }

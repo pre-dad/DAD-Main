@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"dad/donor-api/internal/badges"
 	"dad/donor-api/internal/dbroles"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -33,13 +34,13 @@ func TestBadgesAutoEarnPermanenceAndAdminGrantRevoke(t *testing.T) {
 	_, support := staffFixture(t, pool, "OP_PARTNERSHIPS")
 
 	// With no projection/signals, only badges with no requirement are earned
-	// (none) — the catalog still returns all 24 as views.
+	// (none) — the catalog still returns every badge as a view.
 	views, err := b.Badges(ctx, donorToken)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(views) != 24 {
-		t.Fatalf("expected 24 badge views, got %d", len(views))
+	if len(views) != len(badges.Catalog) {
+		t.Fatalf("expected %d badge views, got %d", len(badges.Catalog), len(views))
 	}
 	if len(earnedSet(views)) != 0 {
 		t.Fatalf("no signals but badges earned: %v", earnedSet(views))
@@ -81,7 +82,9 @@ func TestBadgesAutoEarnPermanenceAndAdminGrantRevoke(t *testing.T) {
 	if err := b.Grant(ctx, adminToken, donorID, "NOT_A_BADGE"); !errors.Is(err, ErrStaffInput) {
 		t.Fatalf("unknown badge code granted: %v", err)
 	}
-	views, _ = b.Badges(ctx, donorToken)
+	if views, err = b.Badges(ctx, donorToken); err != nil {
+		t.Fatal(err)
+	}
 	if !earnedSet(views)["V"] {
 		t.Fatal("admin-granted badge not shown earned")
 	}
@@ -90,7 +93,9 @@ func TestBadgesAutoEarnPermanenceAndAdminGrantRevoke(t *testing.T) {
 	if err := b.Revoke(ctx, adminToken, donorID, "V"); err != nil {
 		t.Fatal(err)
 	}
-	views, _ = b.Badges(ctx, donorToken)
+	if views, err = b.Badges(ctx, donorToken); err != nil {
+		t.Fatal(err)
+	}
 	if earnedSet(views)["V"] {
 		t.Fatal("revoked badge still shown earned")
 	}
@@ -179,12 +184,16 @@ func TestBadgesEarnWithoutVisitingTheBadgesPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var code string
 		if err := rows.Scan(&code); err != nil {
 			t.Fatal(err)
 		}
 		held = append(held, code)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 	if strings.Join(held, ",") != "1D,F" {
 		t.Fatalf("after the first gift the donor holds %v, want First Day and Founding Donor", held)

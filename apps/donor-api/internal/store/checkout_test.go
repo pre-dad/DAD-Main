@@ -89,7 +89,6 @@ func checkoutFixture(t *testing.T) (CheckoutService, payments.CheckoutRequest, p
 			"DELETE FROM donor_recurring_reservations WHERE donor_id=$1",
 			"DELETE FROM donor_stripe_checkouts WHERE checkout_id IN (SELECT id FROM donor_checkouts WHERE donor_id=$1)",
 			"DELETE FROM donor_checkouts WHERE donor_id=$1",
-			"DELETE FROM donor_referral_touches WHERE referrer_id=$1",
 		} {
 			if _, err := pool.Exec(ctx, sql, id); err != nil {
 				t.Error(err)
@@ -219,22 +218,36 @@ func TestCheckoutUncertainWindowAndDisabledDonor(t *testing.T) {
 	}
 }
 
+// cleanReferralCheckout removes the checkout rows of id and the referral touches
+// credited to id or referrer (a self-referral test re-points a touch at id). It
+// must be called after the referrer fixture so those dependent rows are
+// deleted first.
+func cleanReferralCheckout(t *testing.T, pool *pgxpool.Pool, id, referrer pgtype.UUID) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx := context.Background()
+		for _, step := range []struct {
+			sql string
+			arg any
+		}{
+			{"DELETE FROM donor_recurring_reservations WHERE donor_id=$1", id},
+			{"DELETE FROM donor_stripe_checkouts WHERE checkout_id IN (SELECT id FROM donor_checkouts WHERE donor_id=$1)", id},
+			{"DELETE FROM donor_checkouts WHERE donor_id=$1", id},
+			{"DELETE FROM donor_referral_touches WHERE referrer_id=ANY($1)", []pgtype.UUID{id, referrer}},
+		} {
+			if _, err := pool.Exec(ctx, step.sql, step.arg); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+}
+
 func TestCheckoutAttributionSnapshotAndSelfReferral(t *testing.T) {
 	service, request, id, gateway := checkoutFixture(t)
 	pool := database(t)
 	ctx := context.Background()
 	referrer, _ := donor(t, pool)
-	// Registered after referrer cleanup so dependent rows disappear first.
-	t.Cleanup(func() {
-		for _, sql := range []string{"DELETE FROM donor_recurring_reservations WHERE donor_id=$1", "DELETE FROM donor_stripe_checkouts WHERE checkout_id IN (SELECT id FROM donor_checkouts WHERE donor_id=$1)", "DELETE FROM donor_checkouts WHERE donor_id=$1"} {
-			if _, err := pool.Exec(ctx, sql, id); err != nil {
-				t.Error(err)
-			}
-		}
-		if _, err := pool.Exec(ctx, "DELETE FROM donor_referral_touches WHERE referrer_id=$1", referrer); err != nil {
-			t.Error(err)
-		}
-	})
+	cleanReferralCheckout(t, pool, id, referrer)
 	token := "test-visitor"
 	touch := testID(t)
 	if _, err := pool.Exec(ctx, `INSERT INTO donor_referral_touches (id,token_hash,referrer_id,kind,touched_at,expires_at) VALUES ($1,$2,$3,'IRL',$4,$5)`, touch, HashToken(token), referrer, time.Now(), time.Now().Add(time.Hour)); err != nil {

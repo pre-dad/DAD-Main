@@ -92,9 +92,9 @@ func TestWebCheckoutRestartReplacesANativeSession(t *testing.T) {
 }
 
 func TestWebCheckoutPaidWhileRestartingIsAnActiveGift(t *testing.T) {
-	for name, arrange := range map[string]func(*workerFixture, *checkoutGateway){
-		"processor reports the session complete": func(_ *workerFixture, g *checkoutGateway) { g.expireStatus = "complete" },
-		"webhook completes it as the expiry runs": func(f *workerFixture, g *checkoutGateway) {
+	for name, arrange := range map[string]func(*testing.T, *workerFixture, *checkoutGateway){
+		"processor reports the session complete": func(_ *testing.T, _ *workerFixture, g *checkoutGateway) { g.expireStatus = "complete" },
+		"webhook completes it as the expiry runs": func(t *testing.T, f *workerFixture, g *checkoutGateway) {
 			g.beforeExpire = func() {
 				mustExec(t, f.db, "UPDATE donor_stripe_checkouts SET status='COMPLETE' WHERE id=$1", f.request.RequestID)
 			}
@@ -102,7 +102,7 @@ func TestWebCheckoutPaidWhileRestartingIsAnActiveGift(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, gateway, _ := webRestartFixture(t)
-			arrange(f, gateway)
+			arrange(t, f, gateway)
 			if _, _, err := restarted(t, f, 6000); !errors.Is(err, payments.ErrCheckoutConflict) {
 				t.Fatalf("got %v, want a conflict", err)
 			}
