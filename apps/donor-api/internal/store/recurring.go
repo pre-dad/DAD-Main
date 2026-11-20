@@ -94,7 +94,7 @@ func subscriptionView(
 	if row.StopsAt.Valid {
 		sub.StopsAt = &row.StopsAt.Time
 	}
-	return RecurringDetails{Mode: "test", ObservedAt: &row.ObservedAt.Time, State: "ready", Subscription: sub}, nil
+	return RecurringDetails{Mode: processorMode, ObservedAt: &row.ObservedAt.Time, State: "ready", Subscription: sub}, nil
 }
 
 // syncedSubscription returns the donor's latest monthly attempt and its
@@ -131,7 +131,7 @@ func storedDetails(ctx context.Context, q *queries.Queries, donor pgtype.UUID) (
 		if !attempt.ID.Valid {
 			state = "ready"
 		}
-		return RecurringDetails{Mode: "test", State: state}, nil
+		return RecurringDetails{Mode: processorMode, State: state}, nil
 	}
 	return subscriptionView(ctx, q, attempt, *row)
 }
