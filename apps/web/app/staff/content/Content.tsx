@@ -21,7 +21,7 @@ export default function Content() {
     cause instanceof ApiError && cause.status === 403
       ? "Your staff role does not permit storing source documents."
       : failureMessage(cause, fallback);
-  async function upload(event: React.FormEvent) {
+  async function upload(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!source || busy) return;
     const form = event.currentTarget;
