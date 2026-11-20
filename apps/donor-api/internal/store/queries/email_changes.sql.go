@@ -127,12 +127,17 @@ func (q *Queries) EmailChangeDeliveryFailed(ctx context.Context, arg EmailChange
 
 const emailChangeDeliveryOwner = `-- name: EmailChangeDeliveryOwner :one
 SELECT d.id FROM donors d JOIN donor_email_changes c ON c.donor_id=d.id
-WHERE c.stage IN ('CURRENT','NEW') AND c.sent_at IS NULL AND c.attempts<5 AND c.available_at<=$1
+WHERE c.stage IN ('CURRENT','NEW') AND c.sent_at IS NULL AND c.attempts<$2::int AND c.available_at<=$1
 ORDER BY c.available_at,c.id LIMIT 1 FOR UPDATE OF d SKIP LOCKED
 `
 
-func (q *Queries) EmailChangeDeliveryOwner(ctx context.Context, availableAt pgtype.Timestamptz) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, emailChangeDeliveryOwner, availableAt)
+type EmailChangeDeliveryOwnerParams struct {
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	MaxAttempts int32              `json:"max_attempts"`
+}
+
+func (q *Queries) EmailChangeDeliveryOwner(ctx context.Context, arg EmailChangeDeliveryOwnerParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, emailChangeDeliveryOwner, arg.AvailableAt, arg.MaxAttempts)
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
@@ -179,16 +184,17 @@ func (q *Queries) InsertEmailChange(ctx context.Context, arg InsertEmailChangePa
 
 const nextEmailChangeDelivery = `-- name: NextEmailChangeDelivery :one
 SELECT id, donor_id, old_email, new_email, stage, token_hash, encrypted_token, expires_at, sent_at, attempts, available_at, created_at, completed_at FROM donor_email_changes WHERE donor_id=$1 AND stage IN ('CURRENT','NEW')
-AND sent_at IS NULL AND attempts<5 AND available_at<=$2 ORDER BY available_at,id LIMIT 1 FOR UPDATE
+AND sent_at IS NULL AND attempts<$3::int AND available_at<=$2 ORDER BY available_at,id LIMIT 1 FOR UPDATE
 `
 
 type NextEmailChangeDeliveryParams struct {
 	DonorID     pgtype.UUID        `json:"donor_id"`
 	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	MaxAttempts int32              `json:"max_attempts"`
 }
 
 func (q *Queries) NextEmailChangeDelivery(ctx context.Context, arg NextEmailChangeDeliveryParams) (DonorEmailChange, error) {
-	row := q.db.QueryRow(ctx, nextEmailChangeDelivery, arg.DonorID, arg.AvailableAt)
+	row := q.db.QueryRow(ctx, nextEmailChangeDelivery, arg.DonorID, arg.AvailableAt, arg.MaxAttempts)
 	var i DonorEmailChange
 	err := row.Scan(
 		&i.ID,

@@ -80,6 +80,18 @@ func (r *TouchRetention) PurgeNext(ctx context.Context, now time.Time) (bool, er
 				})
 			}},
 			{credentialPurgeBatch, func() (int64, error) {
+				return q.PurgePartnerSessions(ctx, queries.PurgePartnerSessionsParams{
+					ExpiredBefore: timestamp(now.Add(-sessionRetention)),
+					Batch:         credentialPurgeBatch,
+				})
+			}},
+			{credentialPurgeBatch, func() (int64, error) {
+				return q.PurgePartnerLoginEmails(ctx, queries.PurgePartnerLoginEmailsParams{
+					CompletedBefore: timestamp(now.Add(-loginRetention)),
+					Batch:           credentialPurgeBatch,
+				})
+			}},
+			{credentialPurgeBatch, func() (int64, error) {
 				return q.PurgePhoneCodes(ctx, queries.PurgePhoneCodesParams{
 					ExpiredBefore: timestamp(now.Add(-phoneCodeRetention)),
 					Batch:         credentialPurgeBatch,

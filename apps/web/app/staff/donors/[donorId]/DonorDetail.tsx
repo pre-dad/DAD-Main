@@ -24,9 +24,9 @@ const statusWords: Record<string, string> = {
 export default function DonorDetail({ donor }: { donor: string }) {
   const id = encodeURIComponent(donor);
   const [gifts, setGifts] = useState(0);
-  const [referrals, setReferrals] = useState(0);
+  const [referrals, setReferrals] = useState("");
   const [repairStatus, setRepairStatus] = useState("");
-  const path = `/donor/staff/donors/${id}?gifts_offset=${gifts}&referrals_offset=${referrals}`;
+  const path = `/donor/staff/donors/${id}?gifts_offset=${gifts}${referrals && `&referrals_cursor=${encodeURIComponent(referrals)}`}`;
   const { resource, data, reload } = useApiResource(path, {
     load: async (signal) => {
       const [detail, actor] = await Promise.all([
@@ -164,13 +164,17 @@ export default function DonorDetail({ donor }: { donor: string }) {
           ) : (
             <p>No converting referrals recorded.</p>
           )}
-          {referrals > 0 && (
-            <button type="button" className="secondary" onClick={() => setReferrals(0)}>
+          {referrals !== "" && (
+            <button type="button" className="secondary" onClick={() => setReferrals("")}>
               First referrals
             </button>
           )}
-          {detail.next_referrals_offset !== null && (
-            <button type="button" className="secondary" onClick={() => setReferrals(detail.next_referrals_offset ?? 0)}>
+          {detail.next_referrals_cursor !== null && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setReferrals(detail.next_referrals_cursor ?? "")}
+            >
               More referrals
             </button>
           )}

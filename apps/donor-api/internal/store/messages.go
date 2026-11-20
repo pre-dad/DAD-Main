@@ -309,9 +309,9 @@ func renderPromotion(event queries.DonorEvent, donor queries.Donor, site publicS
 // a worker step, so a claim abandoned by a crashed worker is retried later.
 const deliveryLease = 5 * time.Minute
 
-// maxDeliveryAttempts parks a job for operator attention, matching the
-// queries that select due work.
-const maxDeliveryAttempts = 5
+// MaxDeliveryAttempts parks a job for operator attention. Every query that
+// selects due work, and the queue monitor, takes it as an argument.
+const MaxDeliveryAttempts = 5
 
 func messageRetryAt(now time.Time, attempts int32) pgtype.Timestamptz {
 	return timestamp(now.Add(time.Duration(min(60, 1<<uint(attempts))) * time.Minute))
@@ -350,7 +350,7 @@ func (w MessageWorker) prepare(ctx context.Context, site publicSite, now time.Ti
 	worked := false
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		job, err := q.NextMessage(ctx, timestamp(now))
+		job, err := q.NextMessage(ctx, queries.NextMessageParams{AvailableAt: timestamp(now), MaxAttempts: MaxDeliveryAttempts})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -429,7 +429,7 @@ func (w MessageWorker) claim(ctx context.Context, id pgtype.UUID, now time.Time)
 		if err != nil {
 			return err
 		}
-		if job.CompletedAt.Valid || job.Attempts >= maxDeliveryAttempts || job.AvailableAt.Time.After(now) {
+		if job.CompletedAt.Valid || job.Attempts >= MaxDeliveryAttempts || job.AvailableAt.Time.After(now) {
 			return nil
 		}
 		donor, err := q.LockDonor(ctx, job.DonorID)

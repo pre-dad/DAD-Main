@@ -332,12 +332,17 @@ func (q *Queries) MessagePeriod(ctx context.Context, arg MessagePeriodParams) (D
 }
 
 const nextLoginEmail = `-- name: NextLoginEmail :one
-SELECT donor_id, encrypted_token, expires_at, available_at, completed_at, attempts, last_error, id, created_at, return_path FROM donor_login_emails WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+SELECT donor_id, encrypted_token, expires_at, available_at, completed_at, attempts, last_error, id, created_at, return_path FROM donor_login_emails WHERE completed_at IS NULL AND attempts<$2::int AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
 `
 
-func (q *Queries) NextLoginEmail(ctx context.Context, availableAt pgtype.Timestamptz) (DonorLoginEmail, error) {
-	row := q.db.QueryRow(ctx, nextLoginEmail, availableAt)
+type NextLoginEmailParams struct {
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	MaxAttempts int32              `json:"max_attempts"`
+}
+
+func (q *Queries) NextLoginEmail(ctx context.Context, arg NextLoginEmailParams) (DonorLoginEmail, error) {
+	row := q.db.QueryRow(ctx, nextLoginEmail, arg.AvailableAt, arg.MaxAttempts)
 	var i DonorLoginEmail
 	err := row.Scan(
 		&i.DonorID,
@@ -355,12 +360,17 @@ func (q *Queries) NextLoginEmail(ctx context.Context, availableAt pgtype.Timesta
 }
 
 const nextMessage = `-- name: NextMessage :one
-SELECT donor_id, dedup_key, kind, context, available_at, completed_at, attempts, last_error, suppressed_reason, subject, body, id, created_at FROM donor_messages WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+SELECT donor_id, dedup_key, kind, context, available_at, completed_at, attempts, last_error, suppressed_reason, subject, body, id, created_at FROM donor_messages WHERE completed_at IS NULL AND attempts<$2::int AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
 `
 
-func (q *Queries) NextMessage(ctx context.Context, availableAt pgtype.Timestamptz) (DonorMessage, error) {
-	row := q.db.QueryRow(ctx, nextMessage, availableAt)
+type NextMessageParams struct {
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	MaxAttempts int32              `json:"max_attempts"`
+}
+
+func (q *Queries) NextMessage(ctx context.Context, arg NextMessageParams) (DonorMessage, error) {
+	row := q.db.QueryRow(ctx, nextMessage, arg.AvailableAt, arg.MaxAttempts)
 	var i DonorMessage
 	err := row.Scan(
 		&i.DonorID,

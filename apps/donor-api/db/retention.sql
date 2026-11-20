@@ -18,6 +18,18 @@ DELETE FROM donor_login_emails WHERE id=ANY(ARRAY(
  ORDER BY completed_at,id LIMIT sqlc.arg(batch)
 ));
 
+-- name: PurgePartnerSessions :execrows
+DELETE FROM donor_partner_sessions WHERE id=ANY(ARRAY(
+ SELECT id FROM donor_partner_sessions WHERE expires_at<sqlc.arg(expired_before)::timestamptz
+ ORDER BY expires_at,id LIMIT sqlc.arg(batch)
+));
+
+-- name: PurgePartnerLoginEmails :execrows
+DELETE FROM donor_partner_login_emails WHERE id=ANY(ARRAY(
+ SELECT id FROM donor_partner_login_emails WHERE completed_at<sqlc.arg(completed_before)::timestamptz
+ ORDER BY completed_at,id LIMIT sqlc.arg(batch)
+));
+
 -- name: PurgePhoneCodes :execrows
 DELETE FROM donor_phone_codes WHERE phone=ANY(ARRAY(
  SELECT phone FROM donor_phone_codes WHERE expires_at<sqlc.arg(expired_before)::timestamptz
