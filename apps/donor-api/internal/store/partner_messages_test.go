@@ -227,3 +227,52 @@ func partnerMonthlyCount(t *testing.T, pool *pgxpool.Pool, partnerID interface{ 
 	}
 	return n
 }
+
+func TestPartnerMessageFailingFanOutDoesNotStarveTheQueue(t *testing.T) {
+	ctx := context.Background()
+	owner := database(t)
+	pool := as(t, dbroles.API)
+	mustExec(t, owner, "DELETE FROM donor_partner_messages")
+	broken := approvedPartner(t, pool, "Broken Org", "BROKEN-"+mustNewID(t).String()[:8], 0, 0)
+	healthy := approvedPartner(t, pool, "Healthy Org", "HEALTHY-"+mustNewID(t).String()[:8], 0, 0)
+	approvePartnerAdmin(t, pool, broken)
+	approvePartnerAdmin(t, pool, healthy)
+	mustExec(t, owner, `CREATE FUNCTION fail_broken_fan_out() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+		 IF EXISTS(SELECT 1 FROM donor_partner_messages m WHERE m.id=NEW.message_id AND m.dedup_key LIKE 'starve:broken:%') THEN
+		  RAISE EXCEPTION 'forced fan-out failure';
+		 END IF;
+		 RETURN NEW;
+		END $$`)
+	t.Cleanup(func() { cleanExec(t, "DROP FUNCTION fail_broken_fan_out() CASCADE") })
+	mustExec(t, owner, `CREATE TRIGGER fail_broken_fan_out BEFORE INSERT ON donor_partner_message_deliveries
+		FOR EACH ROW EXECUTE FUNCTION fail_broken_fan_out()`)
+
+	brokenKey, healthyKey := "starve:broken:"+broken.String(), "starve:healthy:"+healthy.String()
+	mustExec(t, pool,
+		`INSERT INTO donor_partner_messages (id, partner_id, kind, dedup_key, context, available_at)
+		 VALUES ($1,$2,'MONTHLY_REPORT',$3,'{}',now()-interval '1 hour'), ($4,$5,'MONTHLY_REPORT',$6,'{}',now())`,
+		mustNewID(t), broken, brokenKey, mustNewID(t), healthy, healthyKey)
+	t.Cleanup(func() {
+		cleanExec(t, "DELETE FROM donor_partner_messages WHERE dedup_key IN ($1,$2)", brokenKey, healthyKey)
+	})
+
+	transport := &recordingMail{}
+	w := partnerMessageWorker(t, transport)
+	now := time.Now().UTC().Add(time.Second)
+	if _, err := w.DeliverNext(ctx, now); err == nil {
+		t.Fatal("forced fan-out failure was not reported")
+	}
+	var attempts int32
+	var lastError string
+	if err := pool.QueryRow(ctx, "SELECT attempts, coalesce(last_error,'') FROM donor_partner_messages WHERE dedup_key=$1", brokenKey).
+		Scan(&attempts, &lastError); err != nil || attempts != 1 || lastError == "" {
+		t.Fatalf("failed intent attempts=%d last_error=%q err=%v; want the failure recorded", attempts, lastError, err)
+	}
+	if steps := drainPartnerMessages(t, w, now); steps != 2 {
+		t.Fatalf("healthy intent behind the failed one took %d steps; want fan-out and one send", steps)
+	}
+	if len(transport.messages) != 1 {
+		t.Fatalf("sent %d messages; want the healthy partner's one", len(transport.messages))
+	}
+}

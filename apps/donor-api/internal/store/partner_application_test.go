@@ -150,4 +150,7 @@ func TestPartnerApplicationApprovalStateMachine(t *testing.T) {
 		rate != 5000 {
 		t.Fatalf("match rate not set: %d %v", rate, err)
 	}
+	if err := svc.SetMatch(ctx, superToken, partnerID, 600, 10001, 1_000_00); !errors.Is(err, ErrPartnerApplication) {
+		t.Fatalf("match rate above 100%% accepted: %v", err)
+	}
 }

@@ -127,9 +127,13 @@ func (w PartnerMessageWorker) DeliverNext(ctx context.Context, now time.Time) (b
 // current recipient, suppressing it when the partner is no longer approved or
 // has nobody to mail. The expansion is one set-based statement, so it is a
 // short step however large the organisation, and repeating it adds nothing. It
-// also expands intents queued before deliveries existed.
+// also expands intents queued before deliveries existed. A failure rolls the
+// expansion back, so it is counted in a separate transaction; otherwise the
+// oldest intent would be retried first forever and starve those behind it.
 func (w PartnerMessageWorker) fanOut(ctx context.Context, site publicSite, now time.Time) (bool, error) {
 	worked := false
+	var claimed pgtype.UUID
+	var attempts int32
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
 		row, err := q.NextPartnerMessage(ctx, timestamp(now))
@@ -139,7 +143,7 @@ func (w PartnerMessageWorker) fanOut(ctx context.Context, site publicSite, now t
 		if err != nil {
 			return err
 		}
-		worked = true
+		worked, claimed, attempts = true, row.ID, row.Attempts
 		reason, err := partnerMessageSuppression(ctx, q, row)
 		if err != nil {
 			return err
@@ -176,6 +180,14 @@ func (w PartnerMessageWorker) fanOut(ctx context.Context, site publicSite, now t
 		}
 		return q.FinishPartnerMessageFanOut(ctx, queries.FinishPartnerMessageFanOutParams{ID: row.ID, FannedOutAt: timestamp(now)})
 	})
+	if err != nil && claimed.Valid {
+		failure := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
+			return queries.New(tx).FailPartnerMessage(ctx, queries.FailPartnerMessageParams{
+				ID: claimed, LastError: text("Error"), AvailableAt: messageRetryAt(now, attempts+1),
+			})
+		})
+		err = errors.Join(err, failure)
+	}
 	return worked, err
 }
 

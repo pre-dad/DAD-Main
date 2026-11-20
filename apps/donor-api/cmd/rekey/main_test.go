@@ -165,7 +165,14 @@ func seed(t *testing.T, pool *pgxpool.Pool, keys credentials.Keyring, logins int
 	}
 	for i := range 2 {
 		id, plaintext := newID(t), fmt.Sprintf("email change proof %d", i)
-		if _, err := pool.Exec(ctx, "INSERT INTO donor_email_changes (id,donor_id,old_email,new_email,stage,token_hash,encrypted_token,expires_at) VALUES ($1,$2,'rekey@example.org',$3,'CURRENT',$4,$5,now())", id, donor, fmt.Sprintf("new%d@example.org", i), store.HashToken(plaintext), encrypt(t, keys, plaintext)); err != nil {
+		changing, email := donor, "rekey@example.org"
+		if i > 0 {
+			changing, email = newID(t), fmt.Sprintf("rekey%d@example.org", i)
+			if err := queries.New(pool).InsertGuest(ctx, queries.InsertGuestParams{ID: changing, Email: email}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := pool.Exec(ctx, "INSERT INTO donor_email_changes (id,donor_id,old_email,new_email,stage,token_hash,encrypted_token,expires_at) VALUES ($1,$2,$3,$4,'CURRENT',$5,$6,now())", id, changing, email, fmt.Sprintf("new%d@example.org", i), store.HashToken(plaintext), encrypt(t, keys, plaintext)); err != nil {
 			t.Fatal(err)
 		}
 		f["donor_email_changes"][id] = plaintext

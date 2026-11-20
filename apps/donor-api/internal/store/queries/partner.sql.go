@@ -445,7 +445,7 @@ const invitePartnerUser = `-- name: InvitePartnerUser :one
 INSERT INTO donor_partner_users (id, partner_id, email, name, role, invited_by, created_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7)
 ON CONFLICT (partner_id, email) DO UPDATE
-SET role=EXCLUDED.role, disabled=false
+SET name=EXCLUDED.name, role=EXCLUDED.role, disabled=false
 RETURNING id
 `
 
@@ -461,7 +461,9 @@ type InvitePartnerUserParams struct {
 
 // P-4: a partner admin invites a VIEWER (or ADMIN) by email; the signer of an
 // approved application is invited as the first ADMIN. Re-inviting refreshes
-// the role and re-enables a removed user. The emailed link is minted on delivery.
+// the name and role and re-enables a removed user; accepted_at is kept on
+// purpose, since sign-in still needs a freshly emailed link. The emailed link
+// is minted on delivery.
 func (q *Queries) InvitePartnerUser(ctx context.Context, arg InvitePartnerUserParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, invitePartnerUser,
 		arg.ID,
@@ -906,7 +908,7 @@ SELECT
   EXISTS(SELECT 1 FROM donor_initiative_metrics m JOIN donor_initiatives i ON i.id=m.initiative_id
     WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED' AND m.publish_state='PUBLISHED' AND m.unit='PEOPLE') AS people_reached_verified,
   coalesce((SELECT sum(ip.committed_minor) FROM donor_initiatives i JOIN donor_initiative_partners ip ON ip.initiative_id=i.id AND ip.partner_id=p.id
-            WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
+            WHERE i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
   coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s
             JOIN donor_initiatives i ON i.id=s.initiative_id
             WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED'), 0)::bigint AS deployed_minor,

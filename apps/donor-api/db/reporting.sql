@@ -6,12 +6,14 @@
 --
 -- Attribution is the FROZEN source on the donor's own projection row
 -- (referrer_id / referral_kind, set at the earliest verified payment), not the
--- browser campaign parameters. DIRECT = no referrer. A donor's "first gift" is
+-- browser campaign parameters or the candidate stored on the gift row, which
+-- recognition may have withheld. DIRECT = no referrer. A donor's "first gift" is
 -- the projection's first_gift_id, which references donor_gifts.stripe_object_id.
 --
 -- Reporting periods are half-open [start, end) on gift paid_at / period due_at,
--- in UTC. The caller supplies $1=start, $2=end; the service echoes the cutoff
--- and timezone alongside the numbers.
+-- in UTC. The range queries take $1=start, $2=end; the as-of queries take the
+-- named cutoff, start_at and end_at. The service echoes the cutoff and
+-- timezone alongside the numbers.
 
 -- name: ReportFoundingDonors :one
 -- Distinct donors whose permanent founding award was granted (projection
@@ -47,9 +49,10 @@ GROUP BY g.frequency;
 
 -- name: ReportViralCoefficient :one
 WITH first_gifts AS MATERIALIZED (
-  SELECT DISTINCT ON (donor_id) donor_id, paid_at, referrer_id
-  FROM donor_gifts WHERE paid_at < sqlc.arg(cutoff)::timestamptz
-  ORDER BY donor_id, paid_at, stripe_object_id
+  SELECT DISTINCT ON (g.donor_id) g.donor_id, g.paid_at, p.referrer_id
+  FROM donor_gifts g LEFT JOIN donor_metric_projections p ON p.donor_id=g.donor_id
+  WHERE g.paid_at < sqlc.arg(cutoff)::timestamptz
+  ORDER BY g.donor_id, g.paid_at, g.stripe_object_id
 ), cohort AS (
   SELECT donor_id FROM first_gifts WHERE paid_at >= sqlc.arg(start_at)::timestamptz
     AND paid_at < sqlc.arg(end_at)::timestamptz
@@ -69,9 +72,10 @@ FROM conversions;
 
 -- name: ReportReferralDollars :one
 WITH first_gifts AS (
-  SELECT DISTINCT ON (donor_id) donor_id,paid_at,referrer_id,referral_kind
-  FROM donor_gifts WHERE paid_at < sqlc.arg(cutoff)::timestamptz
-  ORDER BY donor_id,paid_at,stripe_object_id
+  SELECT DISTINCT ON (g.donor_id) g.donor_id,g.paid_at,p.referrer_id,p.referral_kind
+  FROM donor_gifts g LEFT JOIN donor_metric_projections p ON p.donor_id=g.donor_id
+  WHERE g.paid_at < sqlc.arg(cutoff)::timestamptz
+  ORDER BY g.donor_id,g.paid_at,g.stripe_object_id
 ), net AS (
   SELECT f.referral_kind,g.amount_minor-coalesce((SELECT sum(r.amount_minor) FROM donor_refunds r WHERE r.gift_id=g.id
     AND coalesce((SELECT o.status FROM donor_refund_observations o WHERE o.refund_id=r.id
@@ -101,6 +105,7 @@ WITH failures AS (
 SELECT count(*)::bigint AS failed_periods,
   coalesce(sum(amount_minor) FILTER (WHERE due_at+interval '7 days' <= sqlc.arg(cutoff)::timestamptz
     AND (paid_at IS NULL OR paid_at >= due_at+interval '7 days')),0)::bigint AS lost_minor,
+  -- A payment after the grace window counts in both lost_minor and recovered_periods.
   count(*) FILTER (WHERE paid_at IS NOT NULL)::bigint AS recovered_periods,
   coalesce(sum(paid_minor),0)::bigint AS recovered_minor,
   count(*) FILTER (WHERE paid_at < due_at+interval '7 days')::bigint AS recovered_within_grace,

@@ -363,7 +363,7 @@ func (s PartnerApplicationService) SetMatch(
 	workforce, rateBP int32,
 	capMinor int64,
 ) error {
-	if workforce < 0 || rateBP < 0 || capMinor < 0 {
+	if workforce < 0 || rateBP < 0 || rateBP > 10000 || capMinor < 0 {
 		return ErrPartnerApplication
 	}
 	_, err := staffWrite(ctx, s.Staff, token, partnerPermission,

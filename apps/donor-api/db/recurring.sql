@@ -16,7 +16,7 @@ ORDER BY a.created_at DESC,a.id DESC LIMIT 1;
 SELECT observed_at FROM donor_subscriptions WHERE attempt_id=$1;
 
 -- name: LatestConfirmedAmount :one
-SELECT amount_minor FROM donor_amount_changes WHERE checkout_id=$1 AND confirmed_at IS NOT NULL ORDER BY created_at DESC LIMIT 1;
+SELECT amount_minor FROM donor_amount_changes WHERE checkout_id=$1 AND confirmed_at IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1;
 
 -- name: CancellationByID :one
 SELECT * FROM donor_cancellations WHERE id=$1;
@@ -38,7 +38,7 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9);
 SELECT * FROM donor_payment_updates WHERE donor_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1;
 
 -- name: UnfinishedPaymentUpdate :one
-SELECT * FROM donor_payment_updates WHERE donor_id=$1 AND status NOT IN ('APPLIED','EXPIRED','CANCELLED') LIMIT 1;
+SELECT * FROM donor_payment_updates WHERE donor_id=$1 AND status NOT IN ('APPLIED','EXPIRED','CANCELLED') ORDER BY created_at DESC,id DESC LIMIT 1;
 
 -- name: InsertPaymentUpdate :exec
 INSERT INTO donor_payment_updates(id,donor_id,attempt_id,customer_id,request_params,status,created_at)
