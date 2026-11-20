@@ -110,10 +110,13 @@ func readReceipt(ctx context.Context, q *queries.Queries, donor, gift pgtype.UUI
 	return Receipt{Mode: processorMode, AsOf: iso(now), ID: "DAD-TEST-" + gift.String(), Gift: record}, err
 }
 
+// sandboxStartYear is the first year with any gifts; earlier summaries are refused.
+const sandboxStartYear = 2026
+
 func readAnnualSummary(ctx context.Context, q *queries.Queries, donor pgtype.UUID, year int, now time.Time) (AnnualSummary, error) {
 	zone := recognition.NewYork
 	out := AnnualSummary{Mode: processorMode, Year: year, Timezone: zone.String(), AsOf: iso(now), Currency: "USD", Gifts: []GiftRecord{}}
-	if year < 2026 || year > now.In(zone).Year() {
+	if year < sandboxStartYear || year > now.In(zone).Year() {
 		return out, ErrReceipt
 	}
 	rangeParams := queries.AnnualGiftsParams{
