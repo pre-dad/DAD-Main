@@ -29,8 +29,8 @@ func TestStreakLadderDaysMilestonesAndBar(t *testing.T) {
 		wantToNext   int64
 		wantBarOnEnd int // how many trailing bar days should be on
 	}{
-		{days: 3, wantLast: 0, wantNext: 7, wantToNext: 4, wantBarOnEnd: 4},   // days>=0..3 -> 4 days on
-		{days: 7, wantLast: 7, wantNext: 30, wantToNext: 23, wantBarOnEnd: 8}, // day 7 reached
+		{days: 3, wantLast: 0, wantNext: 7, wantToNext: 4, wantBarOnEnd: 4},
+		{days: 7, wantLast: 7, wantNext: 30, wantToNext: 23, wantBarOnEnd: 8},
 		{days: 100, wantLast: 100, wantNext: 365, wantToNext: 265, wantBarOnEnd: 30},
 		{days: 365, wantLast: 365, wantNext: 500, wantToNext: 135, wantBarOnEnd: 30},
 		{days: 1460, wantLast: 1460, wantNext: 1460 + 365, wantToNext: 365, wantBarOnEnd: 30},
@@ -132,6 +132,23 @@ func TestStreakDaysCountCalendarDaysAcrossDST(t *testing.T) {
 	} {
 		if got := fall.Ladder(c.at, ny).Days; got != c.days {
 			t.Errorf("fall-back at %s: %d days, want %d", c.at, got, c.days)
+		}
+	}
+}
+
+func TestLadderWithCustomMilestonesRepeatsYearlyPastTheLast(t *testing.T) {
+	asOf := time.Date(2027, 6, 1, 12, 0, 0, 0, time.UTC)
+	for _, c := range []struct{ days, wantLast, wantNext int64 }{
+		{3, 0, 5},
+		{5, 5, 10},
+		{12, 10, 375},
+		{375, 375, 740},
+		{400, 375, 740},
+	} {
+		since := asOf.Add(-time.Duration(c.days) * 24 * time.Hour)
+		l := Streak{Since: &since}.LadderWithMilestones(asOf, time.UTC, []int64{5, 10})
+		if l.LastMilestone != c.wantLast || l.NextMilestone == nil || *l.NextMilestone != c.wantNext || *l.DaysToNext != c.wantNext-c.days {
+			t.Errorf("days=%d: last %d next %v toNext %v, want last %d next %d", c.days, l.LastMilestone, l.NextMilestone, l.DaysToNext, c.wantLast, c.wantNext)
 		}
 	}
 }
