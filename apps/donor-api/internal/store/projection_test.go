@@ -689,7 +689,7 @@ func TestRefreshNextProjectionDefersUnprojectableDonor(t *testing.T) {
 	if err != nil || !good.NetMinor.Valid || !good.ComputedAt.Time.Equal(now) || good.RefreshError.Valid {
 		t.Fatalf("healthy projection blocked: %+v %v", good, err)
 	}
-	rows, err := queries.New(as(t, dbroles.Monitor)).QueueHealth(ctx, timestamp(now.Add(5*time.Minute)))
+	rows, err := queries.New(as(t, dbroles.Monitor)).QueueHealth(ctx, queries.QueueHealthParams{AsOf: timestamp(now.Add(5 * time.Minute)), MaxAttempts: MaxDeliveryAttempts})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -71,7 +71,7 @@ func (w LoginEmailWorker) claim(ctx context.Context, site publicSite, id pgtype.
 		if err != nil {
 			return err
 		}
-		if job.CompletedAt.Valid || job.AvailableAt.Time.After(now) || job.Attempts >= maxDeliveryAttempts {
+		if job.CompletedAt.Valid || job.AvailableAt.Time.After(now) || job.Attempts >= MaxDeliveryAttempts {
 			return nil
 		}
 		donor, err := q.LockDonor(ctx, job.DonorID)
@@ -142,7 +142,7 @@ func (w LoginEmailWorker) prepare(ctx context.Context, now time.Time) (pgtype.UU
 	worked := false
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		job, err := q.NextLoginEmail(ctx, timestamp(now))
+		job, err := q.NextLoginEmail(ctx, queries.NextLoginEmailParams{AvailableAt: timestamp(now), MaxAttempts: MaxDeliveryAttempts})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}

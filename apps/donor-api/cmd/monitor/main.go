@@ -44,7 +44,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	if err = dbroles.Monitor.Check(ctx, pool, getenv(dbroles.AllowOwnerVariable) == "true"); err != nil {
 		return err
 	}
-	rows, err := queries.New(pool).QueueHealth(ctx, pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true})
+	rows, err := queries.New(pool).QueueHealth(ctx, queries.QueueHealthParams{
+		AsOf:        pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		MaxAttempts: store.MaxDeliveryAttempts,
+	})
 	if err != nil {
 		return errors.New("queue health query failed")
 	}

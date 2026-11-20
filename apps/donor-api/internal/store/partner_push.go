@@ -120,7 +120,7 @@ func (w PartnerPushWorker) DeliverNext(ctx context.Context, now time.Time) (bool
 	}
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		row, err := q.NextPartnerPush(ctx, timestamp(now))
+		row, err := q.NextPartnerPush(ctx, queries.NextPartnerPushParams{AvailableAt: timestamp(now), MaxAttempts: MaxDeliveryAttempts})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -171,7 +171,7 @@ func (w PartnerPushWorker) DeliverNext(ctx context.Context, now time.Time) (bool
 			retry = timestamp(now.Add(unavailable.After))
 		}
 		if errors.Is(sendErr, push.ErrRejected) {
-			attempt, code = maxDeliveryAttempts, "ProviderRejected"
+			attempt, code = MaxDeliveryAttempts, "ProviderRejected"
 		}
 		return q.FailPartnerPush(
 			ctx,

@@ -2,25 +2,25 @@
 WITH queues AS (
  SELECT 'stripe'::text AS queue,available_at AS due_at,attempts>=10 AS parked FROM donor_stripe_events WHERE processed_at IS NULL
  UNION ALL
- SELECT 'messages',available_at,attempts>=5 FROM donor_messages WHERE completed_at IS NULL
+ SELECT 'messages',available_at,attempts>=sqlc.arg(max_attempts)::int FROM donor_messages WHERE completed_at IS NULL
  UNION ALL
- SELECT 'messages',available_at,attempts>=5 FROM donor_partner_messages WHERE completed_at IS NULL
+ SELECT 'messages',available_at,attempts>=sqlc.arg(max_attempts)::int FROM donor_partner_messages WHERE completed_at IS NULL
  UNION ALL
- SELECT 'messages',available_at,attempts>=5 FROM donor_partner_message_deliveries WHERE completed_at IS NULL
+ SELECT 'messages',available_at,attempts>=sqlc.arg(max_attempts)::int FROM donor_partner_message_deliveries WHERE completed_at IS NULL
  UNION ALL
- SELECT 'push',available_at,attempts>=5 FROM donor_partner_push_notifications WHERE completed_at IS NULL AND expires_at>sqlc.arg(as_of)::timestamptz
+ SELECT 'push',available_at,attempts>=sqlc.arg(max_attempts)::int FROM donor_partner_push_notifications WHERE completed_at IS NULL AND expires_at>sqlc.arg(as_of)::timestamptz
  UNION ALL
- SELECT 'login-email',available_at,attempts>=5 FROM donor_login_emails WHERE completed_at IS NULL
+ SELECT 'login-email',available_at,attempts>=sqlc.arg(max_attempts)::int FROM donor_login_emails WHERE completed_at IS NULL
  UNION ALL
- SELECT 'login-email',available_at,attempts>=5 FROM donor_partner_login_emails WHERE completed_at IS NULL
+ SELECT 'login-email',available_at,attempts>=sqlc.arg(max_attempts)::int FROM donor_partner_login_emails WHERE completed_at IS NULL
  UNION ALL
  -- An expired notification will never be sent, so it no longer needs attention.
- SELECT 'push',available_at,attempts>=5 FROM donor_push_notifications
+ SELECT 'push',available_at,attempts>=sqlc.arg(max_attempts)::int FROM donor_push_notifications
  WHERE completed_at IS NULL AND expires_at>sqlc.arg(as_of)::timestamptz
  UNION ALL
  SELECT 'reversals',available_at,attempts>=10 FROM donor_deleted_account_reversals WHERE completed_at IS NULL
  UNION ALL
- SELECT 'email-changes',available_at,attempts>=5 FROM donor_email_changes WHERE stage IN ('CURRENT','NEW') AND sent_at IS NULL
+ SELECT 'email-changes',available_at,attempts>=sqlc.arg(max_attempts)::int FROM donor_email_changes WHERE stage IN ('CURRENT','NEW') AND sent_at IS NULL
  UNION ALL
  SELECT 'projections',next_refresh_at,refresh_error IS NOT NULL FROM donor_metric_projections
  WHERE next_refresh_at<=sqlc.arg(as_of)::timestamptz
