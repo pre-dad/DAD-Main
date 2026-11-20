@@ -91,7 +91,7 @@ if [[ "$command" == config ]]; then
     exit 1
   fi
   printf 'unknown INGRESS_MODE rejected: ok\n'
-  for origin in http://native.test https://public.test https://staff.test https://PUBLIC.test https://native.test:invalid https://native.test:99999; do
+  for origin in http://native.test https://public.test https://staff.test https://PUBLIC.test https://native.test:invalid https://native.test:99999 https://.native.test https://native..test https://-native.test https://native.test.; do
     if DONOR_NATIVE_API_ORIGIN="$origin" INGRESS_MODE=direct compose run --rm --no-deps -T nginx nginx -t -q >/dev/null 2>&1; then
       printf 'Invalid native API origin was accepted: %s\n' "$origin" >&2
       exit 1

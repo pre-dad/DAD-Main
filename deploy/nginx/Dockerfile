@@ -20,7 +20,7 @@ COPY staff-access.conf /etc/nginx/staff-access.conf
 #    entrypoint renders the ingress template into it.
 #  - nginx.conf resolves `web` and the native API at run time through Docker's embedded DNS (127.0.0.11),
 #    which does not exist on Fargate. Service Connect gives both services stable endpoint names
-#    that survives redeploys, so resolve it once at start instead. The build fails if the
+#    that survive redeploys, so resolve them once at start instead. The build fails if the
 #    lines being rewritten change, rather than silently shipping a config that cannot work.
 RUN set -eu \
  && grep -q '^    resolver 127\.0\.0\.11 valid=10s ipv6=off;$' /etc/nginx/nginx.conf \

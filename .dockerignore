@@ -24,3 +24,4 @@ docs
 **/playwright.config.ts
 **/test-results
 **/playwright-report
+.audit-work
