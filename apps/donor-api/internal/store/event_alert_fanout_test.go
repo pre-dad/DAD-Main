@@ -22,7 +22,7 @@ func TestEventAlertsResumeInBoundedBatchesAndStopAfterCancellation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for range EventAlertBatch + 3 {
+	for range eventAlertBatch + 3 {
 		d, _ := donor(t, pool)
 		t.Cleanup(func() {
 			cleanExec(t, "DELETE FROM donor_push_notifications WHERE donor_id=$1", d)
@@ -61,18 +61,18 @@ func TestEventAlertsResumeInBoundedBatchesAndStopAfterCancellation(t *testing.T)
 	if !step() {
 		t.Fatal("first batch was not claimed")
 	}
-	assertProgress(EventAlertBatch, false)
+	assertProgress(eventAlertBatch, false)
 	if !step() {
 		t.Fatal("restarted worker did not resume")
 	}
-	assertProgress(EventAlertBatch+3, true)
+	assertProgress(eventAlertBatch+3, true)
 	if err := events.Publish(ctx, token, id); err != nil {
 		t.Fatal(err)
 	}
 	if step() {
 		t.Fatal("republishing restarted a completed fanout")
 	}
-	assertProgress(EventAlertBatch+3, true)
+	assertProgress(eventAlertBatch+3, true)
 
 	// A cancelled event must end a partially completed job without queueing more.
 	mustExec(t, pool, "UPDATE donor_event_alert_jobs SET last_donor_id=NULL,completed_at=NULL WHERE event_id=$1", id)
@@ -80,7 +80,7 @@ func TestEventAlertsResumeInBoundedBatchesAndStopAfterCancellation(t *testing.T)
 	if !step() {
 		t.Fatal("cancelled job was not retired")
 	}
-	assertProgress(EventAlertBatch+3, true)
+	assertProgress(eventAlertBatch+3, true)
 }
 
 func TestEventAlertBatchesPageEachAudienceInDonorOrder(t *testing.T) {
