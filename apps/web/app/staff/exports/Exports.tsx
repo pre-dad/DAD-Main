@@ -37,10 +37,13 @@ export default function Exports() {
   const { resource, data, reload } = useApiResource<Schema<"ExportDatasets">>("/donor/staff/exports");
   const {
     resource: jobsResource,
-    data: jobs,
+    data: loadedJobs,
     setData: setJobs,
     reload: reloadJobs,
   } = useApiResource<Schema<"ExportJobs">>("/donor/staff/exports/jobs");
+  const [lastJobs, setLastJobs] = useState<Schema<"ExportJobs"> | null>(null);
+  if (loadedJobs && loadedJobs !== lastJobs) setLastJobs(loadedJobs);
+  const jobs = loadedJobs ?? lastJobs;
   const [requesting, setRequesting] = useState("");
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
@@ -49,7 +52,8 @@ export default function Exports() {
 
   // Poll while a file is being built, backing off while nothing changes and
   // starting over whenever progress shows, so a long export is cheap to watch.
-  // Each load replaces `jobs`, which schedules the next poll.
+  // Each load, including a failed one, replaces `jobsResource`, which schedules the next poll.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a failed refresh keeps `jobs` but must still reschedule.
   useEffect(() => {
     const state = jobs?.jobs.map((job) => `${job.id}:${job.state}:${job.row_count}`).join(",") ?? "";
     if (state !== signature.current) {
@@ -62,17 +66,30 @@ export default function Exports() {
       reloadJobs();
     }, delay.current);
     return () => clearTimeout(timer);
-  }, [jobs, reloadJobs]);
+  }, [jobs, jobsResource, reloadJobs]);
 
-  // Announce a file becoming ready or failing, not every row count.
+  // Announce files becoming ready or failing, not every row count.
   const outcomes = useRef<Record<string, string>>({});
   useEffect(() => {
+    const ready: string[] = [];
+    const failed: string[] = [];
+    const seen: Record<string, string> = {};
     for (const job of jobs?.jobs ?? []) {
       const previous = outcomes.current[job.id];
-      outcomes.current[job.id] = job.state;
-      if (previous && previous !== job.state && job.state === "complete")
-        setStatus(`The ${job.dataset} export is ready.`);
-      if (previous && previous !== job.state && job.state === "failed") setError(`The ${job.dataset} export failed.`);
+      seen[job.id] = job.state;
+      if (!previous || previous === job.state) continue;
+      if (job.state === "complete") ready.push(job.dataset);
+      if (job.state === "failed") failed.push(job.dataset);
+    }
+    outcomes.current = seen;
+    if (failed.length) {
+      setStatus("");
+      setError(`The ${failed.join(" and ")} export${failed.length > 1 ? "s" : ""} failed.`);
+    } else if (ready.length) {
+      setError("");
+      setStatus(
+        ready.length > 1 ? `The ${ready.join(" and ")} exports are ready.` : `The ${ready[0]} export is ready.`,
+      );
     }
   }, [jobs]);
 
@@ -128,41 +145,44 @@ export default function Exports() {
           </ul>
           <h2>Your exports</h2>
           {jobs?.jobs.length ? (
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Dataset</th>
-                  <th scope="col">Requested</th>
-                  <th scope="col">Progress</th>
-                  <th scope="col">Download</th>
-                </tr>
-              </thead>
-              <tbody>
-                {jobs.jobs.map((job) => (
-                  <tr key={job.id}>
-                    <th scope="row">{job.dataset}</th>
-                    <td>{formatDateTime(job.requested_at)}</td>
-                    <td>{progress(job)}</td>
-                    <td>
-                      {job.state === "complete" && (
-                        <a href={`/api/donor/staff/exports/jobs/${job.id}/file`}>Download {job.dataset} CSV</a>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <>
+              {/* Keyboard focus is required for horizontal scrolling in Safari. */}
+              {/* biome-ignore lint/a11y/noNoninteractiveTabindex: this is an interactive scroll region. */}
+              <section className="tableScroll" tabIndex={0} aria-label="Exports table">
+                <table className="dataTable">
+                  <thead>
+                    <tr>
+                      <th scope="col">Dataset</th>
+                      <th scope="col">Requested</th>
+                      <th scope="col">Progress</th>
+                      <th scope="col">Download</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {jobs.jobs.map((job) => (
+                      <tr key={job.id}>
+                        <th scope="row">{job.dataset}</th>
+                        <td>{formatDateTime(job.requested_at)}</td>
+                        <td>{progress(job)}</td>
+                        <td>
+                          {job.state === "complete" && (
+                            <a href={`/api/donor/staff/exports/jobs/${job.id}/file`}>Download {job.dataset} CSV</a>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+            </>
           ) : (
             jobs && <p>You have no exports in the last 24 hours.</p>
           )}
           {listFailed && <p className="errorMessage">Your exports could not be refreshed. They will keep building.</p>}
+          <h2>Recipient enrolment queue</h2>
+          <p>Recipient enrolments are not collected yet, so the enrolments export contains column headers only.</p>
         </>
       )}
-      <h2>Recipient enrolment queue</h2>
-      <p>
-        Activates at R2. R1 does not collect recipient enrolments. The enrolments export currently contains column
-        headers only.
-      </p>
       <Announcer status={messages.status || status} alert={messages.alert || error} />
       {resource.state !== "signedOut" && (
         <button

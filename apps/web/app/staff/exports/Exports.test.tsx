@@ -125,3 +125,58 @@ it("says so when the role permits no exports", async () => {
   expect(await screen.findByText("Your role does not permit exports.")).toBeVisible();
   expect(screen.queryByRole("button", { name: /Request/ })).toBeNull();
 });
+
+it("keeps the last exports on screen and keeps polling after one refresh fails", async () => {
+  let polls = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (url === "/api/donor/staff/exports") return reply(200, { datasets: ["gifts"] });
+      polls += 1;
+      if (polls === 2) return reply(500, { detail: "boom" });
+      return reply(200, { jobs: [polls > 2 ? job("complete", 9) : job("running", 5)] });
+    }),
+  );
+  render(<Exports />);
+  expect(await screen.findByText("Building · 5 rows so far")).toBeVisible();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_500);
+  });
+  expect(await screen.findByText("Your exports could not be refreshed. They will keep building.")).toBeVisible();
+  expect(screen.getByText("Building · 5 rows so far")).toBeVisible();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5_000);
+  });
+  expect(await screen.findByRole("link", { name: "Download gifts CSV" })).toBeVisible();
+  expect(screen.queryByText("Your exports could not be refreshed. They will keep building.")).toBeNull();
+});
+
+it("announces every export that finished in one poll and clears the other channel", async () => {
+  let current: unknown[] = [job("running", 1, { id: "a", dataset: "donors" }), job("running", 1, { id: "b" })];
+  backend(() => current);
+  render(<Exports />);
+  await screen.findAllByText("Building · 1 rows so far");
+  current = [job("complete", 2, { id: "a", dataset: "donors" }), job("complete", 2, { id: "b" })];
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_500);
+  });
+  expect(await screen.findByText("The donors and gifts exports are ready.")).toBeVisible();
+});
+
+it("shows the enrolment note and jobs table in a scroll region only once permitted", async () => {
+  backend(() => [job("complete", 3)]);
+  render(<Exports />);
+  expect(await screen.findByRole("region", { name: "Exports table" })).toHaveAttribute("tabindex", "0");
+  expect(screen.getByText(/enrolments export contains column headers only/)).toBeVisible();
+  expect(screen.queryByText(/R1|R2/)).toBeNull();
+});
+
+it("hides the enrolment note when the role permits no exports", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => reply(403, { detail: "Permission denied" })),
+  );
+  render(<Exports />);
+  await screen.findByText("Your role does not permit exports.");
+  expect(screen.queryByText(/enrolments export/)).toBeNull();
+});
