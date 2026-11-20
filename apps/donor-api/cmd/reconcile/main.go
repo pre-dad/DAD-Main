@@ -92,7 +92,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	if err != nil {
 		return err
 	}
-	dsn := dbroles.ReconcileJob.URL(getenv)
+	dsn, err := dbroles.ReconcileJob.URL(getenv)
+	if err != nil {
+		return err
+	}
 	if dsn == "" {
 		return errors.New(dbroles.ReconcileJob.Variable() + " is required")
 	}

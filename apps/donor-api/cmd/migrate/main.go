@@ -21,7 +21,10 @@ func run(args []string, getenv func(string) string) error {
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return errors.New("invalid migrate arguments")
 	}
-	dsn := dbroles.ConnectionURL(dbroles.OwnerVariable, getenv)
+	dsn, err := dbroles.ConnectionURL(dbroles.OwnerVariable, getenv)
+	if err != nil {
+		return err
+	}
 	if dsn == "" {
 		return errors.New(dbroles.OwnerVariable + " is required")
 	}

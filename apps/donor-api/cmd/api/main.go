@@ -193,7 +193,10 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		}
 	}
 
-	dsn := dbroles.API.URL(getenv)
+	dsn, err := dbroles.API.URL(getenv)
+	if err != nil {
+		return services, release, err
+	}
 	if dsn == "" {
 		slog.Warn(dbroles.API.Variable() + " is unset; only health and static responses are available")
 		return services, release, nil

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -14,7 +15,8 @@ import (
 
 // lock lets a role take row locks on a table it never changes: PostgreSQL
 // allows SELECT … FOR UPDATE only with UPDATE on some column, and no process
-// changes an id.
+// changes an id. Every foreign key to donors(id) is NO ACTION, so only the id of
+// a donor with no dependent rows could be rewritten with this grant.
 const lock = "SELECT, UPDATE (id)"
 
 // grants is what each role may do to each relation, in GRANT syntax, derived
@@ -345,6 +347,9 @@ func parsePrivileges(list string) privileges {
 		list = list[end:]
 		if strings.HasPrefix(list, "(") {
 			closing := strings.Index(list, ")")
+			if closing < 0 {
+				panic("dbroles: unbalanced parenthesis in privilege list " + strconv.Quote(list))
+			}
 			for column := range strings.SplitSeq(list[1:closing], ",") {
 				result = append(result, kind+" ("+strings.TrimSpace(column)+")")
 			}
@@ -534,13 +539,13 @@ func align(object, role string, actual, want privileges) []string {
 	if slices.Equal(actual, want) {
 		return nil
 	}
-	grantee := role
+	target := role
 	if role != "PUBLIC" {
-		grantee = pgx.Identifier{role}.Sanitize()
+		target = pgx.Identifier{role}.Sanitize()
 	}
-	statements := []string{"REVOKE ALL ON " + object + " FROM " + grantee}
+	statements := []string{"REVOKE ALL ON " + object + " FROM " + target}
 	if len(want) > 0 {
-		statements = append(statements, "GRANT "+want.sql()+" ON "+object+" TO "+grantee)
+		statements = append(statements, "GRANT "+want.sql()+" ON "+object+" TO "+target)
 	}
 	return statements
 }

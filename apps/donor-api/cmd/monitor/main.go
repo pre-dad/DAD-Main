@@ -27,7 +27,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *maxAge <= 0 {
 		return errors.New("invalid monitor arguments")
 	}
-	dsn := dbroles.Monitor.URL(getenv)
+	dsn, err := dbroles.Monitor.URL(getenv)
+	if err != nil {
+		return err
+	}
 	if dsn == "" {
 		return errors.New(dbroles.Monitor.Variable() + " is required")
 	}
