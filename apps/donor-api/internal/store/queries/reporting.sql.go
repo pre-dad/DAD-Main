@@ -13,14 +13,14 @@ import (
 
 const reportFirstGiftBySource = `-- name: ReportFirstGiftBySource :many
 SELECT
-	CASE WHEN p.referral_kind IS NULL THEN 'DIRECT' ELSE p.referral_kind END AS source,
-	g.frequency,
-	count(*)::bigint AS donors,
-	coalesce(sum(g.amount_minor), 0)::bigint AS gross_minor
+ CASE WHEN p.referral_kind IS NULL THEN 'DIRECT' ELSE p.referral_kind END AS source,
+ g.frequency,
+ count(*)::bigint AS donors,
+ coalesce(sum(g.amount_minor), 0)::bigint AS gross_minor
 FROM donor_metric_projections p
 JOIN donor_gifts g ON g.stripe_object_id = p.first_gift_id
 WHERE p.first_gift_id IS NOT NULL
-	AND g.paid_at >= $1 AND g.paid_at < $2
+ AND g.paid_at >= $1 AND g.paid_at < $2
 GROUP BY source, g.frequency
 `
 

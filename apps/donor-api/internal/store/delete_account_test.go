@@ -66,6 +66,12 @@ func TestDeleteAccountErasesPersonalDataAndKeepsLedger(t *testing.T) {
 			refresh_family_hash, refresh_hash, refresh_expires_at)
 		VALUES ($1, $2, $3, now() + interval '1 day', 'APP', 'Dana''s iPhone', 'IOS', $4, $5, now() + interval '1 day')`,
 		mustNewID(t), id, HashToken("app-"+id.String()), HashToken("family-"+id.String()), HashToken("refresh-"+id.String()))
+	deliveredID, pendingID := mustNewID(t), mustNewID(t)
+	mustExec(t, pool, `INSERT INTO donor_messages (id, donor_id, kind, dedup_key, context, available_at, completed_at, subject, body)
+		VALUES ($1, $2, 'REFERRAL', $3, '{"name":"Sam"}', now(), now(), 'Sam joined', 'Sam gave $30')`, deliveredID, id, "delivered-"+id.String())
+	mustExec(t, pool, `INSERT INTO donor_messages (id, donor_id, kind, dedup_key, context, available_at)
+		VALUES ($1, $2, 'REFERRAL', $3, '{"name":"Sam"}', now())`, pendingID, id, "pending-"+id.String())
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_messages WHERE donor_id=$1", id) })
 	partnerID := approvedPartner(t, pool, "Epsilon Co", "EPSILON", 0, 0)
 	mustExec(t, pool, "INSERT INTO donor_partner_employees (donor_id, partner_id) VALUES ($1, $2)", id, partnerID)
 	cleanEvents(t, pool)
@@ -139,6 +145,15 @@ func TestDeleteAccountErasesPersonalDataAndKeepsLedger(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT count(device_name) FROM donor_sessions WHERE donor_id=$1", id).Scan(&devices); err != nil ||
 		devices != 0 {
 		t.Errorf("sessions kept %d device names (%v)", devices, err)
+	}
+	var delivered, pending string
+	if err := pool.QueryRow(ctx, "SELECT coalesce(subject,'')||coalesce(body,'')||context::text FROM donor_messages WHERE id=$1", deliveredID).
+		Scan(&delivered); err != nil || delivered != "{}" {
+		t.Errorf("delivered message kept content %q (%v)", delivered, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT context::text FROM donor_messages WHERE id=$1", pendingID).Scan(&pending); err != nil ||
+		!strings.Contains(pending, "Sam") {
+		t.Errorf("pending message context = %q (%v); want it kept for delivery", pending, err)
 	}
 	var employers int
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_partner_employees WHERE donor_id=$1", id).Scan(&employers); err != nil ||
