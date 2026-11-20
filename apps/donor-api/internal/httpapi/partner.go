@@ -24,7 +24,7 @@ type PartnerApplySource interface {
 // PartnerPortalSource is the authenticated partner portal surface (§7.2/§7.3).
 type PartnerPortalSource interface {
 	RequestSignIn(ctx context.Context, email string) error
-	AcceptInvite(ctx context.Context, invite string, app ...bool) (string, error)
+	AcceptInvite(ctx context.Context, invite string, app bool) (string, error)
 	SignOut(ctx context.Context, token string) error
 	Users(ctx context.Context, token string) ([]store.PartnerUser, error)
 	Invite(ctx context.Context, token, email, name, role string) error

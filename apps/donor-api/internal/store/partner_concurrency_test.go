@@ -53,7 +53,7 @@ func TestPartnerInviteIsSingleUseUnderConcurrency(t *testing.T) {
 	results := make(chan error, requests)
 	for range requests {
 		go func() {
-			_, err := portal.AcceptInvite(ctx, proof)
+			_, err := portal.AcceptInvite(ctx, proof, false)
 			results <- err
 		}()
 	}
