@@ -29,6 +29,26 @@ it("removes the proof from the URL and waits for explicit confirmation", async (
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
 });
 
+it("redirects after a successful retry without claiming the link is missing", async () => {
+  window.history.replaceState(null, "", "/partner/accept#token=private-proof");
+  const assign = vi.fn();
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ detail: "Unavailable" }, { status: 503 }))
+    .mockResolvedValueOnce(Response.json({}));
+  vi.stubGlobal("fetch", fetch);
+  vi.stubGlobal("location", { ...window.location, assign });
+  render(<Accept />);
+  fireEvent.click(await screen.findByRole("button", { name: "Confirm and sign in" }));
+  await screen.findByRole("alert");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("We couldn’t sign you in right now."));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm and sign in" }));
+  await waitFor(() => expect(assign).toHaveBeenCalledWith("/partner"));
+  expect(screen.getByText("Signed in, redirecting…")).toBeVisible();
+  expect(screen.queryByText(/needs the link/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
+});
+
 it("explains a missing proof without submitting a request", async () => {
   vi.stubGlobal("fetch", vi.fn());
   render(<Accept />);

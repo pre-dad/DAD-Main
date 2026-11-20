@@ -307,3 +307,74 @@ it.each([
   expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith(`/${endpoint}`))).toHaveLength(2);
   expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method)).toBe(true);
 });
+
+it("downloads the verified report through a temporary object URL and refreshes the history", async () => {
+  stub();
+  const createObjectURL = vi.fn(() => "blob:report");
+  const revokeObjectURL = vi.fn();
+  const original = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+  Object.assign(URL, { createObjectURL, revokeObjectURL });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/report.pdf")) return Promise.resolve(new Response(new Blob(["%PDF"])));
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  fireEvent.click(await screen.findByRole("button", { name: "Export verified report (PDF)" }));
+  expect(await screen.findByText("Your verified impact report was downloaded.")).toBeVisible();
+  expect(createObjectURL).toHaveBeenCalledTimes(1);
+  expect(click).toHaveBeenCalledTimes(1);
+  expect(revokeObjectURL).toHaveBeenCalledWith("blob:report");
+  const historyReads = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith("/exports"));
+  expect(historyReads).toHaveLength(2);
+  click.mockRestore();
+  Object.assign(URL, { createObjectURL: original.create, revokeObjectURL: original.revoke });
+});
+
+it("sends the partner to sign-in once sign-out is confirmed", async () => {
+  stub();
+  const assign = vi.fn();
+  vi.stubGlobal("location", { ...window.location, assign });
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/sign-out")) return Promise.resolve(Response.json({}));
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+  await waitFor(() => expect(assign).toHaveBeenCalledWith("/partner/sign-in"));
+});
+
+it("shows employee figures once enough employees have linked their giving", async () => {
+  stub();
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/our-people"))
+      return Promise.resolve(
+        Response.json({
+          enrolled: 12,
+          workforce_size: 400,
+          given_minor: 120000,
+          matched_minor: 60000,
+          avg_streak_days: 9,
+          volunteer_minutes: 180,
+          teams: 2,
+          suppressed: false,
+          streak_verified: true,
+        }),
+      );
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  const people = within(await screen.findByRole("region", { name: "Our People" }));
+  expect(await people.findByText("of 400 employees")).toBeVisible();
+  expect(people.getByText("$1,200.00")).toBeVisible();
+  expect(people.getByText("$600.00")).toBeVisible();
+  expect(people.getByText("Average streak 9 days")).toBeVisible();
+  expect(people.queryByText(/appear once at least 5 employees/)).not.toBeInTheDocument();
+  expect(people.queryByRole("button", { name: "Refresh employee figures" })).not.toBeInTheDocument();
+});

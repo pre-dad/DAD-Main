@@ -11,6 +11,7 @@ it.each(["PENDING", "APPROVED", "REJECTED"])("shows the persisted %s decision", 
   );
   render(<Status />);
   expect(await screen.findByRole("heading", { name: "Delta" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "About DAD" })).toHaveAttribute("href", "/how-it-works");
   if (status === "PENDING") expect(screen.getByText(/Your application is pending review/)).toBeVisible();
   if (status === "APPROVED")
     expect(screen.getByRole("link", { name: "Partner sign-in" })).toHaveAttribute("href", "/partner/sign-in");

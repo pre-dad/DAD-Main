@@ -10,6 +10,7 @@ export default function Accept() {
   const { token, clear } = useHashToken();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
 
   async function accept() {
     if (!token || busy) return;
@@ -17,6 +18,7 @@ export default function Accept() {
     setError("");
     try {
       await api("/donor/partner/accept-invite", { method: "POST", body: JSON.stringify({ invite: token }) });
+      setDone(true);
       clear();
       window.location.assign("/partner");
     } catch (cause) {
@@ -29,7 +31,9 @@ export default function Accept() {
   return (
     <Page eyebrow="Partner portal" title="Sign in to your partner portal">
       <p>Confirm to sign in to the partner account associated with this email link.</p>
-      {token ? (
+      {done ? (
+        <p>Signed in, redirecting…</p>
+      ) : token ? (
         <button type="button" className="button" onClick={accept} disabled={busy}>
           {busy ? "Signing in…" : "Confirm and sign in"}
         </button>
