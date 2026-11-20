@@ -22,7 +22,7 @@ type StaffSource interface {
 	Me(context.Context, string) (store.StaffView, error)
 	Accounts(context.Context, string) ([]store.StaffView, error)
 	Invite(context.Context, string, string, string, string) (string, error)
-	ChangeAccess(context.Context, string, pgtype.UUID, string, string) (store.AccessChange, error)
+	ChangeAccess(context.Context, string, pgtype.UUID, store.StaffAccessAction, string) (store.AccessChange, error)
 }
 
 const (
@@ -215,14 +215,14 @@ type roleBody struct {
 
 func (b roleBody) valid() bool { return validRole(b.Role) }
 
-func (a *api) changeStaffAccess(action string) sessionHandler {
+func (a *api) changeStaffAccess(action store.StaffAccessAction) sessionHandler {
 	return func(w http.ResponseWriter, r *http.Request, session string) {
 		id, ok := pathID(w, r, "staff_id")
 		if !ok {
 			return
 		}
 		var body roleBody
-		if action == "role" {
+		if action == store.AccessRole {
 			if body, ok = decodeValid[roleBody](w, r); !ok {
 				return
 			}
@@ -232,9 +232,9 @@ func (a *api) changeStaffAccess(action string) sessionHandler {
 			switch {
 			case err != nil:
 				return nil, err
-			case action == "recovery":
+			case action == store.AccessRecovery:
 				return map[string]string{"invitation_url": a.invitationURL(change.Token)}, nil
-			case action == "role":
+			case action == store.AccessRole:
 				return change.Staff, nil
 			default:
 				return change, nil

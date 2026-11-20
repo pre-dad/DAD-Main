@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"image"
 	"image/png"
+	"io"
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
@@ -64,10 +65,24 @@ func TestRecognitionArtworkBatchBodyLimit(t *testing.T) {
 	request = httptest.NewRequest("POST", "/donor/staff/content/rules", strings.NewReader("{}"))
 	request.Header.Set("Origin", testStaffOrigin)
 	request.AddCookie(&http.Cookie{Name: "dad_staff_session", Value: "staff-token"})
-	request.ContentLength = (10 << 20) + 1
+	request.ContentLength = maxRecognitionRulesBody + 1
 	response = httptest.NewRecorder()
 	server.Handler.ServeHTTP(response, request)
 	if response.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized batch: %d", response.Code)
+	}
+}
+
+func TestRecognitionRulesBodyLimitAppliesWithoutContentLength(t *testing.T) {
+	server := NewServer("", Services{Wording: &rulesSource{}, Origin: testPublicOrigin, StaffOrigin: testStaffOrigin})
+	body := `{"milestones":[7],"padding":"` + strings.Repeat("x", maxRecognitionRulesBody) + `"}`
+	request := httptest.NewRequest("POST", "/donor/staff/content/rules", io.NopCloser(strings.NewReader(body)))
+	request.ContentLength = -1
+	request.Header.Set("Origin", testStaffOrigin)
+	request.AddCookie(&http.Cookie{Name: "dad_staff_session", Value: "staff-token"})
+	response := httptest.NewRecorder()
+	server.Handler.ServeHTTP(response, request)
+	if response.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized chunked batch: %d", response.Code)
 	}
 }

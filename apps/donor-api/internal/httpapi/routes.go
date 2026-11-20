@@ -1,6 +1,10 @@
 package httpapi
 
-import "net/http"
+import (
+	"net/http"
+
+	"dad/donor-api/internal/store"
+)
 
 // auth names the credential a route acts on. The OpenAPI contract test checks
 // each operation's documented security against it.
@@ -115,9 +119,9 @@ func (a *api) routes() []route {
 		a.staffRead("GET /donor/staff/me", a.staffMe),
 		a.staffRead("GET /donor/staff/accounts", a.staffAccounts),
 		a.staffWrite("POST /donor/staff/accounts", a.inviteStaff),
-		a.staffWrite("POST /donor/staff/accounts/{staff_id}/disable", a.changeStaffAccess("disable")),
-		a.staffWrite("POST /donor/staff/accounts/{staff_id}/recovery", a.changeStaffAccess("recovery")),
-		a.staffWrite("POST /donor/staff/accounts/{staff_id}/role", a.changeStaffAccess("role")),
+		a.staffWrite("POST /donor/staff/accounts/{staff_id}/disable", a.changeStaffAccess(store.AccessDisable)),
+		a.staffWrite("POST /donor/staff/accounts/{staff_id}/recovery", a.changeStaffAccess(store.AccessRecovery)),
+		a.staffWrite("POST /donor/staff/accounts/{staff_id}/role", a.changeStaffAccess(store.AccessRole)),
 
 		a.staffRead("GET /donor/staff/donors", a.searchDonors),
 		a.staffRead("GET /donor/staff/donors/{donor_id}", a.donorDetail),
