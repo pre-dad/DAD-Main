@@ -104,22 +104,24 @@ func TestPaymentUpdateRecoversLostProviderAcknowledgement(t *testing.T) {
 }
 
 func TestPaymentUpdateRequiresVerifiedOwnershipAndCardSetup(t *testing.T) {
-	cases := map[string]func(*paymentUpdateFixture){
-		"session owner": func(p *paymentUpdateFixture) { p.remote["customer"] = "cus_other" },
-		"live setup":    func(p *paymentUpdateFixture) { p.setup["livemode"] = true },
-		"setup owner": func(p *paymentUpdateFixture) {
+	cases := map[string]func(*testing.T, *paymentUpdateFixture){
+		"session owner": func(_ *testing.T, p *paymentUpdateFixture) { p.remote["customer"] = "cus_other" },
+		"live setup":    func(_ *testing.T, p *paymentUpdateFixture) { p.setup["livemode"] = true },
+		"setup owner": func(t *testing.T, p *paymentUpdateFixture) {
 			p.setup["metadata"] = map[string]any{"dad_payment_update_id": testID(t).String()}
 		},
-		"wrong usage":        func(p *paymentUpdateFixture) { p.setup["usage"] = "on_session" },
-		"not card":           func(p *paymentUpdateFixture) { p.setup["payment_method_types"] = []string{"us_bank_account"} },
-		"not succeeded":      func(p *paymentUpdateFixture) { p.setup["status"] = "requires_action" },
-		"subscription owner": func(p *paymentUpdateFixture) { p.sub["customer"] = "cus_other" },
-		"not active":         func(p *paymentUpdateFixture) { p.sub["status"] = "incomplete" },
+		"wrong usage": func(_ *testing.T, p *paymentUpdateFixture) { p.setup["usage"] = "on_session" },
+		"not card": func(_ *testing.T, p *paymentUpdateFixture) {
+			p.setup["payment_method_types"] = []string{"us_bank_account"}
+		},
+		"not succeeded":      func(_ *testing.T, p *paymentUpdateFixture) { p.setup["status"] = "requires_action" },
+		"subscription owner": func(_ *testing.T, p *paymentUpdateFixture) { p.sub["customer"] = "cus_other" },
+		"not active":         func(_ *testing.T, p *paymentUpdateFixture) { p.sub["status"] = "incomplete" },
 	}
 	for name, edit := range cases {
 		t.Run(name, func(t *testing.T) {
 			p := newPaymentUpdateFixture(t)
-			edit(&p)
+			edit(t, &p)
 			p.publish(t)
 			event := p.f.receive(t, "checkout.session.completed", p.remote)
 			p.f.process(t)

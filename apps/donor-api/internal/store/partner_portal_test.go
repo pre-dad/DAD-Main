@@ -323,7 +323,8 @@ func TestPartnerSignInSerializesWithRecipientChanges(t *testing.T) {
 	defer lock.Rollback(context.Background())
 	mustExec(t, lock, "UPDATE donor_partner_users SET disabled=true WHERE id=$1", user)
 	done := make(chan error, 1)
-	go func() { done <- (PartnerPortalService{DB: as(t, dbroles.API)}).RequestSignIn(ctx, email) }()
+	portal := PartnerPortalService{DB: as(t, dbroles.API)}
+	go func() { done <- portal.RequestSignIn(ctx, email) }()
 	select {
 	case err := <-done:
 		t.Fatalf("sign-in did not wait for recipient changes: %v", err)

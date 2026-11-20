@@ -59,13 +59,19 @@ func (h *historyFixture) donor(name string) pgtype.UUID {
 	return id
 }
 
+// monthly builds a USD monthly gift; every seeded gift is monthly.
+func monthly(id, donorID string, amount int64, paidAt time.Time, candidate *recognition.Candidate) recognition.Gift {
+	return recognition.Gift{
+		ID: id, DonorID: donorID, Amount: amount, Currency: "USD", Frequency: "MONTHLY", PaidAt: paidAt, Candidate: candidate,
+	}
+}
+
 func (h *historyFixture) gift(g recognition.Gift) {
 	h.t.Helper()
 	ctx := context.Background()
 	donor := h.donor(g.DonorID)
-	// Giving is MONTHLY-only (one-time removed, PRD §5.1); the checkout constraint
-	// forbids any other frequency. Shared scenarios exercise referral/recognition
-	// math, which is frequency-agnostic, so every seeded gift is recorded monthly.
+	// The checkout constraint allows only MONTHLY, and the referral and recognition
+	// math these scenarios exercise does not depend on frequency.
 	draft := queries.InsertCheckoutParams{
 		ID:          testID(h.t),
 		DonorID:     donor,
@@ -192,11 +198,9 @@ func TestSharedReferralScenariosAgainstSQLAggregate(t *testing.T) {
 	}
 }
 
-// oldReferralAggregate computes a referrer's four referral totals the way the
-// pre-denormalization ReferralTotals query (and the 0016 backfill) did: a live
-// FILTER aggregate over the referred rows. The denormalized read must equal it
-// for every projection ordering; this is the oracle the correctness tests
-// compare against.
+// oldReferralAggregate is the oracle for the referral totals: a live FILTER
+// aggregate over the referred projection rows. The denormalized columns must
+// equal it for every projection ordering.
 func oldReferralAggregate(t *testing.T, tx pgx.Tx, referrer pgtype.UUID) referralTotals {
 	t.Helper()
 	var got referralTotals
@@ -260,37 +264,13 @@ func TestDenormalizedReferralTotalsEqualTheOldAggregate(t *testing.T) {
 		defer tx.Rollback(ctx)
 		h := newHistoryFixture(t, tx)
 		h.gift(
-			recognition.Gift{
-				ID:        "l1",
-				DonorID:   "link1",
-				Amount:    3000,
-				Currency:  "USD",
-				Frequency: "MONTHLY",
-				PaidAt:    asOf.Add(-72 * time.Hour),
-				Candidate: referred("alice", "LINK"),
-			},
+			monthly("l1", "link1", 3000, asOf.Add(-72*time.Hour), referred("alice", "LINK")),
 		)
 		h.gift(
-			recognition.Gift{
-				ID:        "l2",
-				DonorID:   "link2",
-				Amount:    5000,
-				Currency:  "USD",
-				Frequency: "MONTHLY",
-				PaidAt:    asOf.Add(-71 * time.Hour),
-				Candidate: referred("alice", "LINK"),
-			},
+			monthly("l2", "link2", 5000, asOf.Add(-71*time.Hour), referred("alice", "LINK")),
 		)
 		h.gift(
-			recognition.Gift{
-				ID:        "i1",
-				DonorID:   "irl1",
-				Amount:    9000,
-				Currency:  "USD",
-				Frequency: "MONTHLY",
-				PaidAt:    asOf.Add(-70 * time.Hour),
-				Candidate: referred("alice", "IRL"),
-			},
+			monthly("i1", "irl1", 9000, asOf.Add(-70*time.Hour), referred("alice", "IRL")),
 		)
 		actAs(t, tx, dbroles.ProjectionWorker)
 		for _, name := range []string{"alice", "link1", "link2", "irl1"} {
@@ -310,26 +290,10 @@ func TestDenormalizedReferralTotalsEqualTheOldAggregate(t *testing.T) {
 		defer tx.Rollback(ctx)
 		h := newHistoryFixture(t, tx)
 		h.gift(
-			recognition.Gift{
-				ID:        "l1",
-				DonorID:   "link1",
-				Amount:    3000,
-				Currency:  "USD",
-				Frequency: "MONTHLY",
-				PaidAt:    asOf.Add(-72 * time.Hour),
-				Candidate: referred("alice", "LINK"),
-			},
+			monthly("l1", "link1", 3000, asOf.Add(-72*time.Hour), referred("alice", "LINK")),
 		)
 		h.gift(
-			recognition.Gift{
-				ID:        "i1",
-				DonorID:   "irl1",
-				Amount:    9000,
-				Currency:  "USD",
-				Frequency: "MONTHLY",
-				PaidAt:    asOf.Add(-70 * time.Hour),
-				Candidate: referred("alice", "IRL"),
-			},
+			monthly("i1", "irl1", 9000, asOf.Add(-70*time.Hour), referred("alice", "IRL")),
 		)
 		actAs(t, tx, dbroles.ProjectionWorker)
 		// The referred donors are projected while alice has NO projection row,
@@ -356,26 +320,10 @@ func TestDenormalizedReferralTotalsEqualTheOldAggregate(t *testing.T) {
 		defer tx.Rollback(ctx)
 		h := newHistoryFixture(t, tx)
 		h.gift(
-			recognition.Gift{
-				ID:        "l1",
-				DonorID:   "link1",
-				Amount:    3000,
-				Currency:  "USD",
-				Frequency: "MONTHLY",
-				PaidAt:    asOf.Add(-72 * time.Hour),
-				Candidate: referred("alice", "LINK"),
-			},
+			monthly("l1", "link1", 3000, asOf.Add(-72*time.Hour), referred("alice", "LINK")),
 		)
 		h.gift(
-			recognition.Gift{
-				ID:        "l2",
-				DonorID:   "link2",
-				Amount:    5000,
-				Currency:  "USD",
-				Frequency: "MONTHLY",
-				PaidAt:    asOf.Add(-71 * time.Hour),
-				Candidate: referred("alice", "LINK"),
-			},
+			monthly("l2", "link2", 5000, asOf.Add(-71*time.Hour), referred("alice", "LINK")),
 		)
 		actAs(t, tx, dbroles.ProjectionWorker)
 		for _, name := range []string{"alice", "link1", "link2"} {
@@ -413,7 +361,7 @@ func TestDenormalizedReferralTotalsEqualTheOldAggregate(t *testing.T) {
 
 // TestReferralTotalsConvergeAfterRulesBumpRecompute proves the recompute is
 // idempotent: re-projecting an already-converged referrer and its referred
-// donors (as the projectionRules 3->4 bump makes every donor do once) leaves
+// donors, as a projection rules version bump makes every donor do once, leaves
 // the four denormalized columns equal to the aggregate, never double-counted.
 func TestReferralTotalsConvergeAfterRulesBumpRecompute(t *testing.T) {
 	pool := database(t)
@@ -430,37 +378,13 @@ func TestReferralTotalsConvergeAfterRulesBumpRecompute(t *testing.T) {
 		return &recognition.Candidate{ReferrerID: "alice", Kind: kind, ExpiresAt: window}
 	}
 	h.gift(
-		recognition.Gift{
-			ID:        "l1",
-			DonorID:   "link1",
-			Amount:    3000,
-			Currency:  "USD",
-			Frequency: "MONTHLY",
-			PaidAt:    asOf.Add(-72 * time.Hour),
-			Candidate: ref("LINK"),
-		},
+		monthly("l1", "link1", 3000, asOf.Add(-72*time.Hour), ref("LINK")),
 	)
 	h.gift(
-		recognition.Gift{
-			ID:        "l2",
-			DonorID:   "link2",
-			Amount:    5000,
-			Currency:  "USD",
-			Frequency: "MONTHLY",
-			PaidAt:    asOf.Add(-71 * time.Hour),
-			Candidate: ref("LINK"),
-		},
+		monthly("l2", "link2", 5000, asOf.Add(-71*time.Hour), ref("LINK")),
 	)
 	h.gift(
-		recognition.Gift{
-			ID:        "i1",
-			DonorID:   "irl1",
-			Amount:    9000,
-			Currency:  "USD",
-			Frequency: "MONTHLY",
-			PaidAt:    asOf.Add(-70 * time.Hour),
-			Candidate: ref("IRL"),
-		},
+		monthly("i1", "irl1", 9000, asOf.Add(-70*time.Hour), ref("IRL")),
 	)
 	names := []string{"alice", "link1", "link2", "irl1"}
 	actAs(t, tx, dbroles.ProjectionWorker)
@@ -563,15 +487,7 @@ func TestEarlierPaymentCorrectsConversionAndPreservesFoundingAward(t *testing.T)
 	earlier := later.AddDate(0, -1, 0)
 	window := later.AddDate(0, 1, 0)
 	h.gift(
-		recognition.Gift{
-			ID:        "later",
-			DonorID:   "ben",
-			Amount:    3000,
-			Currency:  "USD",
-			Frequency: "MONTHLY",
-			PaidAt:    later,
-			Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: window},
-		},
+		monthly("later", "ben", 3000, later, &recognition.Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: window}),
 	)
 	first, err := projectFacts(ctx, queries.New(tx), h.donor("ben"), later)
 	if err != nil || first.ReferrerID != h.donor("alice") || !first.FoundingAwardedAt.Time.Equal(later) {
@@ -579,15 +495,7 @@ func TestEarlierPaymentCorrectsConversionAndPreservesFoundingAward(t *testing.T)
 	}
 	// Provider collection time, rather than processing order, determines credit.
 	h.gift(
-		recognition.Gift{
-			ID:        "earlier",
-			DonorID:   "ben",
-			Amount:    3000,
-			Currency:  "USD",
-			Frequency: "MONTHLY",
-			PaidAt:    earlier,
-			Candidate: &recognition.Candidate{ReferrerID: "cara", Kind: "IRL", ExpiresAt: window},
-		},
+		monthly("earlier", "ben", 3000, earlier, &recognition.Candidate{ReferrerID: "cara", Kind: "IRL", ExpiresAt: window}),
 	)
 	second, err := projectFacts(ctx, queries.New(tx), h.donor("ben"), later.Add(time.Hour))
 	if err != nil || second.ReferrerID != h.donor("cara") || second.ReferralKind.String != "IRL" ||

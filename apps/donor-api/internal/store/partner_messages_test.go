@@ -11,6 +11,7 @@ import (
 	"dad/donor-api/internal/mail"
 	"dad/donor-api/internal/payments"
 	"dad/donor-api/internal/store/queries"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -38,6 +39,28 @@ func queuePartnerIntent(t *testing.T, partnerID interface{ String() string }, ki
 	})
 }
 
+// queuePartnerIntentAsProduction enqueues through queuePartnerMessage, the call
+// the approval, publish and completion paths make, so dedup and the
+// kind-specific side effects are the production ones.
+func queuePartnerIntentAsProduction(t *testing.T, partnerID pgtype.UUID, kind, key string) {
+	t.Helper()
+	pool := as(t, dbroles.API)
+	tx, err := pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	if err := queuePartnerMessage(context.Background(), queries.New(tx), partnerID, kind, key, map[string]string{}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanExec(t, "DELETE FROM donor_partner_messages WHERE dedup_key=$1", key)
+	})
+}
+
 // TestPartnerMessageMatrixDeliversEachTriggerOnce walks the partner side of the
 // §6.11 matrix: each status trigger renders once, fans out to every accepted
 // org user, and the intent's dedup key makes it idempotent.
@@ -59,9 +82,14 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 		`INSERT INTO donor_partner_users (id, partner_id, email, name, role, accepted_at, disabled, created_at)
 		 VALUES ($1,$2,'off@x.test','D','VIEWER',now(),true,now())`, mustNewID(t), partnerID)
 
-	for _, kind := range []string{"METRICS_VERIFIED", "INITIATIVE_COMPLETE", "MONTHLY_REPORT"} {
+	for _, test := range []struct{ kind, subject, org string }{
+		{"METRICS_VERIFIED", "New verified figures for Matrix Org", "Matrix Org"},
+		{"INITIATIVE_COMPLETE", "An initiative has been marked complete", "Matrix Org's initiatives"},
+		{"MONTHLY_REPORT", "Your monthly DAD impact summary", "summary for Matrix Org"},
+	} {
+		kind := test.kind
 		key := "matrix:" + kind + ":" + partnerID.String()
-		queuePartnerIntent(t, partnerID, kind, key)
+		queuePartnerIntentAsProduction(t, partnerID, kind, key)
 		transport := &recordingMail{}
 		w := partnerMessageWorker(t, transport)
 		now := time.Now().UTC().Add(time.Second)
@@ -76,8 +104,8 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 			if m.To == "pending@x.test" || m.To == "off@x.test" {
 				t.Fatalf("%s: delivered to non-recipient %s", kind, m.To)
 			}
-			if m.Subject == "" || m.Body == "" {
-				t.Fatalf("%s: empty subject/body", kind)
+			if m.Subject != test.subject || !strings.Contains(m.Subject+"\n"+m.Body, test.org) {
+				t.Fatalf("%s: subject %q, body %q; want subject %q and the organisation %q", kind, m.Subject, m.Body, test.subject, test.org)
 			}
 			if !strings.Contains(m.Body, "https://donor.example.org/partner") || !strings.HasSuffix(m.Body, partnerMessageFooter) {
 				t.Fatalf("%s: body lacks the portal link or footer: %q", kind, m.Body)
@@ -88,7 +116,7 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 		if steps := drainPartnerMessages(t, w, now.Add(time.Minute)); steps != 0 {
 			t.Fatalf("%s: redelivered a completed intent in %d steps", kind, steps)
 		}
-		queuePartnerIntent(t, partnerID, kind, key)
+		queuePartnerIntentAsProduction(t, partnerID, kind, key)
 		if _, _, err := renderPartnerMessage(ctx, queries.New(pool), queries.DonorPartnerMessage{PartnerID: partnerID, Kind: "UNKNOWN"},
 			publicSite("https://donor.example.org")); !errors.Is(err, payments.ErrFacts) || !messageDataError(err) {
 			t.Fatalf("unknown partner message kind: %v", err)
@@ -99,7 +127,7 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 		if pending != 0 {
-			t.Fatalf("%s: dedup key re-queued a live intent", kind)
+			t.Fatalf("%s: dedup key re-queued a completed intent", kind)
 		}
 	}
 }

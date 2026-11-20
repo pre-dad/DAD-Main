@@ -26,7 +26,7 @@ import (
 // a committed amount, one spend category, and one verified PEOPLE metric.
 func seedPartnerInitiative(t *testing.T, pool *pgxpool.Pool, partnerID pgtype.UUID, slug string, committed, spend, people int64) {
 	t.Helper()
-	initID, _ := NewID()
+	initID := mustNewID(t)
 	mustExec(
 		t,
 		pool,
@@ -38,7 +38,7 @@ func seedPartnerInitiative(t *testing.T, pool *pgxpool.Pool, partnerID pgtype.UU
 		committed,
 		partnerID,
 	)
-	spendID, _ := NewID()
+	spendID := mustNewID(t)
 	mustExec(
 		t,
 		pool,
@@ -47,7 +47,7 @@ func seedPartnerInitiative(t *testing.T, pool *pgxpool.Pool, partnerID pgtype.UU
 		initID,
 		spend,
 	)
-	metricID, _ := NewID()
+	metricID := mustNewID(t)
 	mustExec(
 		t,
 		pool,
@@ -276,6 +276,14 @@ func TestPartnerReportRendersAnyNameAndPaginatesLongSpend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, tool := range []string{"pdfinfo", "pdftotext"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			if os.Getenv("CI") != "" {
+				t.Fatalf("%s is required in CI (install Poppler): %v", tool, err)
+			}
+			t.Skipf("%s not installed; install Poppler to run the PDF test", tool)
+		}
+	}
 	path := filepath.Join(t.TempDir(), "report.pdf")
 	if err := os.WriteFile(path, pdf, 0600); err != nil {
 		t.Fatal(err)
@@ -304,7 +312,6 @@ func TestPartnerReportRendersAnyNameAndPaginatesLongSpend(t *testing.T) {
 			t.Errorf("report lost expected text %q", expected)
 		}
 	}
-
 }
 
 // TestPartnerProfileEditedByAdminsOnly covers the §7.2 organization profile.
