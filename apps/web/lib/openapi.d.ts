@@ -9299,9 +9299,9 @@ export interface operations {
     staffPartnerMatchPayment: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Version-4 UUID identifying this offline payment. Reuse the same key and payload after an uncertain result. Reusing it with another payload returns 409. Omission remains compatible with older clients but cannot deduplicate a retry. */
-                "Idempotency-Key"?: string;
+            header: {
+                /** @description A fresh version 4 UUID per distinct command. Retrying with the same key and body returns the original outcome and never repeats the effect; the same key with a different body is a 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
             };
             path: {
                 partnerID: string;

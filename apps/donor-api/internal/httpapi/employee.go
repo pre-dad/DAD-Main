@@ -156,20 +156,9 @@ func (a *api) staffPartnerMatchPayment(w http.ResponseWriter, r *http.Request, s
 		invalidFields(w, r)
 		return
 	}
-	var key pgtype.UUID
-	if r.Header.Get("Idempotency-Key") != "" {
-		var ok bool
-		key, ok = idempotencyKey(w, r)
-		if !ok {
-			return
-		}
-	} else {
-		var err error
-		key, err = store.NewID()
-		if err != nil {
-			writeError(w, r, http.StatusServiceUnavailable, "Partner matching is temporarily unavailable", err)
-			return
-		}
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
 	}
 	a.employeeStaff().serve(w, r, func(ctx context.Context) (any, error) {
 		return map[string]any{"recorded": true}, a.EmployeeStaff.RecordMatchPayment(ctx, session, id, body.Year, body.AmountMinor, key)
