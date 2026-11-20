@@ -19,8 +19,8 @@ type partnerPortalDouble struct {
 	signOutError error
 }
 
-func (d *partnerPortalDouble) AcceptInvite(_ context.Context, _ string, app ...bool) (string, error) {
-	d.acceptedApp = append(d.acceptedApp, len(app) == 1 && app[0])
+func (d *partnerPortalDouble) AcceptInvite(_ context.Context, _ string, app bool) (string, error) {
+	d.acceptedApp = append(d.acceptedApp, app)
 	return strings.Repeat("p", 43), nil
 }
 
@@ -45,7 +45,7 @@ func TestPartnerAcceptInviteIssuesBearerToTheAppAndCookieToTheBrowser(t *testing
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"session":"`+strings.Repeat("p", 43)+`"`) {
 		t.Fatalf("native accept: %d %s", response.Code, response.Body)
 	}
-	if len(response.Result().Cookies()) != 0 || !portal.acceptedApp[0] {
+	if len(response.Result().Cookies()) != 0 || len(portal.acceptedApp) != 1 || !portal.acceptedApp[0] {
 		t.Fatalf("native accept set cookies %v or was not flagged as an app session", response.Result().Cookies())
 	}
 
@@ -53,7 +53,8 @@ func TestPartnerAcceptInviteIssuesBearerToTheAppAndCookieToTheBrowser(t *testing
 	r.Header.Set("Origin", testPublicOrigin)
 	response = httptest.NewRecorder()
 	server.Handler.ServeHTTP(response, r)
-	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "session") || portal.acceptedApp[1] {
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "session") ||
+		len(portal.acceptedApp) != 2 || portal.acceptedApp[1] {
 		t.Fatalf("browser accept leaked a token or was flagged as an app: %d %s", response.Code, response.Body)
 	}
 	cookies := response.Result().Cookies()

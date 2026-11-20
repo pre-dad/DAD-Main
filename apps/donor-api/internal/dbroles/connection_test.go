@@ -15,10 +15,11 @@ func env(m map[string]string) func(string) string { return func(k string) string
 func TestConnectionURLPrecedenceAndParts(t *testing.T) {
 	const secret = "s3cr3t/p@ss:word#1"
 	for name, tc := range map[string]struct {
-		env  map[string]string
-		want func(*testing.T, *pgx.ConnConfig)
-		none bool
-		fail string
+		variable string
+		env      map[string]string
+		want     func(*testing.T, *pgx.ConnConfig)
+		none     bool
+		fail     string
 	}{
 		"full URL alone is unchanged": {
 			env: map[string]string{"DONOR_API_DATABASE_URL": "postgresql://dad_api_login:inline-password-1@db:5432/dad?sslmode=require"},
@@ -40,6 +41,7 @@ func TestConnectionURLPrecedenceAndParts(t *testing.T) {
 			},
 		},
 		"parts build a URL": {
+			variable: "DONOR_WORKER_STRIPE_DATABASE_URL",
 			env: map[string]string{
 				"DONOR_WORKER_STRIPE_DATABASE_HOST":     "db.internal",
 				"DONOR_WORKER_STRIPE_DATABASE_PORT":     "6432",
@@ -73,6 +75,10 @@ func TestConnectionURLPrecedenceAndParts(t *testing.T) {
 				}
 			},
 		},
+		"host alone is refused": {
+			env:  map[string]string{"DONOR_API_DATABASE_HOST": "h"},
+			fail: "DONOR_API_DATABASE_USER and DONOR_API_DATABASE_NAME are required",
+		},
 		"nothing configured": {env: map[string]string{"DONOR_API_DATABASE_PASSWORD": "alone"}, none: true},
 		"password with a URL that has no user": {
 			env:  map[string]string{"DONOR_API_DATABASE_URL": "postgresql://db/dad", "DONOR_API_DATABASE_PASSWORD": secret},
@@ -92,9 +98,9 @@ func TestConnectionURLPrecedenceAndParts(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			variable := "DONOR_API_DATABASE_URL"
-			if name == "parts build a URL" {
-				variable = "DONOR_WORKER_STRIPE_DATABASE_URL"
+			variable := tc.variable
+			if variable == "" {
+				variable = "DONOR_API_DATABASE_URL"
 			}
 			got, err := ConnectionURL(variable, env(tc.env))
 			if tc.fail != "" {

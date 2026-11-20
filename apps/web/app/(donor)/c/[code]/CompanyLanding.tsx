@@ -15,6 +15,8 @@ type Capture = ResponseBody<"/donor/company/{code}", "post">;
 export default function CompanyLanding({ code }: { code: string }) {
   const [captured, setCaptured] = useState<boolean | null>(null);
   const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: attempt is the retry trigger, deliberately unread
   useEffect(() => {
     const controller = new AbortController();
     api<Capture>(`/donor/company/${encodeURIComponent(code)}`, {
@@ -27,7 +29,7 @@ export default function CompanyLanding({ code }: { code: string }) {
         if (!controller.signal.aborted) setError(failureMessage(cause, "We couldn’t save your company code."));
       });
     return () => controller.abort();
-  }, [code]);
+  }, [code, attempt]);
 
   if (captured === false)
     return (
@@ -50,8 +52,21 @@ export default function CompanyLanding({ code }: { code: string }) {
       <p className="note">Sign in or claim your account to link your giving to this workplace.</p>
       <p className="note">
         Company code <span className="hash">{code}</span>
-        {captured ? " is saved for this browser." : "."} Already giving? Add it under Employer and team in your account.
+        {captured ? " is saved for this browser." : error ? " was not saved for this browser." : "."} Already giving?
+        Add it under Employer and team in your account.
       </p>
+      {error && (
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => {
+            setError("");
+            setAttempt((value) => value + 1);
+          }}
+        >
+          Try saving the code again
+        </button>
+      )}
       <Announcer status={captured ? "Company code saved." : ""} alert={error} />
     </Page>
   );

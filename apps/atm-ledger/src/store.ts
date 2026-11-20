@@ -49,6 +49,9 @@ interface Event {
 }
 const ZERO = "0".repeat(64);
 const MAX_ARCHIVED_BYTES = 2 * 1024 * 1024;
+export const DAILY_REQUEST_QUOTA = 1000;
+export const DAILY_EVENT_QUOTA = 200;
+export const ARCHIVE_QUOTA_BYTES = 100 * 1024 * 1024;
 const UPSERT_HEAD =
 	"INSERT INTO head(id,version,digest,history_hash,ledger) VALUES(1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,digest=excluded.digest,history_hash=excluded.history_hash,ledger=excluded.ledger";
 
@@ -142,7 +145,7 @@ export class LedgerStore extends DurableObject<Env> {
 	private consumeRequest() {
 		this.ctx.storage.transactionSync(() => {
 			check(
-				this.budget().requests < 1000,
+				this.budget().requests < DAILY_REQUEST_QUOTA,
 				"Daily ledger request quota reached",
 				429,
 			);
@@ -156,9 +159,13 @@ export class LedgerStore extends DurableObject<Env> {
 		const budget = this.budget();
 		const bytes =
 			2 * Buffer.byteLength(`{"event":${payload},"hash":"${hash}"}`);
-		check(budget.events < 200, "Daily ledger event quota reached", 429);
 		check(
-			budget.archive_bytes + bytes <= 100 * 1024 * 1024,
+			budget.events < DAILY_EVENT_QUOTA,
+			"Daily ledger event quota reached",
+			429,
+		);
+		check(
+			budget.archive_bytes + bytes <= ARCHIVE_QUOTA_BYTES,
 			"Ledger archive quota reached",
 			507,
 		);

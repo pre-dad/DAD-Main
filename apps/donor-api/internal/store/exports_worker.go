@@ -182,17 +182,15 @@ func readBatch(
 	) + " FROM " + pgx.Identifier{
 		dataset.table,
 	}.Sanitize() + " WHERE ($1::uuid IS NULL OR id>$1)"
+	arguments := []any{job.Cursor}
 	if column := exportAsOf[job.Dataset]; column != "" {
 		query += " AND " + pgx.Identifier{column}.Sanitize() + "<=$2"
+		arguments = append(arguments, job.RequestedAt)
 	}
 	if job.Dataset == "referrals" {
 		query += " AND referrer_id IS NOT NULL"
 	}
 	query += " ORDER BY id LIMIT " + strconv.Itoa(limit)
-	arguments := []any{job.Cursor}
-	if strings.Contains(query, "<=$2") {
-		arguments = append(arguments, job.RequestedAt)
-	}
 	rows, err := tx.Query(ctx, query, arguments...)
 	if err != nil {
 		return pgtype.UUID{}, 0, err

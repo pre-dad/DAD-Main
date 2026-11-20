@@ -31,7 +31,7 @@ const detail = {
   ],
   referred: [{ id: "donor-2", email: "invitee@example.org", type: "LINK", net_minor: 4500 }],
   next_gifts_offset: null,
-  next_referrals_offset: null,
+  next_referrals_cursor: null,
 };
 const actor = {
   id: "staff-1",
@@ -136,20 +136,33 @@ it("pages through the action history by the cursor the API returns", async () =>
   expect(await screen.findByRole("button", { name: "Older actions" })).toBeVisible();
 });
 
+it("requests the next page of referred donors by the cursor the API returns", async () => {
+  const fetch = serve({
+    "/donor/staff/donors/donor-1?gifts_offset=0": reply(200, { ...detail, next_referrals_cursor: "c/2+" }),
+    "/donor/staff/donors/donor-1?gifts_offset=0&referrals_cursor=c%2F2%2B": reply(200, detail),
+    "/donor/staff/me": reply(200, actor),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
+  });
+  render(<DonorDetail donor="donor-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "More referrals" }));
+  expect(await screen.findByRole("button", { name: "First referrals" })).toBeVisible();
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/donor/staff/donors/donor-1?gifts_offset=0&referrals_cursor=c%2F2%2B",
+    expect.anything(),
+  );
+});
+
 it("requests the next page of gifts from the detail endpoint", async () => {
   const fetch = serve({
-    "/donor/staff/donors/donor-1?gifts_offset=0&referrals_offset=0": reply(200, { ...detail, next_gifts_offset: 50 }),
-    "/donor/staff/donors/donor-1?gifts_offset=50&referrals_offset=0": reply(200, detail),
+    "/donor/staff/donors/donor-1?gifts_offset=0": reply(200, { ...detail, next_gifts_offset: 50 }),
+    "/donor/staff/donors/donor-1?gifts_offset=50": reply(200, detail),
     "/donor/staff/me": reply(200, actor),
     "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
   });
   render(<DonorDetail donor="donor-1" />);
   fireEvent.click(await screen.findByRole("button", { name: "Older gifts" }));
   expect(await screen.findByRole("button", { name: "Newest gifts" })).toBeVisible();
-  expect(fetch).toHaveBeenCalledWith(
-    "/api/donor/staff/donors/donor-1?gifts_offset=50&referrals_offset=0",
-    expect.anything(),
-  );
+  expect(fetch).toHaveBeenCalledWith("/api/donor/staff/donors/donor-1?gifts_offset=50", expect.anything());
 });
 
 it("announces loading until the record arrives", async () => {

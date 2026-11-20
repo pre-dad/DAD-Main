@@ -10,6 +10,7 @@ const walletNeedsName = "Choose a public nickname before adding your code to Wal
 
 func (a *api) walletProviders(w http.ResponseWriter, r *http.Request, session string) {
 	a.donor().serve(w, r, func(ctx context.Context) (any, error) {
+		// Sharing is read only to validate the session.
 		_, err := a.Donor.Sharing(ctx, session)
 		return map[string]bool{
 			"apple":  a.Wallet != nil && a.Wallet.Apple != nil,

@@ -25,8 +25,8 @@ var zipPattern = regexp.MustCompile(`^[0-9]{5}(-[0-9]{4})?$`)
 var encodedZones []byte
 
 type zoneTable struct {
-	// Prefix maps a three-digit ZIP prefix ("0" through "999", left-padded) to
-	// an IANA zone name.
+	// Prefix maps a three-digit ZIP prefix ("005" through "999", zero-padded) to
+	// an IANA zone name; unassigned prefixes are absent.
 	Prefix map[string]string `json:"prefix"`
 	// Override maps a full five-digit ZIP to a zone, for the ZIPs whose prefix
 	// region straddles a time-zone boundary.
@@ -53,8 +53,9 @@ var zones = func() zoneTable {
 	return t
 }()
 
-// NormalizeZip returns the canonical ZIP form (digits, optional +4 hyphen) or
-// ErrZip. It does not confirm the ZIP resolves to a zone; use Timezone for that.
+// NormalizeZip returns zip unchanged when it is ZIP5 or ZIP+4, otherwise ErrZip.
+// It only checks the format and does not confirm the ZIP resolves to a zone;
+// use Timezone for that.
 func NormalizeZip(zip string) (string, error) {
 	if !zipPattern.MatchString(zip) {
 		return "", ErrZip

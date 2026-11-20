@@ -12,6 +12,7 @@ import (
 	"log"
 	"log/slog"
 	"math"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -82,7 +83,8 @@ func Render(ctx context.Context, data Data) (pdf []byte, err error) {
 		return nil, ctx.Err()
 	}
 	defer func() {
-		if recover() != nil {
+		if r := recover(); r != nil {
+			slog.ErrorContext(ctx, "report rendering panicked", "panic_type", fmt.Sprintf("%T", r), "stack", string(debug.Stack()))
 			pdf = nil
 			err = ErrRender
 		}

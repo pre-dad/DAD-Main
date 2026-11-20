@@ -78,5 +78,5 @@ export function observeAPI(path: string, method: string, result: unknown, body?:
         /* Ignore malformed observation context. */
       }
     }
-  } else if (/\/(?:me\/)?events\/[^/]+$/.test(path)) observe("event_viewed");
+  } else if (/\/(?:me\/)?events\/(?!invite-only$)[^/]+$/.test(path)) observe("event_viewed");
 }

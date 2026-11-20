@@ -58,7 +58,11 @@ func TestSetPasswordSeparatesWrongCurrentPasswordFromBadSession(t *testing.T) {
 			appRequest("POST", "/donor/me/password", body),
 		)
 		var got struct{ Detail, Code string }
-		_ = json.Unmarshal(response.Body.Bytes(), &got)
+		if response.Body.Len() > 0 {
+			if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil {
+				t.Errorf("%s: unparseable body %q: %v", tc.name, response.Body, err)
+			}
+		}
 		if response.Code != tc.status || got.Code != tc.code {
 			t.Errorf("%s: got %d %s, want %d with code %q", tc.name, response.Code, response.Body, tc.status, tc.code)
 		}

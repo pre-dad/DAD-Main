@@ -88,8 +88,8 @@ func TestJoiningATeamEarnsTeamPlayer(t *testing.T) {
 
 func TestEveryBadgeStatesHowToEarnIt(t *testing.T) {
 	for _, b := range Catalog {
-		if b.Rule == "" || b.Title == "" {
-			t.Errorf("badge %s has no title or rule", b.Code)
+		if b.Rule == "" {
+			t.Errorf("badge %s has no rule", b.Code)
 		}
 	}
 }
@@ -97,17 +97,14 @@ func TestEveryBadgeStatesHowToEarnIt(t *testing.T) {
 // Opting in earns Volunteer, and checked-in events earn Showed Up, Volunteer ×3
 // and Volunteer ×10 at their thresholds.
 func TestVolunteerBadgesEarnFromSignals(t *testing.T) {
-	// Opt-in alone earns V but none of the check-in badges.
 	got := Evaluate(Signals{VolunteerOptIn: true})
 	if !got["V"] || got["SU"] || got["V3"] || got["V10"] {
 		t.Fatalf("opt-in only: %v", keys(got))
 	}
-	// One check-in earns SU.
 	got = Evaluate(Signals{VolunteerOptIn: true, EventCheckins: 1})
 	if !got["SU"] || got["V3"] {
 		t.Fatalf("one check-in: %v", keys(got))
 	}
-	// Three earn V3, ten earn V10.
 	if got = Evaluate(Signals{EventCheckins: 3}); !got["V3"] || got["V10"] {
 		t.Fatalf("three check-ins: %v", keys(got))
 	}

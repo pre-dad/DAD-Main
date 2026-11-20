@@ -27,7 +27,7 @@ const initiativePermission = "initiative.manage"
 
 // Up to 6 headline metrics per initiative, of which the app shows the first 4
 // (PRD §8).
-const maxHeadlineMetrics = 6
+const MetricSlots = 6
 
 // InitiativeInput is a staff create/update of an initiative's editable fields.
 type InitiativeInput struct {
@@ -255,7 +255,7 @@ func (s InitiativeService) SetMetric(
 ) error {
 	_, err := staffWrite(ctx, s.Staff, token, initiativePermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
-			if in.Position < 0 || in.Position >= maxHeadlineMetrics {
+			if in.Position < 0 || in.Position >= MetricSlots {
 				return struct{}{}, ErrStaffInput
 			}
 			if identity.TrimSpace(in.Label) == "" || utf8.RuneCountInString(in.Label) > 150 ||

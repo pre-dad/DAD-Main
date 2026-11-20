@@ -41,6 +41,47 @@ describe("GitHub OIDC authorization", () => {
 		},
 	);
 
+	it.each(["refs/pull/7/merge", "refs/pull/123456/merge"])(
+		"accepts pull request merge refs: %s",
+		(ref) => {
+			const workflow_ref = `pre-dad/DAD-Main/.github/workflows/atm.yml@${ref}`;
+			expect(
+				authorize({ ...claims, event_name: "pull_request", workflow_ref }, env)
+					.role,
+			).toBe("read");
+		},
+	);
+
+	it.each([
+		"refs/pull/merge",
+		"refs/pull/x/merge",
+		"refs/pull/7/head",
+		"refs/pull/7/merge/extra",
+		"refs/tags/v1",
+	])("rejects unsupported workflow refs: %s", (ref) => {
+		const workflow_ref = `pre-dad/DAD-Main/.github/workflows/atm.yml@${ref}`;
+		expect(() =>
+			authorize({ ...claims, event_name: "pull_request", workflow_ref }, env),
+		).toThrow();
+	});
+
+	it.each(["refs/heads/main", "refs/pull/7/merge"])(
+		"never grants admin from %s",
+		(ref) => {
+			expect(() =>
+				authorize(
+					{
+						...claims,
+						environment: "atm-ledger-admin",
+						event_name: "workflow_dispatch",
+						workflow_ref: `pre-dad/DAD-Main/.github/workflows/atm.yml@${ref}`,
+					},
+					env,
+				),
+			).toThrow();
+		},
+	);
+
 	it("separates readers, publishers and owner-only triage", () => {
 		expect(authorize(claims, env).role).toBe("read");
 		expect(

@@ -11,7 +11,9 @@ import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
 export default function Giving() {
-  const [offset, setOffset] = useState(0);
+  // Offsets of the pages opened so far, so "Newer gifts" returns to exactly where the donor came from.
+  const [trail, setTrail] = useState([0]);
+  const offset = trail[trail.length - 1];
   const [signedOut, setSignedOut] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -28,9 +30,9 @@ export default function Giving() {
       heading.current?.focus();
     }
   }, [data]);
-  const page = (next: number) => {
+  const page = (next: number[]) => {
     paged.current = { previous: data };
-    setOffset(next);
+    setTrail(next);
   };
   const messages = resourceMessages(resource, {
     loading: "Loading your giving…",
@@ -85,20 +87,20 @@ export default function Giving() {
                           </>
                         ) : null}
                       </span>
-                      <Link href={`/account/receipts?gift=${gift.id}`}>Gift record</Link>
+                      <Link href={`/account/receipts?gift=${encodeURIComponent(gift.id)}`}>Gift record</Link>
                     </li>
                   ))}
                 </ul>
               )}
-              {(offset > 0 || data.next_offset !== null) && (
+              {(trail.length > 1 || data.next_offset !== null) && (
                 <div className="actions">
-                  {offset > 0 && (
-                    <button type="button" className="secondary" onClick={() => page(Math.max(0, offset - 50))}>
+                  {trail.length > 1 && (
+                    <button type="button" className="secondary" onClick={() => page(trail.slice(0, -1))}>
                       Newer gifts
                     </button>
                   )}
                   {data.next_offset !== null && (
-                    <button type="button" className="secondary" onClick={() => page(data.next_offset ?? 0)}>
+                    <button type="button" className="secondary" onClick={() => page([...trail, data.next_offset ?? 0])}>
                       Older gifts
                     </button>
                   )}

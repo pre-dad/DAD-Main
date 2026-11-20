@@ -580,7 +580,7 @@ func TestRejectedConfigurationParksTheNotification(t *testing.T) {
 	w := PushWorker{DB: as(t, dbroles.PushWorker), Providers: map[string]push.Provider{push.IOS: apns}}
 	f.deliver(t, w, f.now)
 	attempts, completed, _, lastError, _ := f.state(t)
-	if attempts != maxDeliveryAttempts || completed || lastError != "ProviderRejected" {
+	if attempts != MaxDeliveryAttempts || completed || lastError != "ProviderRejected" {
 		t.Fatalf("attempts=%d completed=%v error=%q, want parked", attempts, completed, lastError)
 	}
 	if f.deliver(t, w, f.now.Add(time.Hour)) || len(apns.sent) != 1 {

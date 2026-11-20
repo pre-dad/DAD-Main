@@ -162,3 +162,15 @@ func TestPartnerPushDeliveryRetrySuppressionAndTokenRotation(t *testing.T) {
 		t.Fatal("unregistered installation was reached")
 	}
 }
+
+func TestPartnerPushContentCoversEveryKindAndRejectsOthers(t *testing.T) {
+	for _, kind := range []string{"APPROVED", "METRICS_VERIFIED", "INITIATIVE_COMPLETE"} {
+		n, ok := partnerPushContent(queries.DonorPartnerPushNotification{Kind: kind})
+		if !ok || n.Title == "" || n.Body == "" || n.Category != "PARTNER_"+kind || n.Path != "/partner" {
+			t.Errorf("%s: %+v ok=%v", kind, n, ok)
+		}
+	}
+	if _, ok := partnerPushContent(queries.DonorPartnerPushNotification{Kind: "UNKNOWN"}); ok {
+		t.Error("an unknown kind rendered")
+	}
+}

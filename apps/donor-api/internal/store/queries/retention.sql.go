@@ -73,6 +73,46 @@ func (q *Queries) PurgeLoginLinks(ctx context.Context, arg PurgeLoginLinksParams
 	return result.RowsAffected(), nil
 }
 
+const purgePartnerLoginEmails = `-- name: PurgePartnerLoginEmails :execrows
+DELETE FROM donor_partner_login_emails WHERE id=ANY(ARRAY(
+ SELECT id FROM donor_partner_login_emails WHERE completed_at<$1::timestamptz
+ ORDER BY completed_at,id LIMIT $2
+))
+`
+
+type PurgePartnerLoginEmailsParams struct {
+	CompletedBefore pgtype.Timestamptz `json:"completed_before"`
+	Batch           int32              `json:"batch"`
+}
+
+func (q *Queries) PurgePartnerLoginEmails(ctx context.Context, arg PurgePartnerLoginEmailsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, purgePartnerLoginEmails, arg.CompletedBefore, arg.Batch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgePartnerSessions = `-- name: PurgePartnerSessions :execrows
+DELETE FROM donor_partner_sessions WHERE id=ANY(ARRAY(
+ SELECT id FROM donor_partner_sessions WHERE expires_at<$1::timestamptz
+ ORDER BY expires_at,id LIMIT $2
+))
+`
+
+type PurgePartnerSessionsParams struct {
+	ExpiredBefore pgtype.Timestamptz `json:"expired_before"`
+	Batch         int32              `json:"batch"`
+}
+
+func (q *Queries) PurgePartnerSessions(ctx context.Context, arg PurgePartnerSessionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, purgePartnerSessions, arg.ExpiredBefore, arg.Batch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const purgePhoneCodes = `-- name: PurgePhoneCodes :execrows
 DELETE FROM donor_phone_codes WHERE phone=ANY(ARRAY(
  SELECT phone FROM donor_phone_codes WHERE expires_at<$1::timestamptz

@@ -320,14 +320,14 @@ func (s PartnerApplicationService) LinkInitiative(
 	ctx context.Context,
 	token string,
 	partnerID, initiativeID pgtype.UUID,
-	commitment ...int64,
+	commitment *int64,
 ) error {
 	var amount pgtype.Int8
-	if len(commitment) > 1 || (len(commitment) == 1 && commitment[0] < 0) {
-		return ErrStaffInput
-	}
-	if len(commitment) == 1 {
-		amount = pgtype.Int8{Int64: commitment[0], Valid: true}
+	if commitment != nil {
+		if *commitment < 0 {
+			return ErrStaffInput
+		}
+		amount = pgtype.Int8{Int64: *commitment, Valid: true}
 	}
 	_, err := staffWrite(ctx, s.Staff, token, partnerPermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {

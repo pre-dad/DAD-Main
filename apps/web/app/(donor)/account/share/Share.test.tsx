@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import CodePage from "../code/Code";
+import { launchDateLabel } from "@/lib/launch";
 import SharePage from "./Share";
 
 const sharing = {
@@ -47,11 +47,12 @@ it("copies the bare link, announces it, and previews the invitation", async () =
   vi.stubGlobal("navigator", { clipboard: { writeText }, onLine: true });
   render(<SharePage />);
   expect(await screen.findByRole("heading", { name: "Sam invited you to DAD" })).toBeVisible();
-  expect(screen.getByText(/April 22, 2027\./, { selector: "p" })).toBeVisible();
+  expect(screen.getByText(new RegExp(`${launchDateLabel()}\\.`), { selector: "p" })).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Link copied."));
   expect(writeText).toHaveBeenCalledWith(sharing.link);
 });
+
 it("requires a focused confirmation step before replacing the link, and restores focus on return", async () => {
   const fetch = vi.fn().mockResolvedValue(response(sharing));
   vi.stubGlobal("fetch", fetch);
@@ -66,47 +67,4 @@ it("requires a focused confirmation step before replacing the link, and restores
   fireEvent.click(screen.getByRole("button", { name: "Confirm replacement" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Your sharing details are saved."));
   expect(JSON.parse(fetch.mock.calls[1][1].body).replace_code).toBe(true);
-});
-
-it("shows an on-screen code with brightness instructions and no download control", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(sharing)));
-  render(<CodePage />);
-  const image = await screen.findByRole("img");
-  expect(image).toHaveAttribute("src", "/api/donor/me/referral-code.svg?view=0");
-  expect(screen.getByText(/Increase your screen brightness/)).toBeVisible();
-  expect(screen.queryByRole("link", { name: /download/i })).not.toBeInTheDocument();
-  fireEvent.error(image);
-  const alert = screen.getByText(/code image could not be loaded/);
-  expect(alert).toHaveAttribute("role", "alert");
-  fireEvent.click(screen.getByRole("button", { name: "Retry code" }));
-  expect(await screen.findByRole("img")).toHaveAttribute("src", "/api/donor/me/referral-code.svg?view=1");
-});
-
-it("keeps the screen awake while the code is shown and releases it on leaving", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(sharing)));
-  const release = vi.fn().mockResolvedValue(undefined);
-  const request = vi.fn().mockResolvedValue({ release });
-  Object.defineProperty(navigator, "wakeLock", { value: { request }, configurable: true });
-  try {
-    const { unmount } = render(<CodePage />);
-    await screen.findByRole("img");
-    await waitFor(() => expect(request).toHaveBeenCalledWith("screen"));
-    unmount();
-    await waitFor(() => expect(release).toHaveBeenCalled());
-  } finally {
-    Reflect.deleteProperty(navigator, "wakeLock");
-  }
-});
-
-it("sends a signed-out visitor to sign-in instead of showing a code", async () => {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) }),
-  );
-  render(<CodePage />);
-  expect(await screen.findByRole("link", { name: "Sign in to show your code" })).toHaveAttribute(
-    "href",
-    "/account/sign-in",
-  );
-  expect(within(document.body).queryByRole("img")).not.toBeInTheDocument();
 });

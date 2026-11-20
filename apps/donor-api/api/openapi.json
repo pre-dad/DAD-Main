@@ -3880,15 +3880,14 @@
       }
      },
      {
-      "name": "referrals_offset",
+      "name": "referrals_cursor",
       "in": "query",
       "required": false,
       "schema": {
-       "type": "integer",
-       "format": "int64",
-       "minimum": 0,
-       "default": 0
-      }
+       "type": "string",
+       "maxLength": 600
+      },
+      "description": "The previous page's next_referrals_cursor; omit for the first page."
      }
     ],
     "responses": {
@@ -13906,14 +13905,12 @@
       "description": "Pass as gifts_offset for the next page of gifts.",
       "minimum": 0
      },
-     "next_referrals_offset": {
+     "next_referrals_cursor": {
       "type": [
-       "integer",
+       "string",
        "null"
       ],
-      "format": "int64",
-      "description": "Pass as referrals_offset for the next page of referred donors.",
-      "minimum": 0
+      "description": "Pass as referrals_cursor for the next page of referred donors."
      },
      "public_name": {
       "type": [
@@ -13966,7 +13963,7 @@
      "gifts",
      "id",
      "next_gifts_offset",
-     "next_referrals_offset",
+     "next_referrals_cursor",
      "public_name",
      "referred",
      "referrer",

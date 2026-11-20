@@ -13,6 +13,7 @@ import (
 	"errors"
 	"io"
 	"math/big"
+	"mime"
 	"mime/quotedprintable"
 	"net"
 	netmail "net/mail"
@@ -45,6 +46,9 @@ func TestMessageMIMEAndInjectionBoundaries(t *testing.T) {
 	}
 	if parsed.Header.Get("Message-ID") != message.ID {
 		t.Fatal("message identity changed")
+	}
+	if subject, err := new(mime.WordDecoder).DecodeHeader(parsed.Header.Get("Subject")); err != nil || subject != message.Subject {
+		t.Fatalf("subject = %q, %v; want %q", subject, err, message.Subject)
 	}
 	date, err := time.Parse(time.RFC1123Z, parsed.Header.Get("Date"))
 	if err != nil || time.Since(date) > time.Minute {
@@ -184,7 +188,9 @@ type fixtureSession struct {
 	err      error
 }
 
-func serveSTARTTLS(listener net.Listener, config *tls.Config, rcptReply string) fixtureSession {
+// serveSTARTTLS answers one delivery; an empty quitReply drops the connection
+// on QUIT without answering.
+func serveSTARTTLS(listener net.Listener, config *tls.Config, rcptReply, quitReply string) fixtureSession {
 	var session fixtureSession
 	conn, err := listener.Accept()
 	if err != nil {
@@ -239,7 +245,7 @@ func serveSTARTTLS(listener net.Listener, config *tls.Config, rcptReply string) 
 			}
 			reply("250 queued\r\n")
 		case verb == "QUIT":
-			reply("221 bye\r\n")
+			reply(quitReply)
 			return session
 		default:
 			reply("502 unexpected\r\n")
@@ -257,7 +263,7 @@ func TestSMTPDeliversOverVerifiedSTARTTLS(t *testing.T) {
 	host, portText, _ := net.SplitHostPort(listener.Addr().String())
 	port, _ := strconv.Atoi(portText)
 	sessions := make(chan fixtureSession, 1)
-	go func() { sessions <- serveSTARTTLS(listener, config, "250 ok\r\n") }()
+	go func() { sessions <- serveSTARTTLS(listener, config, "250 ok\r\n", "221 bye\r\n") }()
 	transport := SMTPTransport{
 		Settings: Settings{
 			Host:     host,
@@ -333,7 +339,7 @@ func startSTARTTLS(t *testing.T, rcptReply string) (SMTPTransport, *x509.CertPoo
 	host, portText, _ := net.SplitHostPort(listener.Addr().String())
 	port, _ := strconv.Atoi(portText)
 	sessions := make(chan fixtureSession, 1)
-	go func() { sessions <- serveSTARTTLS(listener, config, rcptReply) }()
+	go func() { sessions <- serveSTARTTLS(listener, config, rcptReply, "221 bye\r\n") }()
 	return SMTPTransport{
 		Settings: Settings{Host: host, Port: port, Username: "private-user", Password: "private-password", Sender: "sender@example.org"},
 	}, roots, sessions
@@ -374,5 +380,28 @@ func TestSMTPRecipientRefusalIsASafeDeliveryFailure(t *testing.T) {
 	}
 	if session := <-sessions; slices.Contains(session.commands, "DATA") || len(session.data) != 0 {
 		t.Fatalf("a message was sent to a refused recipient: %q", session.commands)
+	}
+}
+
+func TestSMTPAcceptedMessageIsDeliveredEvenWhenQuitFails(t *testing.T) {
+	config, roots := fixtureTLS(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	host, portText, _ := net.SplitHostPort(listener.Addr().String())
+	port, _ := strconv.Atoi(portText)
+	sessions := make(chan fixtureSession, 1)
+	go func() { sessions <- serveSTARTTLS(listener, config, "250 ok\r\n", "") }()
+	transport := SMTPTransport{
+		Settings: Settings{Host: host, Port: port, Username: "private-user", Password: "private-password", Sender: "sender@example.org"},
+		RootCAs:  roots,
+	}
+	if err = transport.Send(context.Background(), deliverable); err != nil {
+		t.Fatalf("accepted message reported as %v", err)
+	}
+	if session := <-sessions; !slices.Contains(session.commands, "QUIT") || len(session.data) == 0 {
+		t.Fatalf("session did not reach QUIT after DATA: %q", session.commands)
 	}
 }

@@ -68,6 +68,10 @@ func TestEmailChangeRequiresBothAddressesAndRevokesAccess(t *testing.T) {
 	if len(transport.messages) != 1 || transport.messages[0].To != old {
 		t.Fatal("first proof was not sent to current address")
 	}
+	if body := transport.messages[0].Body; !strings.Contains(body, "signed in to your DAD account and requested changing") ||
+		!strings.Contains(body, "expires 15 minutes after it was requested") {
+		t.Fatalf("current-address message: %q", body)
+	}
 	first := tokenFromMail(t, transport.messages[0])
 	if stage, err := s.Confirm(ctx, first); err != nil || stage != "NEW" {
 		t.Fatal(stage, err)
@@ -84,6 +88,9 @@ func TestEmailChangeRequiresBothAddressesAndRevokesAccess(t *testing.T) {
 	}
 	if len(transport.messages) != 2 || transport.messages[1].To != newEmail {
 		t.Fatal("second proof sent to wrong address")
+	}
+	if body := transport.messages[1].Body; !strings.Contains(body, "expires 15 minutes after you confirmed your current address") {
+		t.Fatalf("new-address message: %q", body)
 	}
 	second := tokenFromMail(t, transport.messages[1])
 	var wg sync.WaitGroup

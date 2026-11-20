@@ -2,7 +2,6 @@ package mail
 
 import (
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -21,16 +20,17 @@ func FromEnvironment(getenv func(string) string) (*Settings, error) {
 		CAPath:   getenv("DONOR_SMTP_CA"),
 	}
 	keys := getenv("DONOR_EMAIL_ENCRYPTION_KEY")
-	if s.Host == "" && s.Username == "" && s.Password == "" && s.Sender == "" && keys == "" {
+	port := getenv("DONOR_SMTP_PORT")
+	if s.Host == "" && s.Username == "" && s.Password == "" && s.Sender == "" && s.CAPath == "" && port == "" && keys == "" {
 		return nil, nil
 	}
 	var invalid []string
-	if port := getenv("DONOR_SMTP_PORT"); port != "" {
-		value, err := strconv.Atoi(port)
-		if err != nil {
+	if port != "" {
+		if value, err := strconv.Atoi(port); err != nil {
 			invalid = append(invalid, "DONOR_SMTP_PORT")
+		} else {
+			s.Port = value
 		}
-		s.Port = value
 	}
 	for _, check := range []struct {
 		name string
@@ -42,7 +42,7 @@ func FromEnvironment(getenv func(string) string) (*Settings, error) {
 		{"DONOR_EMAIL_FROM", validAddress(s.Sender)},
 		{"DONOR_SMTP_USERNAME and DONOR_SMTP_PASSWORD", (s.Username == "") == (s.Password == "")},
 	} {
-		if !check.ok && !slices.Contains(invalid, check.name) {
+		if !check.ok {
 			invalid = append(invalid, check.name)
 		}
 	}

@@ -106,6 +106,7 @@ export function Passkeys({ onSignedOut }: { onSignedOut: () => void }) {
     );
   };
   const remove = (passkey: Passkey) => {
+    if (!window.confirm(`Remove ${label(passkey)}? It will no longer be able to sign in to your account.`)) return;
     const position = data?.passkeys.indexOf(passkey) ?? 0;
     run(
       async () => {

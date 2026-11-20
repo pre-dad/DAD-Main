@@ -23,8 +23,11 @@ const (
 	readTimeout     = 5 * time.Second
 	staffTimeout    = 15 * time.Second
 	providerTimeout = 25 * time.Second
-	maxJSONBody     = 256 << 10
-	maxAmountMinor  = 99_999_999
+	// publicReadTimeout bounds a cacheable public read; probeTimeout bounds the readiness check.
+	publicReadTimeout = 3 * time.Second
+	probeTimeout      = 3 * time.Second
+	maxJSONBody       = 256 << 10
+	maxAmountMinor    = 99_999_999
 )
 
 const (

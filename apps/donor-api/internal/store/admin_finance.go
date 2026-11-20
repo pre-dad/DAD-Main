@@ -261,7 +261,7 @@ func (s StaffFinanceService) submitRefund(ctx context.Context, token string, r S
 					if err != nil {
 						return StaffRefund{}, err
 					}
-					notSubmitted := StaffRefund{RequestID: command.ID, Status: "NOT_SUBMITTED", Mode: "test"}
+					notSubmitted := StaffRefund{RequestID: command.ID, Status: "NOT_SUBMITTED", Mode: processorMode}
 					if command.Status == "ABANDONED" {
 						return notSubmitted, nil
 					}
@@ -313,7 +313,7 @@ func (s StaffFinanceService) submitRefund(ctx context.Context, token string, r S
 						Status:      refund.Status,
 						AmountMinor: refund.AmountMinor,
 						Currency:    "USD",
-						Mode:        "test",
+						Mode:        processorMode,
 					}, nil
 				},
 			)
@@ -462,6 +462,8 @@ func (s StaffFinanceService) auditFailure(
 	switch {
 	case errors.Is(cause, payments.ErrProcessorUnavailable), errors.Is(cause, payments.ErrUnconfigured):
 		outcome = "processor_unavailable"
+	case errors.Is(cause, payments.ErrProcessorRejected), errors.Is(cause, payments.ErrCheckoutRejected):
+		outcome = "processor_rejected"
 	case errors.Is(cause, payments.ErrFacts):
 		outcome = "invalid_processor_facts"
 	case errors.Is(cause, ErrStaffConflict), errors.Is(cause, ErrSubscriptionConflict):

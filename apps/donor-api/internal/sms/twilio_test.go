@@ -83,3 +83,13 @@ func TestTwilioRefusalIsUnavailableWithoutSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestTwilioTransportFailureKeepsCause(t *testing.T) {
+	sender, _, _ := twilio(t, "+14155550100", http.StatusOK)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := sender.Send(ctx, "+14155550123", "Your code is 123456.")
+	if !errors.Is(err, ErrUnavailable) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v; want ErrUnavailable wrapping context.Canceled", err)
+	}
+}

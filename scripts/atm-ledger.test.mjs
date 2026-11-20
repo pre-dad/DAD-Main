@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "node:test";
-import { migrationHistory, request } from "./atm-ledger.mjs";
+import { migrationHistory, request, token } from "./atm-ledger.mjs";
 
 const original = process.env.ATM_LEDGER_URL;
 afterEach(() => {
@@ -74,6 +74,67 @@ test("client retries transient errors with the identical publication and refuses
   assert.equal(calls, 1);
 });
 
+test("OIDC credential request refuses a non-HTTPS issuer endpoint", async () => {
+  const saved = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+  process.env.ACTIONS_ID_TOKEN_REQUEST_URL = "http://issuer.example.org/token";
+  try {
+    await assert.rejects(token(), /HTTPS OIDC issuer endpoint required/);
+  } finally {
+    if (saved === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    else process.env.ACTIONS_ID_TOKEN_REQUEST_URL = saved;
+  }
+});
+
+const sequence = (...responses) => {
+  let calls = 0;
+  return {
+    token: async () => "fixture",
+    delay: 0,
+    fetch: async () => responses[calls++](),
+    calls: () => calls,
+  };
+};
+
+test("client retries a gateway error with a non-JSON body and keeps the status", async () => {
+  process.env.ATM_LEDGER_URL = "https://ledger.example.org";
+  const html = () => new Response("<html>Bad Gateway</html>", { status: 502 });
+  const retried = sequence(html, () => Response.json({ version: 5 }));
+  assert.deepEqual(await request("/v1/ledger", "GET", undefined, retried), { version: 5 });
+  assert.equal(retried.calls(), 2);
+  const exhausted = sequence(html, html, html);
+  await assert.rejects(request("/v1/ledger", "GET", undefined, exhausted), /502/);
+  assert.equal(exhausted.calls(), 3);
+});
+
+test("client reports the status when the error body is JSON null", async () => {
+  process.env.ATM_LEDGER_URL = "https://ledger.example.org";
+  const client = sequence(() => new Response("null", { status: 400 }));
+  await assert.rejects(request("/v1/ledger", "GET", undefined, client), /400.*Unavailable/);
+});
+
+test("client refuses an oversize response", async () => {
+  process.env.ATM_LEDGER_URL = "https://ledger.example.org";
+  const client = sequence(() => new Response("{}", { status: 200, headers: { "content-length": "20000000" } }));
+  await assert.rejects(request("/v1/ledger", "GET", undefined, client), /capacity/);
+});
+
+test("migration refuses a revision that did not touch the ledger", () => {
+  const repo = mkdtempSync(path.join(os.tmpdir(), "atm-ledger-migration-"));
+  const git = (...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  try {
+    git("init", "--quiet");
+    git("config", "user.name", "Test");
+    git("config", "user.email", "test@example.org");
+    git("config", "commit.gpgsign", "false");
+    writeFileSync(path.join(repo, "other.txt"), "x");
+    git("add", ".");
+    git("commit", "--quiet", "-m", "No ledger");
+    assert.throws(() => migrationHistory(repo, git("rev-parse", "HEAD")), /last ledger revision/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("migration exports every committed ledger revision without copying application source", () => {
   const repo = mkdtempSync(path.join(os.tmpdir(), "atm-ledger-migration-"));
   const git = (...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
@@ -81,6 +142,7 @@ test("migration exports every committed ledger revision without copying applicat
     git("init", "--quiet");
     git("config", "user.name", "Test");
     git("config", "user.email", "test@example.org");
+    git("config", "commit.gpgsign", "false");
     writeFileSync(path.join(repo, "ledger.json"), JSON.stringify({ sequence: 0 }));
     writeFileSync(path.join(repo, "private-source.txt"), "must not be exported");
     git("add", ".");

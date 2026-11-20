@@ -150,10 +150,10 @@ func TestPartnerMessageCountsAttemptAtClaimAndParksPoison(t *testing.T) {
 	q := queries.New(w.DB)
 	// A worker that dies after every claim never records a failure: the claim
 	// alone must count the attempt and park the delivery after the cap.
-	for i := range maxDeliveryAttempts {
+	for i := range MaxDeliveryAttempts {
 		at := now.Add(time.Duration(i) * (deliveryLease + time.Minute))
 		if _, err := q.NextPartnerDelivery(context.Background(), queries.NextPartnerDeliveryParams{
-			AsOf: timestamp(at), LeaseUntil: timestamp(at.Add(deliveryLease)),
+			AsOf: timestamp(at), LeaseUntil: timestamp(at.Add(deliveryLease)), MaxAttempts: MaxDeliveryAttempts,
 		}); err != nil {
 			t.Fatalf("claim %d: %v", i+1, err)
 		}
@@ -163,8 +163,8 @@ func TestPartnerMessageCountsAttemptAtClaimAndParksPoison(t *testing.T) {
 	if steps := drainPartnerMessages(t, w, now.Add(24*time.Hour)); steps != 0 || len(transport.messages) != 0 {
 		t.Fatalf("a parked delivery was sent: steps=%d sent=%d", steps, len(transport.messages))
 	}
-	if attempts, _, completed := partnerDeliveryState(t, key); attempts != maxDeliveryAttempts || completed {
-		t.Fatalf("attempts=%d completed=%v, want parked at %d", attempts, completed, maxDeliveryAttempts)
+	if attempts, _, completed := partnerDeliveryState(t, key); attempts != MaxDeliveryAttempts || completed {
+		t.Fatalf("attempts=%d completed=%v, want parked at %d", attempts, completed, MaxDeliveryAttempts)
 	}
 }
 
@@ -176,7 +176,7 @@ func TestPartnerMessageRetriesAfterLeaseExpiry(t *testing.T) {
 		t.Fatalf("fan-out: worked=%v err=%v", worked, err)
 	}
 	if _, err := queries.New(w.DB).NextPartnerDelivery(context.Background(), queries.NextPartnerDeliveryParams{
-		AsOf: timestamp(now), LeaseUntil: timestamp(now.Add(deliveryLease)),
+		AsOf: timestamp(now), LeaseUntil: timestamp(now.Add(deliveryLease)), MaxAttempts: MaxDeliveryAttempts,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +344,7 @@ func TestQueueHealthCountsPartnerDeliveries(t *testing.T) {
 			testID(t), message, user, i, now.Add(delivery.due), delivery.attempts, delivery.done)
 	}
 	actAs(t, tx, dbroles.Monitor)
-	rows, err := queries.New(tx).QueueHealth(ctx, timestamp(now))
+	rows, err := queries.New(tx).QueueHealth(ctx, queries.QueueHealthParams{AsOf: timestamp(now), MaxAttempts: MaxDeliveryAttempts})
 	if err != nil {
 		t.Fatal(err)
 	}

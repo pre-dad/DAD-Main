@@ -141,3 +141,21 @@ func TestTimezoneStraddledRegions(t *testing.T) {
 		}
 	}
 }
+
+func TestEveryResolvableZoneIsAValidOverride(t *testing.T) {
+	seen := map[string]bool{}
+	for _, name := range zones.Prefix {
+		seen[name] = true
+	}
+	for _, name := range zones.Override {
+		seen[name] = true
+	}
+	for name := range seen {
+		if !ValidTimezoneOverride(name) {
+			t.Errorf("table zone %q is not an accepted profile override", name)
+		}
+	}
+	if ValidTimezoneOverride("UTC") {
+		t.Error("UTC accepted as a profile time zone")
+	}
+}

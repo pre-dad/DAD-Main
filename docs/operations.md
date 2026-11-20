@@ -420,8 +420,10 @@ Monitor the oldest unprocessed `donor_stripe_events`, attempt counts, and worker
 A failed event waits before its next attempt, doubling from one minute up to an hour (an event whose worker crashed instead waits out the six-minute lease),
 so a provider outage or an event that arrives before its gift is retried later rather
 than immediately. Events park after ten failed attempts. Investigate the error class
-(`PaymentUnavailable`, `MissingRecord`, `InvalidFacts`, or `ProcessingError`) and current
-Stripe state before explicitly retrying:
+(`PaymentUnavailable`, `PaymentRejected`, `MissingRecord`, `InvalidFacts`, or `ProcessingError`) and current
+Stripe state before explicitly retrying. `PaymentUnavailable` is an outage or throttle worth retrying;
+`PaymentRejected` is a Stripe 4xx or an unusable checkout response, which another attempt will not change,
+so fix the cause first:
 
 ```sh
 cd apps/donor-api
@@ -563,9 +565,9 @@ cancellation, start time, and notification choices; delivery rechecks the recipi
 Apply migration `0054_projection_schedules_and_event_fanout.sql` before these binaries.
 
 History: migration `0017_referral_corrections.sql` had to be applied before binaries
-using projection rules version 6 (the current version is 12, `projectionRules` in
-`internal/store/financial.go`). Older projections then converge on the earliest verified successful payment
-through the normal refresh worker. Corrections, transferred referral totals, and new
+using projection rules version 6 (see `projectionRules` in `internal/store/financial.go`
+for the current version). Older projections then converge on the earliest verified
+successful payment through the normal refresh worker. Corrections, transferred referral totals, and new
 notification intents commit together. Monitor projection errors during convergence and
 use the staff `referral-corrections` export to inspect changed attribution. The migration
 does not rewrite gift facts or reconstruct corrections from before this release.
@@ -1254,7 +1256,6 @@ Branch protection should require the CI and mobile checks and ATM acceptance.
 A green application test suite alone does not authorize deployment. All
 workflows run on GitHub-hosted runners.
 
-
 ## One email, one role
 
 New identities are refused for an address held by another role (see
@@ -1323,7 +1324,7 @@ Payment history remains authoritative; permanent earned badges and historical be
 are preserved. This operation repairs derived state after facts or code have been
 corrected. It does not provide an arbitrary manual continuity override.
 
-### Web signup and identity providers
+## Web signup and identity providers
 
 Donor signup collects a private name, email, ZIP, and city before emailing a
 single-use verification link. Existing donor profiles are not overwritten by an
@@ -1352,7 +1353,7 @@ expiry before issuing the normal HttpOnly donor session. Provider errors return 
 sign-in failure without logging codes, tokens, or response bodies. These flows need
 real-provider acceptance with the deployment's registered credentials.
 
-### Initiative co-funders and verified spending
+## Initiative co-funders and verified spending
 
 An initiative may have several approved co-funders, each with its own committed
 amount. Partnerships staff set the initiative ID and that partner's commitment in
@@ -1368,7 +1369,7 @@ visible until the verified replacement is published. Verification evidence is ke
 with the published total. Existing published totals are preserved on migration;
 the migration does not manufacture historical verification evidence.
 
-### Recognition controls
+## Recognition controls
 
 Super administrators can reset a donor's current streak with a reason. The reset is
 stored separately from gift facts and survives projection recomputation; giving
@@ -1390,7 +1391,6 @@ uses the checkout's current commit, and `make check-images` does the same. A dir
 Docker or Compose build must supply `BUILD_REVISION` to identify its source revision.
 An unstamped build reports `unknown`; image tags alone do not stamp Go binaries.
 
-
 ## Partner report storage
 
 An unchanged organization snapshot reuses its immutable PDF for the same UTC day,
@@ -1408,6 +1408,12 @@ Review capacity with the owner before increasing these limits; never purge finan
 report history automatically. Quota checks and artifact creation share a serializable
 transaction, with bounded retries for concurrent exports.
 
+Report rendering embeds Unicode font subsets, including CJK and complex-script
+shaping. Each API process renders one report at a time; report text is capped at 128 KiB and queued requests honor
+cancellation. An export exceeding 1,000 spend categories or a 2 MiB PDF returns
+413 `PARTNER_REPORT_TOO_LARGE` without storing a partial artifact. Previously
+exported reports remain immutable and downloadable. Renderer changes use a new
+snapshot version, so older lossy PDFs are not reused for new exports.
 
 ## Employee projection freshness
 
@@ -1424,7 +1430,6 @@ The monthly winner job leaves a month open while any eligible team's figures are
 unverified. A subsequent worker pass can close it after projections recover;
 checks, standings and badge awards share one consistent transaction snapshot.
 
-
 ## Donor time zone corrections
 
 A ZIP suggests the donor's IANA time zone using the bundled region table; border
@@ -1437,13 +1442,6 @@ zones and JSON null are rejected, and account deletion clears the correction.
 
 An effective zone change marks the donor's financial projection due in the same
 transaction so midnight schedules and recognition refresh under the new zone.
-
-Report rendering embeds Unicode font subsets, including CJK and complex-script
-shaping. Each API process renders one report at a time; report text is capped at 128 KiB and queued requests honor
-cancellation. An export exceeding 1,000 spend categories or a 2 MiB PDF returns
-413 `PARTNER_REPORT_TOO_LARGE` without storing a partial artifact. Previously
-exported reports remain immutable and downloadable. Renderer changes use a new
-snapshot version, so older lossy PDFs are not reused for new exports.
 
 ## R1 native contract rollout
 

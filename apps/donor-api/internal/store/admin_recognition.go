@@ -3,20 +3,27 @@ package store
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 	"unicode/utf8"
 
+	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// repairReason trims and validates the reason a staff member gives for a repair.
+func repairReason(reason string) (string, bool) {
+	reason = identity.TrimSpace(reason)
+	n := utf8.RuneCountInString(reason)
+	return reason, n >= 10 && n <= 1000 && plainText(reason, true)
+}
+
 // RecomputeRecognition repairs derived state after a documented system error.
 // The recorded payment history remains the authority for continuity and awards.
 func (s *StaffService) RecomputeRecognition(ctx context.Context, token string, donor pgtype.UUID, reason string) error {
-	reason = strings.TrimSpace(reason)
-	if n := utf8.RuneCountInString(reason); n < 10 || n > 1000 || !plainText(reason, true) {
+	reason, ok := repairReason(reason)
+	if !ok {
 		return ErrStaffInput
 	}
 	_, err := staffDonorWrite(
@@ -44,9 +51,10 @@ func (s *StaffService) RecomputeRecognition(ctx context.Context, token string, d
 	return err
 }
 
+// ResetStreak restarts a donor's streak from now without touching payment history.
 func (s *StaffService) ResetStreak(ctx context.Context, token string, donor pgtype.UUID, reason string) error {
-	reason = strings.TrimSpace(reason)
-	if n := utf8.RuneCountInString(reason); n < 10 || n > 1000 || !plainText(reason, true) {
+	reason, ok := repairReason(reason)
+	if !ok {
 		return ErrStaffInput
 	}
 	_, err := staffDonorWrite(

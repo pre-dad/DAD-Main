@@ -40,6 +40,7 @@ export default function DeliveryHistory({ donor }: { donor: string }) {
           method: "POST",
           headers: { "Idempotency-Key": keys.current[id] },
         });
+        delete keys.current[id];
       } else await api(`/donor/staff/donors/${encodeURIComponent(donor)}/claim-email`, { method: "POST" });
       setMessage("Delivery request recorded. This does not confirm email delivery.");
       reload();

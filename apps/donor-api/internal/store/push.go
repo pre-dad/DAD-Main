@@ -455,7 +455,10 @@ func (w PushWorker) claim(ctx context.Context, now time.Time) (*pushJob, bool, e
 	worked := false
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		row, err := q.NextPushNotification(ctx, timestamp(now))
+		row, err := q.NextPushNotification(
+			ctx,
+			queries.NextPushNotificationParams{AvailableAt: timestamp(now), MaxAttempts: MaxDeliveryAttempts},
+		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -548,7 +551,7 @@ func (w PushWorker) record(ctx context.Context, job *pushJob, outcome pushOutcom
 					ID:          job.ID,
 					LastError:   text("ProviderRejected"),
 					AvailableAt: timestamp(now),
-					Attempts:    maxDeliveryAttempts,
+					Attempts:    MaxDeliveryAttempts,
 				},
 			)
 		case outcome.retry:

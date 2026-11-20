@@ -4,7 +4,7 @@ import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { TeamLeaderboard } from "@/components/donor/TeamLeaderboard";
-import { api, classifyFailure, failureMessage, type ResponseBody } from "@/lib/api";
+import { api, classifyFailure, failureMessage, type RequestBody, type ResponseBody } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
 type Team = ResponseBody<"/donor/me/team", "get">;
@@ -32,9 +32,9 @@ export default function Employer() {
     setError("");
     setStatus("");
     try {
-      const result = await api<{ organization: string }>("/donor/me/employer", {
+      const result = await api<ResponseBody<"/donor/me/employer", "post">>("/donor/me/employer", {
         method: "POST",
-        body: JSON.stringify({ company_code: code }),
+        body: JSON.stringify({ company_code: code.trim() } satisfies RequestBody<"/donor/me/employer", "post">),
       });
       setStatus(`You’re now linked to ${result.organization}.`);
       setCode("");
@@ -53,8 +53,12 @@ export default function Employer() {
     setError("");
     setStatus("");
     try {
-      await api("/donor/me/team", { method: "POST", body: JSON.stringify({ name: team }) });
-      setStatus(`You’ve joined the ${team} team.`);
+      const name = team.trim();
+      await api("/donor/me/team", {
+        method: "POST",
+        body: JSON.stringify({ name } satisfies RequestBody<"/donor/me/team", "post">),
+      });
+      setStatus(`You’ve joined the ${name} team.`);
       setTeam("");
       reload();
     } catch (cause) {

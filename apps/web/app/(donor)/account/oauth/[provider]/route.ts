@@ -14,7 +14,8 @@ async function handle(request: NextRequest, context: Context) {
   const key = provider.toUpperCase();
   const client = process.env[`DONOR_OAUTH_${key}_CLIENT_ID`];
   const secret = process.env[`DONOR_OAUTH_${key}_CLIENT_SECRET`];
-  if (!client || !secret) return new Response("This sign-in method is not configured.", { status: 503 });
+  if (!client || !secret)
+    return NextResponse.redirect(new URL("/account/sign-in?social_error=unavailable", origin), 303);
   const callback = `${origin}/account/oauth/${provider}`;
   const jar = await cookies();
   const cookie = `dad_oauth_${provider}`;

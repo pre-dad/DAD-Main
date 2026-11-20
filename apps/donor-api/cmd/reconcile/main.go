@@ -281,7 +281,6 @@ func reconcileWindowPaced(
 			StripePaymentIntentID: payment,
 			AmountMinor:           g.AmountMinor,
 			Currency:              g.Currency,
-			PaidAt:                g.PaidAt.Time,
 		})
 		if payment == "" || seenCharges[g.StripeObjectID] || seenCharges[payment] {
 			continue
@@ -319,7 +318,6 @@ func reconcileWindowPaced(
 			AmountMinor:    r.AmountMinor,
 			Currency:       r.Currency,
 			Status:         r.Status,
-			ObservedAt:     r.ObservedAt.Time,
 		})
 		if !seenRefunds[r.StripeRefundID] {
 			if err := wait(ctx); err != nil {
@@ -373,7 +371,6 @@ func reconcileWindowPaced(
 					AmountMinor:    row.AmountMinor,
 					Currency:       row.Currency,
 					Status:         row.Status,
-					ObservedAt:     row.ObservedAt.Time,
 				},
 			)
 		}

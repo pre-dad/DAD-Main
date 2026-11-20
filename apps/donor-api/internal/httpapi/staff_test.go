@@ -32,7 +32,7 @@ func (s *passkeyStub) Invite(context.Context, string, string, string, string) (s
 	return "private-invitation", nil
 }
 
-func (s *passkeyStub) ChangeAccess(context.Context, string, pgtype.UUID, string, string) (store.AccessChange, error) {
+func (s *passkeyStub) ChangeAccess(context.Context, string, pgtype.UUID, store.StaffAccessAction, string) (store.AccessChange, error) {
 	return store.AccessChange{Token: "private-recovery"}, nil
 }
 

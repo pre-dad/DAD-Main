@@ -211,5 +211,8 @@ func (s SMTPTransport) deliver(ctx context.Context, wire []byte, from, to string
 	if err = data.Close(); err != nil {
 		return err
 	}
-	return client.Quit()
+	// The server has accepted the message; a failed QUIT must not report a
+	// delivery failure, which would make the worker send it again.
+	_ = client.Quit()
+	return nil
 }

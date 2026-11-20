@@ -236,7 +236,7 @@ func TestPartnerDashboardAndReport(t *testing.T) {
 	if err := dash.Invite(ctx, adminSession, "analyst@delta.test", "Ana", "VIEWER"); err != nil {
 		t.Fatal(err)
 	}
-	viewerSession, err := dash.AcceptInvite(ctx, deliverPartnerLinks(t, time.Now().UTC())["analyst@delta.test"])
+	viewerSession, err := dash.AcceptInvite(ctx, deliverPartnerLinks(t, time.Now().UTC())["analyst@delta.test"], false)
 	if err != nil {
 		t.Fatal(err)
 	}

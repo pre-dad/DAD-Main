@@ -111,3 +111,65 @@ it("explains an unchanged gift separately from one out of range", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Review change" }));
   expect(screen.getByRole("alert")).toHaveTextContent("from $1 to $30");
 });
+
+it("does not offer a refresh beside a validation error, and keeps the typed amount", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(options)));
+  render(<AmountPage />);
+  fireEvent.change(await screen.findByLabelText("Dollars a day"), { target: { value: "2.50" } });
+  fireEvent.click(screen.getByRole("button", { name: "Review change" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("whole number of dollars");
+  expect(screen.queryByRole("button", { name: "Refresh amount details" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Dollars a day")).toHaveValue("2.50");
+});
+
+it("offers a refresh when a save is not confirmed", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(response(options)).mockRejectedValue(new Error("Offline")));
+  render(<AmountPage />);
+  fireEvent.change(await screen.findByLabelText("Dollars a day"), { target: { value: "3" } });
+  fireEvent.click(screen.getByRole("button", { name: "Review change" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm amount change" }));
+  expect(await screen.findByRole("button", { name: "Refresh amount details" })).toBeVisible();
+});
+
+it("says so when the amount cannot be changed", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ state: "unavailable" })));
+  render(<AmountPage />);
+  expect(await screen.findByText(/Your monthly amount can’t be changed right now/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Review change" })).not.toBeInTheDocument();
+});
+
+it("asks the donor to sign in when saving returns 401", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValueOnce(response(options))
+      .mockResolvedValue({ ok: false, status: 401, json: async () => ({}) }),
+  );
+  render(<AmountPage />);
+  fireEvent.change(await screen.findByLabelText("Dollars a day"), { target: { value: "3" } });
+  fireEvent.click(screen.getByRole("button", { name: "Review change" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm amount change" }));
+  expect(await screen.findByRole("link", { name: "Sign in to manage your giving" })).toBeVisible();
+});
+
+it("resumes an unconfirmed change with its original request id and cannot back out", async () => {
+  const pending = {
+    request_id: "pending-command",
+    amount_minor: 9000,
+    previous_minor: 3000,
+    effective_at: options.effective_at,
+    confirmed: false,
+  };
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(response({ ...options, change: pending }))
+    .mockResolvedValueOnce(response({ ...pending, confirmed: true }));
+  vi.stubGlobal("fetch", fetch);
+  render(<AmountPage />);
+  expect(await screen.findByRole("heading", { name: "Confirm your new daily gift" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Back" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Confirm amount change" }));
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  expect(fetch.mock.calls[1][1].headers["Idempotency-Key"]).toBe("pending-command");
+});

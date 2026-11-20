@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dad/donor-api/internal/mail"
+	"dad/donor-api/internal/payments"
 	"dad/donor-api/internal/recognition"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
@@ -59,6 +60,8 @@ type PartnerMessageWorker struct {
 	Transport mail.Transport
 }
 
+const partnerMessageFooter = "This is a sandbox notification. DAD launches in April 2027.\n"
+
 // renderPartnerMessage builds the subject and body for a partner intent. The
 // body links into the partner portal; partner status emails carry no per-user
 // detail, so one rendering serves every recipient of the org.
@@ -73,25 +76,25 @@ func renderPartnerMessage(
 		return "", "", err
 	}
 	org := partner.Organization
-	portal := string(site) + "/partner"
+	portal := site.partnerPortal()
 	switch job.Kind {
 	case "METRICS_VERIFIED":
 		return "New verified figures for " + org,
 			"A DAD-verified figure for one of your initiatives has been published.\n" +
 				"View your updated dashboard: " + portal + "\n" +
-				"This is a sandbox notification. DAD launches in April 2027.\n", nil
+				partnerMessageFooter, nil
 	case "INITIATIVE_COMPLETE":
 		return "An initiative has been marked complete",
 			"One of " + org + "'s initiatives has been marked complete in DAD.\n" +
 				"View it in your partner portal: " + portal + "\n" +
-				"This is a sandbox notification. DAD launches in April 2027.\n", nil
+				partnerMessageFooter, nil
 	case "MONTHLY_REPORT":
 		return "Your monthly DAD impact summary",
 			"Your monthly partner summary for " + org + " is ready.\n" +
 				"Open your dashboard to review committed and deployed funds and your verified figures: " + portal + "\n" +
-				"This is a sandbox notification. DAD launches in April 2027.\n", nil
+				partnerMessageFooter, nil
 	default:
-		return "", "", ErrReceipt
+		return "", "", payments.ErrFacts
 	}
 }
 
@@ -136,7 +139,10 @@ func (w PartnerMessageWorker) fanOut(ctx context.Context, site publicSite, now t
 	var attempts int32
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		row, err := q.NextPartnerMessage(ctx, timestamp(now))
+		row, err := q.NextPartnerMessage(
+			ctx,
+			queries.NextPartnerMessageParams{AvailableAt: timestamp(now), MaxAttempts: MaxDeliveryAttempts},
+		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -193,7 +199,7 @@ func (w PartnerMessageWorker) fanOut(ctx context.Context, site publicSite, now t
 
 // deliver sends the next due delivery. The claim counts the attempt and takes
 // the lease before the send, so a crash mid-send is retried after the lease and
-// parked after maxDeliveryAttempts, and the stable Message-ID lets a lost
+// parked after MaxDeliveryAttempts, and the stable Message-ID lets a lost
 // acknowledgement resend the same email.
 func (w PartnerMessageWorker) deliver(ctx context.Context, now time.Time) (bool, error) {
 	var message *mail.Message
@@ -203,7 +209,7 @@ func (w PartnerMessageWorker) deliver(ctx context.Context, now time.Time) (bool,
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
 		row, err := q.NextPartnerDelivery(ctx, queries.NextPartnerDeliveryParams{
-			AsOf: timestamp(now), LeaseUntil: timestamp(now.Add(deliveryLease)),
+			AsOf: timestamp(now), LeaseUntil: timestamp(now.Add(deliveryLease)), MaxAttempts: MaxDeliveryAttempts,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil

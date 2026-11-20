@@ -1,6 +1,11 @@
 // Package identity preserves the existing donor email identity contract. The
 // IDNA2003 codec intentionally differs from modern UTS46/IDNA2008: changing that
 // policy during a language rewrite could split one donor into two identities.
+//
+// The retired Python backend is the source of truth for testdata/identity.json.
+// Its "cases" were produced by that backend's normalize_email. Its scalar_digest is
+// the SHA-256 of normalize_email("x@<scalar>.org") for every Unicode scalar value in
+// order, each result followed by a newline and rejected inputs recorded as "!".
 package identity
 
 import (
@@ -56,12 +61,14 @@ func ascii(value string) bool {
 	return true
 }
 
-// maxEmailRunes bounds an address before normalization, whose canonical
+// MaxEmailRunes bounds an address before normalization, whose canonical
 // reordering is quadratic in the length of a label.
-const maxEmailRunes = 320
+const MaxEmailRunes = 320
+
+var domainDots = strings.NewReplacer("。", ".", "．", ".", "｡", ".")
 
 func NormalizeEmail(value string) (string, error) {
-	if !utf8.ValidString(value) || utf8.RuneCountInString(value) > maxEmailRunes {
+	if !utf8.ValidString(value) || utf8.RuneCountInString(value) > MaxEmailRunes {
 		return "", ErrEmail
 	}
 	value = TrimSpace(value)
@@ -72,7 +79,7 @@ func NormalizeEmail(value string) (string, error) {
 	if !localPattern.MatchString(local) || strings.HasPrefix(local, ".") || strings.HasSuffix(local, ".") || strings.Contains(local, "..") {
 		return "", ErrEmail
 	}
-	domain = strings.NewReplacer("。", ".", "．", ".", "｡", ".").Replace(domain)
+	domain = domainDots.Replace(domain)
 	labels := strings.Split(domain, ".")
 	for i, label := range labels {
 		encoded, err := labelASCII(label)

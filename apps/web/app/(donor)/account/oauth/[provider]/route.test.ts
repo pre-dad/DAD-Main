@@ -14,7 +14,7 @@ const { values, jar } = vi.hoisted(() => {
 });
 vi.mock("next/headers", () => ({ cookies: async () => jar }));
 
-import { GET } from "./route";
+import { GET, POST } from "./route";
 
 const context = { params: Promise.resolve({ provider: "google" }) };
 beforeEach(() => {
@@ -75,13 +75,27 @@ async function begin() {
 const idToken = (claims: Record<string, unknown>) =>
   `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`;
 
-it("binds a fresh random nonce to every attempt and sends the same one to the provider", async () => {
-  const first = new URL(
+it("gives every attempt a fresh random nonce", async () => {
+  const nonce = async () => {
+    const url = new URL(
+      (await GET(new NextRequest("https://dad.test/account/oauth/google"), context)).headers.get("location") ?? "",
+    );
+    return url.searchParams.get("nonce");
+  };
+  const [first, second] = [await nonce(), await nonce()];
+  expect(first).toMatch(/^[\w-]{43}$/);
+  expect(second).toMatch(/^[\w-]{43}$/);
+  expect(first).not.toBe(second);
+});
+
+it("sends the provider the same nonce it saved in the transaction cookie", async () => {
+  const url = new URL(
     (await GET(new NextRequest("https://dad.test/account/oauth/google"), context)).headers.get("location") ?? "",
   );
-  const saved = await begin();
-  expect(first.searchParams.get("nonce")).toMatch(/^[\w-]{43}$/);
-  expect(first.searchParams.get("nonce")).not.toBe(saved.nonce);
+  const [encoded] = (values.get("dad_oauth_google") ?? "").split(".");
+  const saved = JSON.parse(Buffer.from(encoded, "base64url").toString());
+  expect(url.searchParams.get("nonce")).toBe(saved.nonce);
+  expect(url.searchParams.get("state")).toBe(saved.state);
 });
 
 it.each([
@@ -118,5 +132,84 @@ it("refuses a callback whose state does not match the transaction", async () => 
   vi.stubGlobal("fetch", fetch);
   const r = await GET(new NextRequest("https://dad.test/account/oauth/google?code=code&state=attacker"), context);
   expect(r.headers.get("location")).toBe("https://dad.test/account/sign-in?social_error=1");
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+const apple = { params: Promise.resolve({ provider: "apple" }) };
+const social = "https://dad.test/account/sign-in?social_error=1";
+
+it("starts Apple sign-in with form_post, a cross-site cookie and no PKCE", async () => {
+  vi.stubEnv("DONOR_OAUTH_APPLE_CLIENT_ID", "apple-client");
+  vi.stubEnv("DONOR_OAUTH_APPLE_CLIENT_SECRET", "apple-secret");
+  const r = await GET(new NextRequest("https://dad.test/account/oauth/apple"), apple);
+  const url = new URL(r.headers.get("location") ?? "");
+  expect(url.origin).toBe("https://appleid.apple.com");
+  expect(url.searchParams.get("response_mode")).toBe("form_post");
+  expect(url.searchParams.has("code_challenge")).toBe(false);
+  expect(jar.set.mock.calls[0][2]).toMatchObject({ sameSite: "none", path: "/account/oauth/apple" });
+});
+
+it("completes Apple sign-in from the form_post callback", async () => {
+  vi.stubEnv("DONOR_OAUTH_APPLE_CLIENT_ID", "apple-client");
+  vi.stubEnv("DONOR_OAUTH_APPLE_CLIENT_SECRET", "apple-secret");
+  await GET(new NextRequest("https://dad.test/account/oauth/apple"), apple);
+  const [encoded] = (values.get("dad_oauth_apple") ?? "").split(".");
+  const saved = JSON.parse(Buffer.from(encoded, "base64url").toString());
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ id_token: idToken({ nonce: saved.nonce }) }))
+    .mockResolvedValueOnce(new Response("{}"));
+  vi.stubGlobal("fetch", fetch);
+  const r = await POST(
+    new NextRequest("https://dad.test/account/oauth/apple", {
+      method: "POST",
+      body: new URLSearchParams({ code: "code", state: saved.state }),
+    }),
+    apple,
+  );
+  expect(r.status).toBe(303);
+  expect(r.headers.get("location")).toBe("https://dad.test/account/profile");
+  expect(fetch.mock.calls[0][0]).toBe("https://appleid.apple.com/auth/token");
+  expect(String(fetch.mock.calls[0][1].body)).not.toContain("code_verifier");
+});
+
+it("returns 404 for an unknown provider", async () => {
+  const r = await GET(new NextRequest("https://dad.test/account/oauth/github"), {
+    params: Promise.resolve({ provider: "github" }),
+  });
+  expect(r.status).toBe(404);
+});
+
+it("reports sign-in as unconfigured without an origin", async () => {
+  vi.stubEnv("DONOR_PUBLIC_ORIGIN", "");
+  const r = await GET(new NextRequest("https://dad.test/account/oauth/google"), context);
+  expect(r.status).toBe(503);
+});
+
+it("sends a donor back to sign-in when the provider is not configured", async () => {
+  vi.stubEnv("DONOR_OAUTH_GOOGLE_CLIENT_ID", "");
+  const r = await GET(new NextRequest("https://dad.test/account/oauth/google"), context);
+  expect(r.status).toBe(303);
+  expect(r.headers.get("location")).toBe("https://dad.test/account/sign-in?social_error=unavailable");
+  expect(jar.set).not.toHaveBeenCalled();
+});
+
+it("refuses an oversized callback body", async () => {
+  const r = await POST(
+    new NextRequest("https://dad.test/account/oauth/apple", { method: "POST", headers: { "content-length": "16385" } }),
+    apple,
+  );
+  expect(r.status).toBe(413);
+});
+
+it("returns the donor to sign-in when the provider reports an error", async () => {
+  const saved = await begin();
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  const r = await GET(
+    new NextRequest(`https://dad.test/account/oauth/google?error=access_denied&state=${saved.state}`),
+    context,
+  );
+  expect(r.headers.get("location")).toBe(social);
   expect(fetch).not.toHaveBeenCalled();
 });

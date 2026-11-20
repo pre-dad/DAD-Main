@@ -32,7 +32,7 @@ func TestCofundersKeepIndependentCommitmentsAndVerifiedSpend(t *testing.T) {
 		id     pgtype.UUID
 		amount int64
 	}{{a, 10000}, {b, 20000}} {
-		if err := partners.LinkInitiative(ctx, admin, p.id, id, p.amount); err != nil {
+		if err := partners.LinkInitiative(ctx, admin, p.id, id, &p.amount); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -143,6 +143,24 @@ func TestRecognitionRulesAndArtwork(t *testing.T) {
 	saved, err := s.Rules(ctx, admin)
 	if err != nil || saved.Milestones[0] != 5 {
 		t.Fatalf("rules not saved: %+v %v", saved, err)
+	}
+	var audited int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM donor_staff_audit
+		WHERE action='content.recognition_rules_changed' AND details->>'milestones'='[5,30,100,365]'
+		AND jsonb_array_length((details->'badges')::jsonb)=$1
+		AND EXISTS (SELECT 1 FROM json_array_elements(details->'badges') b
+			WHERE b->>'code'='V' AND length(b->>'artwork_sha256')=64 AND b->>'signal'='volunteer')`, len(badges.Catalog)).
+		Scan(&audited); err != nil || audited != 1 {
+		t.Fatalf("badge rule changes not audited in full: %d %v", audited, err)
+	}
+	untunable := slices.Clone(saved.Badges)
+	for i := range untunable {
+		if untunable[i].Code == "V" {
+			untunable[i].Threshold = 2
+		}
+	}
+	if err := s.SetRules(ctx, admin, RecognitionRules{Badges: untunable, Milestones: saved.Milestones}); !errors.Is(err, ErrStaffInput) {
+		t.Fatalf("threshold accepted on a badge that is earned or not: %v", err)
 	}
 	for _, b := range saved.Badges {
 		ranked := b.Code == "NAT2" || b.Code == "CITY50"

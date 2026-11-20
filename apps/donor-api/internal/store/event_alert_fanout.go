@@ -11,7 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const EventAlertBatch = 256
+// eventAlertBatch is how many donors one queue step considers, so a large
+// audience never holds a single transaction open.
+const eventAlertBatch = 256
 
 type EventAlertService struct{ DB *pgxpool.Pool }
 
@@ -26,13 +28,13 @@ func (s EventAlertService) QueueNext(ctx context.Context, now time.Time) (bool, 
 			return false, err
 		}
 		batch, err := q.QueueEventAlertBatch(ctx, queries.QueueEventAlertBatchParams{
-			EventID: job.EventID, AfterDonor: job.LastDonorID, AsOf: timestamp(now), BatchSize: EventAlertBatch,
+			EventID: job.EventID, AfterDonor: job.LastDonorID, AsOf: timestamp(now), BatchSize: eventAlertBatch,
 		})
 		if err != nil {
 			return false, err
 		}
 		var completed pgtype.Timestamptz
-		if batch.Considered < EventAlertBatch {
+		if batch.Considered < eventAlertBatch {
 			completed = timestamp(now)
 		}
 		err = q.SaveEventAlertProgress(ctx, queries.SaveEventAlertProgressParams{

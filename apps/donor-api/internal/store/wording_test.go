@@ -7,6 +7,7 @@ import (
 
 	"dad/donor-api/internal/dbroles"
 	"dad/donor-api/internal/push"
+	"dad/donor-api/internal/store/queries"
 )
 
 // TestStaffRewordsBadgesAndMilestones covers PRD §8 Content: staff change the
@@ -77,5 +78,73 @@ func TestStaffRewordsBadgesAndMilestones(t *testing.T) {
 		Scan(&audited); err != nil ||
 		audited < 3 {
 		t.Fatalf("%d wording changes audited, err %v; want 3", audited, err)
+	}
+}
+
+func TestTunedThresholdKeepsStaffWordingAndPluralizesDefaults(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	staff := &StaffService{DB: as(t, dbroles.API)}
+	_, admin := staffFixture(t, pool, "SUPER_ADMIN")
+	wording := WordingService{Staff: staff}
+	t.Cleanup(func() {
+		mustExec(t, pool, "DELETE FROM donor_recognition_wording")
+		mustExec(t, pool, "DELETE FROM donor_badge_rules")
+		mustExec(t, pool, "DELETE FROM donor_milestone_rules")
+	})
+
+	rules, err := wording.Rules(ctx, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, b := range rules.Badges {
+		switch b.Code {
+		case "REF3", "V3":
+			rules.Badges[i].Threshold = 1
+		case "REF12":
+			rules.Badges[i].Threshold = 2
+		}
+	}
+	if err = wording.SetRules(ctx, admin, rules); err != nil {
+		t.Fatal(err)
+	}
+	custom := WordingChange{Kind: WordingBadge, Key: "REF12", Title: "Connector", Text: "Introduce a couple of friends"}
+	if err = wording.SetWording(ctx, admin, custom); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := wording.Wording(ctx, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := map[string]WordingEntry{}
+	for _, e := range all.Badges {
+		entries[e.Key] = e
+	}
+	if e := entries["REF3"]; e.Custom || e.Text != "Bring in 1 person who completes a gift" || e.DefaultText != e.Text {
+		t.Fatalf("tuned referral default %+v", e)
+	}
+	if e := entries["V3"]; e.Text != "Check in at 1 event" || e.DefaultText != e.Text {
+		t.Fatalf("tuned check-in default %+v", e)
+	}
+	if e := entries["REF12"]; !e.Custom || e.Text != custom.Text || e.DefaultText != "Bring in 2 people who complete a gift" {
+		t.Fatalf("custom wording on a tuned badge %+v", e)
+	}
+
+	catalog, err := badgeWording(ctx, queries.New(pool))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range catalog {
+		switch b.Code {
+		case "REF12":
+			if b.Title != custom.Title || b.Rule != custom.Text {
+				t.Fatalf("tuning overwrote staff wording: %+v", b)
+			}
+		case "V3":
+			if b.Rule != "Check in at 1 event" {
+				t.Fatalf("tuned rule %q", b.Rule)
+			}
+		}
 	}
 }

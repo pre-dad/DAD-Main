@@ -72,11 +72,11 @@ func TestPartnerPortalSignInJourney(t *testing.T) {
 	}
 
 	links := deliverPartnerLinks(t, time.Now().UTC())
-	adminSession, err := portal.AcceptInvite(ctx, links["lead@gamma.test"])
+	adminSession, err := portal.AcceptInvite(ctx, links["lead@gamma.test"], false)
 	if err != nil {
 		t.Fatalf("approval link did not sign the signer in: %v", err)
 	}
-	if _, err := portal.AcceptInvite(ctx, links["lead@gamma.test"]); !errors.Is(err, ErrPartnerInvite) {
+	if _, err := portal.AcceptInvite(ctx, links["lead@gamma.test"], false); !errors.Is(err, ErrPartnerInvite) {
 		t.Fatalf("approval link worked twice: %v", err)
 	}
 	if shown, err := portal.CompanyCode(ctx, adminSession); err != nil || shown != code {
@@ -89,11 +89,11 @@ func TestPartnerPortalSignInJourney(t *testing.T) {
 	if err := portal.Invite(ctx, adminSession, "viewer@gamma.test", "Val Viewer", "VIEWER"); err != nil {
 		t.Fatalf("admin invite: %v", err)
 	}
-	viewerSession, err := portal.AcceptInvite(ctx, deliverPartnerLinks(t, time.Now().UTC())["viewer@gamma.test"])
+	viewerSession, err := portal.AcceptInvite(ctx, deliverPartnerLinks(t, time.Now().UTC())["viewer@gamma.test"], false)
 	if err != nil {
 		t.Fatalf("invitation link: %v", err)
 	}
-	if _, err := portal.AcceptInvite(ctx, "not-a-real-invite-token-0123456789abcdef"); !errors.Is(err, ErrPartnerInvite) {
+	if _, err := portal.AcceptInvite(ctx, "not-a-real-invite-token-0123456789abcdef", false); !errors.Is(err, ErrPartnerInvite) {
 		t.Fatalf("bad invite accepted: %v", err)
 	}
 
@@ -123,7 +123,7 @@ func TestPartnerPortalSignInJourney(t *testing.T) {
 	if len(signIn) != 1 {
 		t.Fatalf("sign-in requests sent %v, want one throttled link for the admin only", signIn)
 	}
-	if adminSession, err = portal.AcceptInvite(ctx, signIn["lead@gamma.test"]); err != nil {
+	if adminSession, err = portal.AcceptInvite(ctx, signIn["lead@gamma.test"], false); err != nil {
 		t.Fatalf("requested sign-in link: %v", err)
 	}
 	if _, err := portal.Users(ctx, adminSession); err != nil {
@@ -172,7 +172,7 @@ func TestPartnerPortalSignInJourney(t *testing.T) {
 	if err := portal.Invite(ctx, adminSession, "viewer@gamma.test", "Val Viewer", "VIEWER"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := portal.AcceptInvite(ctx, staleProof); !errors.Is(err, ErrPartnerInvite) {
+	if _, err := portal.AcceptInvite(ctx, staleProof, false); !errors.Is(err, ErrPartnerInvite) {
 		t.Fatalf("reinviting a removed user revived their old proof: %v", err)
 	}
 	if err := portal.RemoveUser(ctx, adminSession, mustNewID(t)); !errors.Is(err, pgx.ErrNoRows) {

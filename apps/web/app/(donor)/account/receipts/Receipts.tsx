@@ -11,6 +11,15 @@ import { formatMoney } from "@/lib/money";
 import { FIRST_SUMMARY_YEAR } from "@/lib/taxYear";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
+const refundStatuses: Record<string, string> = {
+  succeeded: "Completed",
+  pending: "Pending",
+  requires_action: "Needs action",
+  failed: "Failed",
+  canceled: "Canceled",
+};
+const refundStatus = (status: string) => refundStatuses[status] ?? status;
+
 /** What is shown comes from the address (?gift= or ?year=), so every record can be linked, bookmarked and reached with Back. */
 export default function Receipts({
   gift,
@@ -92,7 +101,7 @@ export default function Receipts({
                     {document.gift.refunds.map((refund) => (
                       <li key={refund.id}>
                         <span>
-                          Refund · {refund.status} · observed {formatDateTime(refund.observed_at)}
+                          Refund · {refundStatus(refund.status)} · observed {formatDateTime(refund.observed_at)}
                         </span>
                         <span>{formatMoney(refund.amount_minor)}</span>
                       </li>

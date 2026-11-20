@@ -71,7 +71,7 @@ AND (c.category<>'REFERRAL_CONVERTED' OR NOT EXISTS(
 ON CONFLICT(dedup_key) DO NOTHING;
 
 -- name: NextPushNotification :one
-SELECT * FROM donor_push_notifications WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+SELECT * FROM donor_push_notifications WHERE completed_at IS NULL AND attempts<sqlc.arg(max_attempts)::int AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
 
 -- name: PushTargets :many

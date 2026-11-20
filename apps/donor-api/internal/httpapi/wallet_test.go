@@ -4,10 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"dad/donor-api/internal/store"
 	"dad/donor-api/internal/wallet"
@@ -67,8 +71,53 @@ func TestWalletHTTPRequiresSessionOriginAndSharing(t *testing.T) {
 				tc.status,
 			)
 		}
+		if tc.status == 200 && tc.method == "GET" && strings.TrimSpace(response.Body.String()) != `{"apple":false,"google":true}` {
+			t.Errorf("%s: got %s, want the configured providers", tc.path, response.Body)
+		}
 		if tc.status == 200 && tc.method == "POST" && !strings.Contains(response.Body.String(), "https://pay.google.com/gp/v/save/") {
 			t.Errorf("%s: got %s, want a signed Google Wallet link", tc.path, response.Body)
 		}
+	}
+}
+
+func TestApplePassDownloadIsAnAttachment(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "Synthetic test CA", OrganizationalUnit: []string{"TESTTEAM"}},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer := &wallet.Issuer{
+		Origin: "https://dad.example",
+		Apple:  &wallet.Apple{Certificate: cert, Intermediate: cert, Key: key, PassType: "pass.org.example.dad", Team: "TESTTEAM"},
+	}
+	link := "https://dad.example/r/code?via=irl"
+	server := NewServer("", Services{Origin: issuer.Origin, Wallet: issuer, Donor: walletDonor{link: &link}})
+	request := httptest.NewRequest("POST", "/donor/me/wallet/apple", nil)
+	request.Header.Set("Origin", issuer.Origin)
+	request.AddCookie(&http.Cookie{Name: "dad_donor_session", Value: "valid"})
+	response := httptest.NewRecorder()
+	server.Handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK ||
+		response.Header().Get("Content-Type") != "application/vnd.apple.pkpass" ||
+		!strings.HasPrefix(response.Header().Get("Content-Disposition"), "attachment;") ||
+		!strings.HasPrefix(response.Body.String(), "PK") {
+		t.Fatalf("got %d %v, want a pkpass attachment", response.Code, response.Header())
 	}
 }

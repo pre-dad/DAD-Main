@@ -6,10 +6,10 @@ import (
 	"math"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 	"unicode/utf8"
 
+	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/sharing"
 	"dad/donor-api/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -24,7 +24,7 @@ type PartnerApplySource interface {
 // PartnerPortalSource is the authenticated partner portal surface (§7.2/§7.3).
 type PartnerPortalSource interface {
 	RequestSignIn(ctx context.Context, email string) error
-	AcceptInvite(ctx context.Context, invite string, app ...bool) (string, error)
+	AcceptInvite(ctx context.Context, invite string, app bool) (string, error)
 	SignOut(ctx context.Context, token string) error
 	Users(ctx context.Context, token string) ([]store.PartnerUser, error)
 	Invite(ctx context.Context, token, email, name, role string) error
@@ -46,7 +46,7 @@ type StaffPartnerSource interface {
 	PendingApplications(ctx context.Context, token, after string) (store.PendingApplicationPage, error)
 	Approve(ctx context.Context, token string, appID pgtype.UUID) (pgtype.UUID, error)
 	Reject(ctx context.Context, token string, appID pgtype.UUID, reason string) error
-	LinkInitiative(ctx context.Context, token string, partnerID, initiativeID pgtype.UUID, commitment ...int64) error
+	LinkInitiative(ctx context.Context, token string, partnerID, initiativeID pgtype.UUID, commitment *int64) error
 	SetMatch(ctx context.Context, token string, partnerID pgtype.UUID, workforce, rateBP int32, capMinor int64) error
 	Partners(ctx context.Context, token string, offset int64) (store.StaffPartnerPage, error)
 	Partner(ctx context.Context, token string, partnerID pgtype.UUID) (store.StaffPartnerDetail, error)
@@ -65,11 +65,7 @@ func partnerSession(r *http.Request) string {
 	if !native(r) {
 		return sessionCookieValue(r, partnerCookie)
 	}
-	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
-	if !strings.EqualFold(scheme, "Bearer") || !validToken(token) {
-		return ""
-	}
-	return token
+	return bearerToken(r)
 }
 
 func partnerStatusCode(err error) (int, string) {
@@ -136,7 +132,7 @@ func (a *api) partnerSignIn(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if body.Email == nil || utf8.RuneCountInString(*body.Email) > maxEmailRunes {
+	if body.Email == nil || utf8.RuneCountInString(*body.Email) > identity.MaxEmailRunes {
 		invalidFields(w, r)
 		return
 	}
@@ -334,10 +330,7 @@ func (a *api) partnerReport(w http.ResponseWriter, r *http.Request, session stri
 		respond(w, r, nil, err, partnerStatusCode)
 		return
 	}
-	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", `attachment; filename="dad-impact-report.pdf"`)
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(pdf)
+	writePDF(w, pdf)
 }
 
 func (a *api) partnerReportArtifact(w http.ResponseWriter, r *http.Request, session string) {
@@ -359,6 +352,10 @@ func (a *api) partnerReportArtifact(w http.ResponseWriter, r *http.Request, sess
 		respond(w, r, nil, err, partnerStatusCode)
 		return
 	}
+	writePDF(w, pdf)
+}
+
+func writePDF(w http.ResponseWriter, pdf []byte) {
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", `attachment; filename="dad-impact-report.pdf"`)
 	_, _ = w.Write(pdf)
@@ -388,12 +385,16 @@ func (a *api) partnerSaveLogo(w http.ResponseWriter, r *http.Request, session st
 	})
 }
 
+// maxLogoBodyBytes bounds a logo upload: the store accepts a data URL of up to
+// 350000 characters, and the rest is room for the JSON wrapper.
+const maxLogoBodyBytes = 360000
+
 // logoBody reads a logo upload: a data URL, or empty to remove the logo.
 func logoBody(w http.ResponseWriter, r *http.Request) (string, bool) {
 	var body struct {
 		DataURL *string `json:"data_url"`
 	}
-	if !decodeJSONLimit(w, r, &body, 360000) {
+	if !decodeJSONLimit(w, r, &body, maxLogoBodyBytes) {
 		return "", false
 	}
 	if body.DataURL == nil {
@@ -549,11 +550,7 @@ func (a *api) staffPartnerLink(w http.ResponseWriter, r *http.Request, session s
 		return
 	}
 	a.staffPartner().serve(w, r, func(ctx context.Context) (any, error) {
-		var amount []int64
-		if body.CommittedMinor != nil {
-			amount = append(amount, *body.CommittedMinor)
-		}
-		return map[string]any{"linked": true}, a.StaffPartner.LinkInitiative(ctx, session, id, initiativeID, amount...)
+		return map[string]any{"linked": true}, a.StaffPartner.LinkInitiative(ctx, session, id, initiativeID, body.CommittedMinor)
 	})
 }
 

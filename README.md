@@ -108,11 +108,17 @@ process's code as that process's [database role](docs/operations.md#database-rol
 privilege the process lacks fails a test. Tests must never run against the application
 database.
 
+PDF regression tests also require Poppler (`brew install poppler` on macOS or
+`apt-get install poppler-utils` on Debian/Ubuntu); CI installs it before the Go suite.
+The deployed API uses embedded, licensed fonts and pure-Go rendering; it does not
+require Poppler, a browser, Python, or network font downloads.
+
 ```sh
+docker rm -f dad-go-test-postgres 2>/dev/null
 docker run -d --name dad-go-test-postgres -p 127.0.0.1:55440:5432 \
   -e POSTGRES_USER=go_test -e POSTGRES_PASSWORD=go_test -e POSTGRES_DB=donor_go \
   postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
-# Wait for: docker exec dad-go-test-postgres pg_isready -U go_test -d donor_go
+until docker exec dad-go-test-postgres pg_isready -U go_test -d donor_go; do sleep 1; done
 export TEST_DATABASE_URL=postgresql://go_test:go_test@localhost:55440/donor_go
 (cd apps/donor-api && DONOR_GO_DATABASE_URL="$TEST_DATABASE_URL" go run ./cmd/migrate)
 make test
@@ -224,8 +230,3 @@ enables workers or deletes database volumes implicitly. Test-only readiness is n
 - `docs`: product rules, architecture, operations, and security guidance.
 
 [Contributing](CONTRIBUTING.md) · [Architecture](docs/architecture.md) · [MIT license](LICENSE)
-
-PDF regression tests require Poppler (`brew install poppler` on macOS or
-`apt-get install poppler-utils` on Debian/Ubuntu). CI installs it before the Go
-suite. The deployed API uses embedded, licensed fonts and pure-Go rendering; it
-does not require Poppler, a browser, Python, or network font downloads.

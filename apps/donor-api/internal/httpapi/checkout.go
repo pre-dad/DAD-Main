@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/payments"
 	"dad/donor-api/internal/store"
 )
@@ -45,7 +46,7 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request, session stri
 	}
 	frequency, ok := optional(body.Frequency, "MONTHLY")
 	if !ok || frequency != "MONTHLY" || body.Email == nil || body.Amount == nil ||
-		utf8.RuneCountInString(*body.Email) > maxEmailRunes || !store.ValidGiftAmount(*body.Amount) {
+		utf8.RuneCountInString(*body.Email) > identity.MaxEmailRunes || !store.ValidGiftAmount(*body.Amount) {
 		invalidFields(w, r)
 		return
 	}
