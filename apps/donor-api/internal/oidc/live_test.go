@@ -167,7 +167,7 @@ func TestLiveVerifierRejections(t *testing.T) {
 		"wrong issuer":    p.sign(rs256("k1"), with("iss", "https://evil.example")),
 		"wrong audience":  p.sign(rs256("k1"), with("aud", "someone-else")),
 		"audience list":   p.sign(rs256("k1"), with("aud", []string{"someone-else"})),
-		"expired":         p.sign(rs256("k1"), with("exp", issued.Add(-2*time.Minute).Unix())),
+		"expired":         p.sign(rs256("k1"), expiredClaims()),
 		"issued later":    p.sign(rs256("k1"), with("iat", issued.Add(10*time.Minute).Unix())),
 		"no subject":      p.sign(rs256("k1"), with("sub", "")),
 		"no expiry":       p.sign(rs256("k1"), with("exp", 0)),
@@ -193,6 +193,24 @@ func TestLiveVerifierRejections(t *testing.T) {
 		if _, err := p.verifier(issued).Verify(context.Background(), provider, token); !errors.Is(err, ErrToken) {
 			t.Errorf("%s: err = %v; want ErrToken", name, err)
 		}
+	}
+}
+
+func expiredClaims() map[string]any {
+	claims := googleClaims()
+	claims["iat"], claims["exp"] = issued.Add(-2*time.Hour).Unix(), issued.Add(-time.Hour).Unix()
+	return claims
+}
+
+func TestLiveVerifierExpiryBoundary(t *testing.T) {
+	p := newProvider(t)
+	expiry := time.Unix(googleClaims()["exp"].(int64), 0)
+	token := p.sign(rs256("k1"), googleClaims())
+	if _, err := p.verifier(expiry.Add(clockSkew)).Verify(context.Background(), Google, token); err != nil {
+		t.Errorf("at expiry plus skew: %v; want accepted", err)
+	}
+	if _, err := p.verifier(expiry.Add(clockSkew+time.Second)).Verify(context.Background(), Google, token); !errors.Is(err, ErrToken) {
+		t.Errorf("past expiry plus skew: %v; want ErrToken", err)
 	}
 }
 
