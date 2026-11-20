@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,9 +123,12 @@ func TestDayFivePushWaitsAndStopsAfterRecovery(t *testing.T) {
 	}
 	var reminder queries.DonorPushNotification
 	for _, intent := range intentsOf(t, f.db, f.donorID, "STREAK_AT_RISK") {
-		if intent.DedupKey[len(intent.DedupKey)-2:] == ":5" {
+		if strings.HasSuffix(intent.DedupKey, ":5") {
 			reminder = intent
 		}
+	}
+	if !reminder.ID.Valid {
+		t.Fatal("no day-five reminder was queued")
 	}
 	if reason, err := pushSuppression(ctx, q, reminder, d, due); err != nil || reason != "" {
 		t.Fatalf("day-five reminder suppressed: %q %v", reason, err)

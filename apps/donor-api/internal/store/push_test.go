@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -268,11 +269,11 @@ func pushIntents(t *testing.T, db queries.DBTX, donor pgtype.UUID) []queries.Don
 	var out []queries.DonorPushNotification
 	for rows.Next() {
 		var n queries.DonorPushNotification
-		var context string
-		if err = rows.Scan(&n.ID, &n.Category, &n.DedupKey, &context, &n.ExpiresAt); err != nil {
+		var raw string
+		if err = rows.Scan(&n.ID, &n.Category, &n.DedupKey, &raw, &n.ExpiresAt); err != nil {
 			t.Fatal(err)
 		}
-		n.Context = []byte(context)
+		n.Context = []byte(raw)
 		out = append(out, n)
 	}
 	return out
@@ -328,8 +329,11 @@ func TestReferralConversionQueuesOneGenericPushWithTheGift(t *testing.T) {
 		!intents[0].ExpiresAt.Time.Equal(paid.Add(pushLifetime)) {
 		t.Fatalf("intents %+v, want one conversion notice", intents)
 	}
-	if !strings.Contains(string(intents[0].Context), `"kind" : "IRL"`) {
-		t.Fatalf("context %s lacks the channel", intents[0].Context)
+	var referral struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(intents[0].Context, &referral); err != nil || referral.Kind != "IRL" {
+		t.Fatalf("context %s lacks the IRL channel: %v", intents[0].Context, err)
 	}
 	note, err := pushContent(intents[0])
 	if err != nil || note.Body != "Someone you invited through an IRL Referral just made their first test gift." ||
