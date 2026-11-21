@@ -152,6 +152,43 @@ it("requests the next page of referred donors by the cursor the API returns", as
   );
 });
 
+it("returns to the first page of referred donors", async () => {
+  const fetch = serve({
+    "/donor/staff/donors/donor-1?gifts_offset=0": reply(200, { ...detail, next_referrals_cursor: "c2" }),
+    "/donor/staff/donors/donor-1?gifts_offset=0&referrals_cursor=c2": reply(200, detail),
+    "/donor/staff/me": reply(200, actor),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
+  });
+  render(<DonorDetail donor="donor-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "More referrals" }));
+  fireEvent.click(await screen.findByRole("button", { name: "First referrals" }));
+  expect(await screen.findByRole("button", { name: "More referrals" })).toBeVisible();
+  const firstPage = fetch.mock.calls.filter(([url]) => url === "/api/donor/staff/donors/donor-1?gifts_offset=0");
+  expect(firstPage).toHaveLength(2);
+});
+
+it("starts at the first page when navigating to another donor", async () => {
+  const fetch = serve({
+    "/donor/staff/donors/donor-1?gifts_offset=0": reply(200, { ...detail, next_gifts_offset: 50 }),
+    "/donor/staff/donors/donor-1?gifts_offset=50": reply(200, detail),
+    "/donor/staff/donors/donor-2?gifts_offset=0": reply(200, {
+      ...detail,
+      id: "donor-2",
+      email: "invitee@example.org",
+    }),
+    "/donor/staff/me": reply(200, actor),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
+    "/donor/staff/donors/donor-2/actions": reply(200, { actions: [], next_cursor: null }),
+  });
+  const { rerender } = render(<DonorDetail donor="donor-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Older gifts" }));
+  expect(await screen.findByRole("button", { name: "Newest gifts" })).toBeVisible();
+  rerender(<DonorDetail donor="donor-2" />);
+  expect(await screen.findByRole("heading", { level: 1, name: "invitee@example.org" })).toBeVisible();
+  expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining("donor-2"), expect.anything());
+  expect(fetch).not.toHaveBeenCalledWith("/api/donor/staff/donors/donor-2?gifts_offset=50", expect.anything());
+});
+
 it("requests the next page of gifts from the detail endpoint", async () => {
   const fetch = serve({
     "/donor/staff/donors/donor-1?gifts_offset=0": reply(200, { ...detail, next_gifts_offset: 50 }),

@@ -22,6 +22,10 @@ const statusWords: Record<string, string> = {
 };
 
 export default function DonorDetail({ donor }: { donor: string }) {
+  return <DonorRecord key={donor} donor={donor} />;
+}
+
+function DonorRecord({ donor }: { donor: string }) {
   const id = encodeURIComponent(donor);
   const [gifts, setGifts] = useState(0);
   const [referrals, setReferrals] = useState("");
