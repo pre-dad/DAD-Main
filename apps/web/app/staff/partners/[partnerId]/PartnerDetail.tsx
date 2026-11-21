@@ -4,8 +4,9 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { LogoEditor } from "@/components/donor/LogoEditor";
 import { Page } from "@/components/donor/Page";
-import { api, failureMessage, type ResponseBody, type Schema, unconfirmedMessage } from "@/lib/api";
+import { api, classifyFailure, failureMessage, type ResponseBody, type Schema, unconfirmedMessage } from "@/lib/api";
 import { formatDollars, formatMoney, parseDollars } from "@/lib/money";
+import { taxYear } from "@/lib/taxYear";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { matchTerms } from "../Partners";
 
@@ -15,7 +16,7 @@ type MatchStatus = ResponseBody<"/donor/staff/partners/{partnerID}/match-status"
 
 export default function PartnerDetail({ partner }: { partner: string }) {
   const id = encodeURIComponent(partner);
-  const year = new Date().getFullYear();
+  const year = taxYear(new Date());
   const { resource, data, reload } = useApiResource(`/donor/staff/partners/${id}`, {
     load: async (signal) => {
       const [detail, match] = await Promise.all([
@@ -72,6 +73,7 @@ export default function PartnerDetail({ partner }: { partner: string }) {
     done: string,
     action: () => Promise<unknown>,
     uncertainFailure?: string,
+    discardRefusedPayment?: (cause: unknown) => void,
   ) {
     event?.preventDefault();
     const form = event?.currentTarget;
@@ -85,6 +87,7 @@ export default function PartnerDetail({ partner }: { partner: string }) {
       form?.reset();
       reload();
     } catch (cause) {
+      discardRefusedPayment?.(cause);
       setError(
         uncertainFailure
           ? unconfirmedMessage(cause, uncertainFailure)
@@ -150,6 +153,14 @@ export default function PartnerDetail({ partner }: { partner: string }) {
         setPaymentAmount("");
       },
       "The recording is not confirmed. Retry this payment; do not record it again as a new payment.",
+      (cause) => {
+        // A definite refusal means the server recorded nothing, so the saved retry can go.
+        const failure = classifyFailure(cause);
+        if (failure !== "rejected" && failure !== "unconfigured") return;
+        sessionStorage.removeItem(paymentStorageKey);
+        paymentRef.current = null;
+        setPendingPayment(null);
+      },
     );
   }
 
@@ -321,6 +332,7 @@ export default function PartnerDetail({ partner }: { partner: string }) {
                     className="link"
                     disabled={busy}
                     onClick={() =>
+                      window.confirm(`Remove ${user.email} from ${detail.organization}'s portal?`) &&
                       run(null, `Removed ${user.email}.`, () =>
                         api(`/donor/staff/partners/${id}/users/${encodeURIComponent(user.id)}/remove`, {
                           method: "POST",
