@@ -7,6 +7,7 @@ import { databaseAs } from "./test-support/database";
 const production = process.env.E2E_PRODUCTION === "1";
 
 export default defineConfig({
+  forbidOnly: !!process.env.CI,
   testDir: "./e2e",
   timeout: 45_000,
   expect: { timeout: 15_000 },

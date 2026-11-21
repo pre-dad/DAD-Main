@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import { axe, expectNoHorizontalScroll } from "./a11y";
 
 test("an application receipt persists through navigation and refresh without granting portal access", async ({
   page,
@@ -32,15 +32,13 @@ test("an application receipt persists through navigation and refresh without gra
   expect(await status.json()).toEqual({ organization, status: "PENDING" });
   expect((await page.request.get("/api/donor/partner/overview")).status()).toBe(401);
   expect((await page.request.get("/api/donor/me/profile")).status()).toBe(401);
-  expect(await page.locator("body").evaluate((body) => body.scrollWidth <= window.innerWidth + 1)).toBe(true);
-  expect(
-    (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,
-  ).toEqual([]);
+  await expectNoHorizontalScroll(page);
+  expect((await axe(page)).violations).toEqual([]);
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: test.info().outputPath("application-status.png"), fullPage: true });
   const other = await browser.newContext();
   try {
-    expect((await other.request.get("http://127.0.0.1:3000/api/donor/partner/application-status")).status()).toBe(401);
+    expect((await other.request.get("/api/donor/partner/application-status")).status()).toBe(401);
   } finally {
     await other.close();
   }
@@ -62,10 +60,8 @@ test("phone sign-in offers a retry after a rejected code", async ({ page }) => {
   await page.getByRole("button", { name: "Change number or request a new code" }).click();
   await expect(page.getByLabel("Verification code", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Phone number", { exact: true })).toBeEditable();
-  expect(await page.locator("body").evaluate((body) => body.scrollWidth <= window.innerWidth + 1)).toBe(true);
-  expect(
-    (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,
-  ).toEqual([]);
+  await expectNoHorizontalScroll(page);
+  expect((await axe(page)).violations).toEqual([]);
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: test.info().outputPath("phone-sign-in.png"), fullPage: true });
 });

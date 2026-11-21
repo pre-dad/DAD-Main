@@ -1,13 +1,10 @@
 import { expect, type Page, test } from "@playwright/test";
+import { expectNoHorizontalScroll } from "./a11y";
 
 async function navigateByHeader(page: Page, name: string) {
   const menu = page.getByRole("button", { name: "Menu" });
   if (await menu.isVisible()) await menu.click();
   await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name, exact: true }).click();
-}
-
-async function expectNoHorizontalScroll(page: Page) {
-  expect(await page.locator("body").evaluate((body) => body.scrollWidth <= window.innerWidth + 1)).toBe(true);
 }
 
 test("giving requires email verification before checkout", async ({ page }) => {
