@@ -117,6 +117,22 @@ func (q *Queries) AuthenticatedPartnerUser(ctx context.Context, arg Authenticate
 	return i, err
 }
 
+const cancelPartnerLoginEmails = `-- name: CancelPartnerLoginEmails :exec
+UPDATE donor_partner_login_emails SET completed_at=$2, encrypted_token=NULL
+WHERE partner_user_id=$1 AND completed_at IS NULL
+`
+
+type CancelPartnerLoginEmailsParams struct {
+	PartnerUserID pgtype.UUID        `json:"partner_user_id"`
+	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
+}
+
+// Drops the user's queued emails that have not been delivered.
+func (q *Queries) CancelPartnerLoginEmails(ctx context.Context, arg CancelPartnerLoginEmailsParams) error {
+	_, err := q.db.Exec(ctx, cancelPartnerLoginEmails, arg.PartnerUserID, arg.CompletedAt)
+	return err
+}
+
 const claimPartnerLoginEmail = `-- name: ClaimPartnerLoginEmail :exec
 UPDATE donor_partner_login_emails SET attempts=attempts+1, available_at=$2 WHERE id=$1
 `
@@ -525,7 +541,7 @@ func (q *Queries) LinkInitiativeToPartner(ctx context.Context, arg LinkInitiativ
 }
 
 const lockPartnerLoginRecipient = `-- name: LockPartnerLoginRecipient :one
-SELECT u.id, u.email, u.name, u.role, u.disabled, u.invite_token_hash, p.organization, p.approved_at
+SELECT u.id, u.email, u.name, u.role, u.disabled, u.invite_token_hash, u.accepted_at, p.organization, p.approved_at
 FROM donor_partner_users u
 JOIN donor_partner_signups p ON p.id = u.partner_id
 WHERE u.id=$1
@@ -539,6 +555,7 @@ type LockPartnerLoginRecipientRow struct {
 	Role            string             `json:"role"`
 	Disabled        bool               `json:"disabled"`
 	InviteTokenHash pgtype.Text        `json:"invite_token_hash"`
+	AcceptedAt      pgtype.Timestamptz `json:"accepted_at"`
 	Organization    string             `json:"organization"`
 	ApprovedAt      pgtype.Timestamptz `json:"approved_at"`
 }
@@ -553,6 +570,7 @@ func (q *Queries) LockPartnerLoginRecipient(ctx context.Context, id pgtype.UUID)
 		&i.Role,
 		&i.Disabled,
 		&i.InviteTokenHash,
+		&i.AcceptedAt,
 		&i.Organization,
 		&i.ApprovedAt,
 	)
@@ -1237,11 +1255,14 @@ func (q *Queries) PartnerUsersForPartner(ctx context.Context, partnerID pgtype.U
 const partnerUsersForSignIn = `-- name: PartnerUsersForSignIn :many
 SELECT u.id FROM donor_partner_users u
 JOIN donor_partner_signups p ON p.id = u.partner_id
-WHERE u.email=$1 AND NOT u.disabled AND p.approved_at IS NOT NULL
+WHERE u.email=$1 AND NOT u.disabled AND u.accepted_at IS NOT NULL AND p.approved_at IS NOT NULL
 ORDER BY u.id FOR UPDATE OF u
 `
 
-// The enabled users of approved partners who sign in with this email.
+// The enabled users of approved partners who sign in with this email. Only a
+// user who has accepted their invitation qualifies: a public request must not
+// replace the live invite link of someone who has not, who is re-invited by an
+// admin instead.
 func (q *Queries) PartnerUsersForSignIn(ctx context.Context, email string) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, partnerUsersForSignIn, email)
 	if err != nil {
@@ -1469,6 +1490,32 @@ func (q *Queries) QueuePartnerMessage(ctx context.Context, arg QueuePartnerMessa
 	return err
 }
 
+const recentPartnerInvites = `-- name: RecentPartnerInvites :one
+SELECT
+  count(*) FILTER (WHERE created_at > $1::timestamptz - interval '1 minute')::int AS last_minute,
+  count(*) FILTER (WHERE created_at > $1::timestamptz - interval '1 hour')::int AS last_hour
+FROM donor_partner_login_emails
+WHERE partner_user_id=$2::uuid AND kind IN ('APPROVED','INVITED')
+`
+
+type RecentPartnerInvitesParams struct {
+	AsOf          pgtype.Timestamptz `json:"as_of"`
+	PartnerUserID pgtype.UUID        `json:"partner_user_id"`
+}
+
+type RecentPartnerInvitesRow struct {
+	LastMinute int32 `json:"last_minute"`
+	LastHour   int32 `json:"last_hour"`
+}
+
+// How many invitations were queued for the user in the last minute and hour.
+func (q *Queries) RecentPartnerInvites(ctx context.Context, arg RecentPartnerInvitesParams) (RecentPartnerInvitesRow, error) {
+	row := q.db.QueryRow(ctx, recentPartnerInvites, arg.AsOf, arg.PartnerUserID)
+	var i RecentPartnerInvitesRow
+	err := row.Scan(&i.LastMinute, &i.LastHour)
+	return i, err
+}
+
 const renderPartnerMessage = `-- name: RenderPartnerMessage :exec
 UPDATE donor_partner_messages SET subject=$2,body=$3 WHERE id=$1
 `
@@ -1510,6 +1557,26 @@ type RevokePartnerUserSessionsParams struct {
 func (q *Queries) RevokePartnerUserSessions(ctx context.Context, arg RevokePartnerUserSessionsParams) error {
 	_, err := q.db.Exec(ctx, revokePartnerUserSessions, arg.PartnerUserID, arg.RevokedAt)
 	return err
+}
+
+const revokePendingPartnerInvite = `-- name: RevokePendingPartnerInvite :one
+UPDATE donor_partner_users SET invite_token_hash=NULL, invite_expires_at=NULL
+WHERE partner_id=$1 AND id=$2 AND NOT disabled AND accepted_at IS NULL
+RETURNING id
+`
+
+type RevokePendingPartnerInviteParams struct {
+	PartnerID pgtype.UUID `json:"partner_id"`
+	ID        pgtype.UUID `json:"id"`
+}
+
+// Ends the live invite link of a user who has not accepted yet, so a resend
+// leaves exactly one working link.
+func (q *Queries) RevokePendingPartnerInvite(ctx context.Context, arg RevokePendingPartnerInviteParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, revokePendingPartnerInvite, arg.PartnerID, arg.ID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const setPartnerLogo = `-- name: SetPartnerLogo :exec

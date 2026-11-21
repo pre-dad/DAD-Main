@@ -71,6 +71,18 @@ it("shows the partner's match position, initiatives, and users", async () => {
   expect(screen.getByText(/Invitation not yet used/)).toBeInTheDocument();
 });
 
+it("resends an unused invitation for a partner user", async () => {
+  const fetch = stubApi();
+  render(<PartnerDetail partner="p-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Resend invitation to dana@delta.example" }));
+  await waitFor(() =>
+    expect(screen.getByRole("status")).toHaveTextContent("Resent the invitation to dana@delta.example."),
+  );
+  expect(fetch.mock.calls.some(([u, i]) => String(u).endsWith("/p-1/users/u-1/reinvite") && i?.method === "POST")).toBe(
+    true,
+  );
+});
+
 it("saves match terms in basis points and cents", async () => {
   const fetch = stubApi();
   render(<PartnerDetail partner="p-1" />);

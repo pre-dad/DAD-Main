@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"dad/donor-api/internal/store"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // partnerPortalDouble records the partner session each call carries.
@@ -17,6 +19,13 @@ type partnerPortalDouble struct {
 	overview     []string
 	signedOut    []string
 	signOutError error
+	reinvited    []pgtype.UUID
+	reinviteErr  error
+}
+
+func (d *partnerPortalDouble) Reinvite(_ context.Context, _ string, userID pgtype.UUID) error {
+	d.reinvited = append(d.reinvited, userID)
+	return d.reinviteErr
 }
 
 func (d *partnerPortalDouble) AcceptInvite(_ context.Context, _ string, app bool) (string, error) {
@@ -129,5 +138,52 @@ func TestPartnerSignOutRevokesTheNativeSession(t *testing.T) {
 	server.Handler.ServeHTTP(response, r)
 	if response.Code != http.StatusForbidden || len(portal.signedOut) != 1 {
 		t.Fatalf("cookie sign-out without Origin: %d, want 403 before storage", response.Code)
+	}
+}
+
+func TestPartnerReinviteRouteServesAppAndBrowserAndMapsFailures(t *testing.T) {
+	const path = "/donor/partner/users/6f1d1c52-3c7c-4d2b-9a43-0f7f6f3a1b11/reinvite"
+	portal := &partnerPortalDouble{}
+	server := NewServer("", Services{PartnerPortal: portal})
+	serve := func(r *http.Request) int {
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, r)
+		return response.Code
+	}
+
+	if code := serve(appRequest("POST", path, "")); code != http.StatusOK || len(portal.reinvited) != 1 {
+		t.Fatalf("native resend: %d %v", code, portal.reinvited)
+	}
+	browser := httptest.NewRequest("POST", path, nil)
+	browser.AddCookie(&http.Cookie{Name: partnerCookie, Value: "cookie-session"})
+	if code := serve(browser); code != http.StatusForbidden || len(portal.reinvited) != 1 {
+		t.Fatalf("cookie resend without Origin: %d, want 403 before storage", code)
+	}
+	browser.Header.Set("Origin", testPublicOrigin)
+	if code := serve(browser); code != http.StatusOK || len(portal.reinvited) != 2 {
+		t.Fatalf("browser resend: %d", code)
+	}
+	anonymous := appRequest("POST", path, "")
+	anonymous.Header.Del("Authorization")
+	if code := serve(anonymous); code != http.StatusUnauthorized || len(portal.reinvited) != 2 {
+		t.Fatalf("resend without a session: %d, want 401", code)
+	}
+	if code := serve(appRequest("POST", "/donor/partner/users/not-a-uuid/reinvite", "")); code != http.StatusNotFound &&
+		code != http.StatusUnprocessableEntity {
+		t.Fatalf("malformed user id: %d", code)
+	}
+
+	for err, want := range map[error]int{
+		store.ErrPartnerForbidden:  http.StatusForbidden,
+		store.ErrPartnerInviteRate: http.StatusTooManyRequests,
+		pgx.ErrNoRows:              http.StatusNotFound,
+	} {
+		portal.reinviteErr = err
+		if code := serve(appRequest("POST", path, "")); code != want {
+			t.Errorf("resend failing with %v: %d, want %d", err, code, want)
+		}
+	}
+	if code, _ := staffPartnerStatus(store.ErrPartnerInviteRate); code != http.StatusTooManyRequests {
+		t.Errorf("staff resend throttled: %d, want 429", code)
 	}
 }

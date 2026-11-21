@@ -17,6 +17,9 @@ import (
 const (
 	partnerInviteLifetime  = 7 * 24 * time.Hour
 	partnerSessionLifetime = 12 * time.Hour
+	// partnerReinvitesPerHour caps the invitations queued for one user per hour,
+	// the same as sign-in links; a resend is also held to one a minute.
+	partnerReinvitesPerHour = 5
 )
 
 var (
@@ -26,6 +29,8 @@ var (
 	ErrPartnerForbidden = errors.New("partner permission denied")
 	// ErrPartnerInvite is an invalid or expired invite.
 	ErrPartnerInvite = errors.New("invalid or expired partner invite")
+	// ErrPartnerInviteRate means an invitation was resent to the user too recently.
+	ErrPartnerInviteRate = errors.New("partner invite was resent too recently")
 )
 
 // PartnerActor is the authenticated partner user behind a request.
@@ -180,6 +185,15 @@ func (s PartnerPortalService) Invite(ctx context.Context, token, email, name, ro
 	return err
 }
 
+// Reinvite resends the invitation of a user who has not accepted it: the old
+// link stops working and a fresh one is emailed. Admin-only.
+func (s PartnerPortalService) Reinvite(ctx context.Context, token string, userID pgtype.UUID) error {
+	_, err := partnerAdminWrite(ctx, s.DB, token, func(tx pgx.Tx, actor PartnerActor, now time.Time) (struct{}, error) {
+		return struct{}{}, partnerReinvite(ctx, queries.New(tx), actor.PartnerID, userID, now)
+	})
+	return err
+}
+
 // AcceptInvite exchanges an emailed sign-in link, whether an invitation or a
 // requested sign-in, for a partner session token. Each link works once.
 func (s PartnerPortalService) AcceptInvite(ctx context.Context, invite string, app bool) (string, error) {
@@ -241,6 +255,8 @@ type PartnerUser struct {
 	Email string `json:"email"`
 	Name  string `json:"name"`
 	Role  string `json:"role"`
+	// Accepted is false until the user has signed in from their invitation.
+	Accepted bool `json:"accepted"`
 }
 
 // Users lists the partner org's active users (any partner role may view).
@@ -252,7 +268,7 @@ func (s PartnerPortalService) Users(ctx context.Context, token string) ([]Partne
 		}
 		out := make([]PartnerUser, 0, len(rows))
 		for _, r := range rows {
-			out = append(out, PartnerUser{ID: r.ID.String(), Email: r.Email, Name: r.Name, Role: r.Role})
+			out = append(out, PartnerUser{ID: r.ID.String(), Email: r.Email, Name: r.Name, Role: r.Role, Accepted: r.AcceptedAt.Valid})
 		}
 		return out, nil
 	})

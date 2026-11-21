@@ -8207,13 +8207,17 @@
              },
              "role": {
               "type": "string"
+             },
+             "accepted": {
+              "type": "boolean"
              }
             },
             "required": [
              "id",
              "email",
              "name",
-             "role"
+             "role",
+             "accepted"
             ],
             "additionalProperties": false
            }
@@ -8542,6 +8546,96 @@
       "$ref": "#/components/responses/Unavailable"
      }
     }
+   }
+  },
+  "/donor/partner/users/{user_id}/reinvite": {
+   "post": {
+    "operationId": "partnerReinviteUser",
+    "summary": "Resend a partner portal invitation",
+    "tags": [
+     "Partner"
+    ],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
+    "x-rate-limit": "account",
+    "x-clients": [
+     "browser",
+     "native"
+    ],
+    "parameters": [
+     {
+      "name": "user_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "invited": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "invited"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "description": "Admin only. For a user who has not accepted their invitation yet: ends the old link and emails a fresh single-use link that expires after 7 days. Not found once the user has accepted or was removed. Limited to one resend a minute and five an hour per user (429)."
    }
   },
   "/donor/partner/users/{user_id}/remove": {
@@ -10263,6 +10357,85 @@
       }
      }
     ]
+   }
+  },
+  "/donor/staff/partners/{partner_id}/users/{user_id}/reinvite": {
+   "post": {
+    "operationId": "staffPartnerReinviteUser",
+    "summary": "Resend a partner user invitation",
+    "tags": [
+     "Staff"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "parameters": [
+     {
+      "name": "partner_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     },
+     {
+      "name": "user_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "invited": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "invited"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "x-clients": [
+     "browser"
+    ],
+    "description": "For a user who has not accepted their invitation yet: ends the old link and emails a fresh single-use link that expires after 7 days. Not found once the user has accepted or was removed. Limited to one resend a minute and five an hour per user (429). Audited."
    }
   },
   "/donor/staff/partners/{partner_id}/users/{user_id}/remove": {

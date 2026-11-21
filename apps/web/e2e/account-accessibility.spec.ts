@@ -441,7 +441,7 @@ const partnerPortal: Record<string, unknown> = {
     ],
   },
   "/donor/partner/spend": { categories: [{ category: "Meals", amount_minor: 50000 }] },
-  "/donor/partner/users": { users: [{ id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN" }] },
+  "/donor/partner/users": { users: [{ id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN", accepted: true }] },
   "/donor/partner/exports": { exports: [] },
   "/donor/partner/our-people": {
     enrolled: 8,

@@ -407,6 +407,17 @@ function UsersSection({ self }: { self: string }) {
     }
   }
 
+  async function resendInvite(id: string, email: string) {
+    setError("");
+    setStatus("");
+    try {
+      await api(`/donor/partner/users/${id}/reinvite`, { method: "POST", body: "{}" });
+      setStatus(`We emailed ${email} a new invitation. The previous link no longer works.`);
+    } catch (cause) {
+      setError(failureMessage(cause, "The invitation could not be resent right now."));
+    }
+  }
+
   return (
     <section id="users" aria-labelledby="users-heading">
       <h2 id="users-heading">Users</h2>
@@ -419,12 +430,18 @@ function UsersSection({ self }: { self: string }) {
                 <br />
                 <span className="note">
                   {u.email} · {u.role === "ADMIN" ? "Administrator" : "Viewer"}
+                  {!u.accepted && " · Invitation not yet used"}
                 </span>
               </span>
               {u.id === self ? (
                 <span className="note">You</span>
               ) : (
                 <span className="actions">
+                  {!u.accepted && confirming !== u.id && (
+                    <button type="button" className="secondary" onClick={() => resendInvite(u.id, u.email)}>
+                      Resend invitation <span className="visuallyHidden">to {u.email}</span>
+                    </button>
+                  )}
                   {confirming === u.id ? (
                     <>
                       <button

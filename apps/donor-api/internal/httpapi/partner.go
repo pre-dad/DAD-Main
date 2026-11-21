@@ -28,6 +28,7 @@ type PartnerPortalSource interface {
 	SignOut(ctx context.Context, token string) error
 	Users(ctx context.Context, token string) ([]store.PartnerUser, error)
 	Invite(ctx context.Context, token, email, name, role string) error
+	Reinvite(ctx context.Context, token string, userID pgtype.UUID) error
 	RemoveUser(ctx context.Context, token string, userID pgtype.UUID) error
 	SaveProfile(ctx context.Context, token, organization, description string) error
 	Overview(ctx context.Context, token string) (store.PartnerOverview, error)
@@ -51,6 +52,7 @@ type StaffPartnerSource interface {
 	Partners(ctx context.Context, token string, offset int64) (store.StaffPartnerPage, error)
 	Partner(ctx context.Context, token string, partnerID pgtype.UUID) (store.StaffPartnerDetail, error)
 	InviteUser(ctx context.Context, token string, partnerID pgtype.UUID, email, name, role string) error
+	ReinviteUser(ctx context.Context, token string, partnerID, userID pgtype.UUID) error
 	RemoveUser(ctx context.Context, token string, partnerID, userID pgtype.UUID) error
 	SetLogo(ctx context.Context, token string, partnerID pgtype.UUID, dataURL string) error
 	Logo(ctx context.Context, token string, partnerID pgtype.UUID) ([]byte, error)
@@ -80,6 +82,8 @@ func partnerStatusCode(err error) (int, string) {
 		return http.StatusUnprocessableEntity, "This invite link is invalid or has expired"
 	case errors.Is(err, store.ErrPartnerApplication):
 		return http.StatusUnprocessableEntity, "Check the highlighted fields and try again"
+	case errors.Is(err, store.ErrPartnerInviteRate):
+		return http.StatusTooManyRequests, "This invitation was sent a moment ago. Try again later."
 	case errors.Is(err, store.ErrPartnerDecision):
 		return http.StatusConflict, "This application has already been decided"
 	case errors.Is(err, store.EmailRoleError{}):
@@ -99,6 +103,8 @@ func staffPartnerStatus(err error) (int, string) {
 	switch {
 	case errors.Is(err, store.ErrPartnerApplication):
 		return http.StatusUnprocessableEntity, "Check the highlighted fields and try again"
+	case errors.Is(err, store.ErrPartnerInviteRate):
+		return http.StatusTooManyRequests, "This invitation was sent a moment ago. Try again later."
 	case errors.Is(err, store.ErrPartnerDecision):
 		return http.StatusConflict, "This application has already been decided"
 	default:
@@ -245,6 +251,16 @@ func (a *api) partnerSaveProfile(w http.ResponseWriter, r *http.Request, session
 	}
 	a.partnerPortal().serve(w, r, func(ctx context.Context) (any, error) {
 		return map[string]bool{"saved": true}, a.PartnerPortal.SaveProfile(ctx, session, *body.Organization, *body.Description)
+	})
+}
+
+func (a *api) partnerReinviteUser(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "user_id")
+	if !ok {
+		return
+	}
+	a.partnerPortal().serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]bool{"invited": true}, a.PartnerPortal.Reinvite(ctx, session, id)
 	})
 }
 
@@ -475,6 +491,20 @@ func (a *api) staffPartnerInviteUser(w http.ResponseWriter, r *http.Request, ses
 	}
 	a.staffPartner().serve(w, r, func(ctx context.Context) (any, error) {
 		return map[string]bool{"invited": true}, a.StaffPartner.InviteUser(ctx, session, id, body.Email, body.Name, body.Role)
+	})
+}
+
+func (a *api) staffPartnerReinviteUser(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "partner_id")
+	if !ok {
+		return
+	}
+	userID, ok := pathID(w, r, "user_id")
+	if !ok {
+		return
+	}
+	a.staffPartner().serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]bool{"invited": true}, a.StaffPartner.ReinviteUser(ctx, session, id, userID)
 	})
 }
 

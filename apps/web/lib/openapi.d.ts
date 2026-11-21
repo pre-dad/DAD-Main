@@ -2174,6 +2174,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/partner/users/{user_id}/reinvite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resend a partner portal invitation
+         * @description Admin only. For a user who has not accepted their invitation yet: ends the old link and emails a fresh single-use link that expires after 7 days. Not found once the user has accepted or was removed. Limited to one resend a minute and five an hour per user (429).
+         */
+        post: operations["partnerReinviteUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/donor/partner/users/{user_id}/remove": {
         parameters: {
             query?: never;
@@ -2514,6 +2534,26 @@ export interface paths {
          * @description Staff with partnerships access set the logo while enrolling an approved partner. The partner's administrators can replace it from the portal. Audited.
          */
         post: operations["staffPartnerSaveLogo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/partners/{partner_id}/users/{user_id}/reinvite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resend a partner user invitation
+         * @description For a user who has not accepted their invitation yet: ends the old link and emails a fresh single-use link that expires after 7 days. Not found once the user has accepted or was removed. Limited to one resend a minute and five an hour per user (429). Audited.
+         */
+        post: operations["staffPartnerReinviteUser"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8598,6 +8638,7 @@ export interface operations {
                             email: string;
                             name: string;
                             role: string;
+                            accepted: boolean;
                         }[];
                     };
                 };
@@ -8756,6 +8797,42 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimitedByIngress"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerReinviteUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, unknown>;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        invited: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -9499,6 +9576,38 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerReinviteUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                partner_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        invited: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
         };
