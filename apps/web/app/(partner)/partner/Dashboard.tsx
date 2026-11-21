@@ -59,6 +59,7 @@ function Progress({ deployed, committed }: { deployed: number; committed: number
 
 function SpendTable({ rows, caption }: { rows: Spend["categories"]; caption: string }) {
   return (
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: a focusable scroll region lets keyboard users pan a wide table.
     <section className="tableScroll" tabIndex={0} aria-label={caption}>
       <table className="dataTable">
         <caption className="visuallyHidden">{caption}</caption>
