@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { api, failureMessage, type RequestBody } from "@/lib/api";
 
-type LogoPath = "/donor/partner/logo" | "/donor/staff/partners/{partnerID}/logo";
+type LogoPath = "/donor/partner/logo" | "/donor/staff/partners/{partner_id}/logo";
 
 /**
  * Uploads, shows and removes a partner organization's logo at `path`, which serves it on GET.

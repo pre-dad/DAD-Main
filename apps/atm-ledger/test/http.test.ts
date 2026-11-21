@@ -128,3 +128,84 @@ it("rejects bodies over the size limit", async () => {
 	expect(response.status).toBe(413);
 	expect(await response.json()).toEqual({ detail: "Body too large" });
 });
+
+it("keys the ingress limit on the caller address so one client cannot lock out others", async () => {
+	const keys: string[] = [];
+	const limited = {
+		...env,
+		INGRESS: {
+			limit: async ({ key }: { key: string }) => {
+				keys.push(key);
+				return { success: key !== "203.0.113.9" };
+			},
+		},
+	};
+	const call = (ip?: string) =>
+		worker.fetch(
+			new Request("https://ledger.example.org/v1/ledger", {
+				headers: ip ? { "cf-connecting-ip": ip } : {},
+			}),
+			limited,
+		);
+	expect((await call("203.0.113.9")).status).toBe(429);
+	expect((await call("198.51.100.4")).status).toBe(401);
+	expect((await call()).status).toBe(401);
+	expect(keys).toEqual(["203.0.113.9", "198.51.100.4", "unknown"]);
+});
+
+it("distinguishes unknown routes, wrong methods and role mismatches", async () => {
+	const missing = await send("/v1/nothing", "admin", { method: "GET" });
+	expect(missing.status).toBe(404);
+	const wrong = await send("/v1/ledger", "admin", { method: "POST" });
+	expect(wrong.status).toBe(405);
+	expect(wrong.headers.get("allow")).toBe("GET");
+	const forbidden = await send("/v1/history", "read", { method: "GET" });
+	expect(forbidden.status).toBe(403);
+	expect((await send("/v1/toString", "admin", { method: "GET" })).status).toBe(
+		404,
+	);
+});
+
+it.each(["abc", "", "-1", "1.5", "99999999999999999999"])(
+	"rejects history cursor %j",
+	async (after) => {
+		const response = await send(`/v1/history?after=${after}`, "admin", {
+			method: "GET",
+		});
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({ detail: "Invalid history cursor" });
+	},
+);
+
+it("caps publication and triage bodies below the migration limit", async () => {
+	const big = JSON.stringify({ pad: "x".repeat(1024 * 1024 + 70 * 1024) });
+	for (const [path, role] of [
+		["/v1/publications", "publish"],
+		["/v1/triage", "admin"],
+	] as const) {
+		const response = await send(path, role, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: big,
+		});
+		expect(response.status).toBe(413);
+	}
+	const migration = await send("/v1/migration", "admin", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: big,
+	});
+	expect(migration.status).toBe(400);
+});
+
+it("rejects an oversized declared length before reading the body", async () => {
+	const response = await send("/v1/publications", "publish", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			"Content-Length": String(2 * 1024 * 1024),
+		},
+		body: "{}",
+	});
+	expect(response.status).toBe(413);
+});

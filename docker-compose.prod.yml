@@ -86,7 +86,7 @@ services:
       DONOR_WALLET_GOOGLE_CLASS_ID: ${DONOR_WALLET_GOOGLE_CLASS_ID-}
       DONOR_PUSH_PLATFORMS: ${DONOR_PUSH_PLATFORMS:-${DONOR_PUSH_APNS_KEY_FILE:+IOS}${DONOR_PUSH_FCM_KEY_FILE:+,ANDROID}}
       DONOR_GO_LISTEN: 0.0.0.0:8002
-      # Only the web proxies, which alone share the app network with the API, may supply
+      # Only the web and nginx proxies, which share the app network with the API, may supply
       # X-Real-IP; they strip any client-sent copy.
       DONOR_TRUSTED_PROXY_CIDRS: 172.30.43.0/24
       DONOR_STAFF_ORIGIN: ${DONOR_STAFF_ORIGIN:?set DONOR_STAFF_ORIGIN}

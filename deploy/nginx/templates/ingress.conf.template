@@ -41,7 +41,7 @@ server {
         include /etc/nginx/ingress/not-found.conf;
     }
 
-    location ~ ^/api/donor/(login|claim|email-change/confirm|(passkeys|phone)/sign-in(/options)?|oidc/[^/]+/sign-in|partner/(sign-in|accept-invite))$ {
+    location ~ ^/api/donor/(login|signup|password/sign-in|claim|email-change/confirm|(passkeys|phone)/sign-in(/options)?|oidc/[^/]+/sign-in|partner/(sign-in|accept-invite))$ {
         limit_req zone=auth burst=20 nodelay;
         error_page 429 @auth_limited;
         proxy_pass http://web;

@@ -251,7 +251,7 @@ check 'native host refuses browser requests' 403 "$(status https://native.test/d
 check 'native host refuses cookies' 403 "$(status -H 'X-DAD-Client: native' -H 'Cookie: dad_session=synthetic' https://native.test/donor/me/profile)"
 check 'native host refuses Origin' 403 "$(status -H 'X-DAD-Client: native' -H 'Origin: https://native.test' https://native.test/donor/me/profile)"
 check 'native host admits its supported sign-in operation' 200 "$(status -X POST -H 'X-DAD-Client: native' https://native.test/donor/login)"
-for path in /donor/staff/me /donor/staff/sign-in /donor/checkouts /api/donor/me/profile /health/ready /staff; do
+for path in /donor/staff/me /donor/staff/sign-in /donor/checkouts /api/donor/me/profile /health/ready /staff /donor/login%0A; do
   check "native host hides $path" 404 "$(status -X POST -H 'X-DAD-Client: native' "https://native.test$path")"
 done
 check 'native ingress refuses unsupported methods' 405 "$(status -X DELETE -H 'X-DAD-Client: native' https://native.test/donor/login)"
@@ -302,6 +302,8 @@ check 'sign-in 429 is not cacheable' no-store "$(header cache-control "$headers"
 check 'sign-in 429 body is JSON' '{"detail":"Too many requests"}' "$(compose exec -T web cat /tmp/limited)"
 check 'passkey sign-in shares the sign-in limit' '429 429' \
   "$(status -X POST https://public.test/api/donor/passkeys/sign-in/options) $(status -X POST https://public.test/api/donor/passkeys/sign-in)"
+check 'password sign-in and signup share the sign-in limit' '429 429' \
+  "$(status -X POST https://public.test/api/donor/password/sign-in) $(status -X POST https://public.test/api/donor/signup)"
 headers="$(client -D - -o /dev/null -X POST https://staff.test/api/donor/staff/sign-in | tr -d '\r')"
 check 'staff host 429 is not indexed' '429 noindex, nofollow' \
   "$(awk 'NR == 1 { print $2 }' <<< "$headers") $(header x-robots-tag "$headers")"
@@ -311,10 +313,12 @@ check 'pages admit a burst of 300, then limit' yes \
   "$(awk -F'[: ]' '{ ok = $1 == 200 && $2 >= 300 && $3 == 429 } END { print ok ? "yes" : $0 }' <<< "$pages")"
 
 client -o /dev/null 'https://public.test/r/SECRETCODE?token=SECRETTOKEN' || true
+client -o /dev/null 'https://public.test/api/donor/company/COMPANYCODE' || true
 client -o /dev/null 'https://staff.test/staff?q=private%40example.org' || true
 log="$(compose logs --no-log-prefix nginx 2>/dev/null)"
 check 'access log redacts referral codes' yes "$(grep -q '"path":"/r/:code","status":200' <<< "$log" && echo yes)"
-check 'access log omits query strings and codes' no "$(grep -qE 'SECRET|private@|private%40|amount=' <<< "$log" && echo yes || echo no)"
+check 'access log redacts company codes' yes "$(grep -q '"path":"/api/donor/company/:code"' <<< "$log" && echo yes)"
+check 'access log omits query strings and codes' no "$(grep -qE 'SECRET|COMPANYCODE|private@|private%40|amount=' <<< "$log" && echo yes || echo no)"
 
 printf -- '-- cloudflare mode\n'
 INGRESS_MODE=cloudflare INGRESS_ORIGIN_PULL_CA="$work/pki/ca.pem" compose up -d --wait nginx >/dev/null 2>&1

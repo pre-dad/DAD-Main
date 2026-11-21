@@ -127,7 +127,7 @@ func yearParam(w http.ResponseWriter, r *http.Request) (int32, bool) {
 }
 
 func (a *api) staffPartnerMatchStatus(w http.ResponseWriter, r *http.Request, session string) {
-	id, ok := pathID(w, r, "partnerID")
+	id, ok := pathID(w, r, "partner_id")
 	if !ok {
 		return
 	}
@@ -141,7 +141,7 @@ func (a *api) staffPartnerMatchStatus(w http.ResponseWriter, r *http.Request, se
 }
 
 func (a *api) staffPartnerMatchPayment(w http.ResponseWriter, r *http.Request, session string) {
-	id, ok := pathID(w, r, "partnerID")
+	id, ok := pathID(w, r, "partner_id")
 	if !ok {
 		return
 	}

@@ -50,12 +50,14 @@ interface Event {
 const ZERO = "0".repeat(64);
 const MAX_ARCHIVED_BYTES = 2 * 1024 * 1024;
 export const DAILY_REQUEST_QUOTA = 1000;
+// Readers stop here so a flood of reads cannot starve publication or admin calls.
+export const DAILY_READ_QUOTA = 800;
 export const DAILY_EVENT_QUOTA = 200;
 export const ARCHIVE_QUOTA_BYTES = 100 * 1024 * 1024;
 const UPSERT_HEAD =
 	"INSERT INTO head(id,version,digest,history_hash,ledger) VALUES(1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,digest=excluded.digest,history_hash=excluded.history_hash,ledger=excluded.ledger";
 
-const envelope = (row: EventRow) =>
+const archiveBytes = (row: EventRow) =>
 	canonical({ hash: row.hash, event: JSON.parse(row.payload) });
 
 async function holds(object: R2ObjectBody | null, bytes: string) {
@@ -85,7 +87,7 @@ export class LedgerStore extends DurableObject<Env> {
 		| { ok: false; status: number; detail: string }
 	> {
 		try {
-			this.consumeRequest();
+			this.consumeRequest(principal.role);
 			switch (operation) {
 				case "snapshot":
 					return { ok: true, value: await this.snapshot() };
@@ -142,10 +144,11 @@ export class LedgerStore extends DurableObject<Env> {
 			.one();
 	}
 
-	private consumeRequest() {
+	private consumeRequest(role: Principal["role"]) {
 		this.ctx.storage.transactionSync(() => {
 			check(
-				this.budget().requests < DAILY_REQUEST_QUOTA,
+				this.budget().requests <
+					(role === "read" ? DAILY_READ_QUOTA : DAILY_REQUEST_QUOTA),
 				"Daily ledger request quota reached",
 				429,
 			);
@@ -225,7 +228,7 @@ export class LedgerStore extends DurableObject<Env> {
 			)
 			.toArray();
 		for (const event of pending) {
-			const bytes = envelope(event);
+			const bytes = archiveBytes(event);
 			for (const key of [
 				this.eventKey(event.version, event.hash),
 				this.key(event.version, event.hash),
@@ -277,7 +280,7 @@ export class LedgerStore extends DurableObject<Env> {
 			.exec<EventRow>("SELECT * FROM events WHERE version=?", head.version)
 			.one();
 		check(
-			await holds(archived, envelope(event)),
+			await holds(archived, archiveBytes(event)),
 			"Archive integrity failure",
 			503,
 		);
@@ -449,8 +452,8 @@ export class LedgerStore extends DurableObject<Env> {
 			body.source === this.env.SOURCE &&
 				Array.isArray(body.history) &&
 				body.history.length > 0 &&
-				body.history.length <= 1000,
-			"Invalid migration history",
+				body.history.length <= DAILY_EVENT_QUOTA,
+			"Invalid migration history: between 1 and the daily event quota of entries required",
 		);
 		if (this.eventCount() === 0) {
 			for (const index of ["events", "history"]) {
@@ -480,6 +483,7 @@ export class LedgerStore extends DurableObject<Env> {
 			check(this.eventCount() === 0, "Ledger already initialized", 409);
 			let prior = this.genesis();
 			let parent: string | null = null;
+			const seen = new Set<string>();
 			for (const [i, entry] of history.entries()) {
 				objectFields(entry, ["commit", "parent", "at", "ledger"]);
 				check(
@@ -490,6 +494,8 @@ export class LedgerStore extends DurableObject<Env> {
 						Number.isFinite(Date.parse(entry.at)),
 					"Migration chain is incomplete",
 				);
+				check(!seen.has(entry.commit), "Migration chain repeats a commit");
+				seen.add(entry.commit);
 				validateLedger(entry.ledger, this.env.SOURCE);
 				check(
 					entry.ledger.sequence >= prior.ledger.sequence &&
@@ -540,8 +546,8 @@ export class LedgerStore extends DurableObject<Env> {
 	async history(
 		after: number,
 	): Promise<{ events: { hash: string; event: Event }[]; more: boolean }> {
-		await this.archive();
 		check(Number.isSafeInteger(after) && after >= 0, "Invalid history cursor");
+		await this.archive();
 		const rows = this.ctx.storage.sql
 			.exec<EventRow>(
 				"SELECT * FROM events WHERE version>? ORDER BY version LIMIT 101",
@@ -586,9 +592,9 @@ export class LedgerStore extends DurableObject<Env> {
 				"Missing or oversized archive entry",
 				503,
 			);
-			const envelope: unknown = JSON.parse(await archived.text());
-			objectFields(envelope, ["hash", "event"]);
-			const event = envelope.event;
+			const entry: unknown = JSON.parse(await archived.text());
+			objectFields(entry, ["hash", "event"]);
+			const event = entry.event;
 			objectFields(event, [
 				"schemaVersion",
 				"source",
@@ -610,8 +616,8 @@ export class LedgerStore extends DurableObject<Env> {
 					event.version === head.version + 1 &&
 					event.previousHash === head.historyHash &&
 					event.beforeDigest === head.digest &&
-					digest(event) === envelope.hash &&
-					object.key === this.eventKey(head.version + 1, String(envelope.hash)),
+					digest(event) === entry.hash &&
+					object.key === this.eventKey(head.version + 1, String(entry.hash)),
 				"Broken archive chain",
 				503,
 			);
@@ -655,16 +661,16 @@ export class LedgerStore extends DurableObject<Env> {
 				const payload = canonical(event);
 				if (existing)
 					check(
-						existing.hash === envelope.hash && existing.payload === payload,
+						existing.hash === entry.hash && existing.payload === payload,
 						"Existing history contradicts archive",
 						503,
 					);
 				else {
-					this.reserveEvent(payload, String(envelope.hash));
+					this.reserveEvent(payload, String(entry.hash));
 					this.ctx.storage.sql.exec(
 						"INSERT INTO events(version,hash,payload,operation,request_digest) VALUES(?,?,?,?,?)",
 						event.version,
-						envelope.hash,
+						entry.hash,
 						payload,
 						event.operation,
 						event.requestDigest,
@@ -674,7 +680,7 @@ export class LedgerStore extends DurableObject<Env> {
 					UPSERT_HEAD,
 					event.version,
 					event.afterDigest,
-					envelope.hash,
+					entry.hash,
 					canonical(next),
 				);
 			});
