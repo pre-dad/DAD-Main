@@ -114,8 +114,8 @@ Staff passkeys belong to the staff hostname; changing it means every staff membe
 again.
 
 Rate limits are per visitor. nginx sets `X-Real-IP` to the client address, which the API
-trusts only from the `app` network, `172.30.43.0/24`, that the web containers alone share
-with it ([edge](edge.md#client-address)). Setting `DONOR_CLIENT_IP_HEADER` empty makes all
+trusts only from the `app` network, `172.30.43.0/24`, that the web containers and the
+nginx ingress share with it ([edge](edge.md#client-address)). Setting `DONOR_CLIENT_IP_HEADER` empty makes all
 visitors share the proxy's quota. Edit the Compose networks if `172.30.42.0/24` or
 `172.30.43.0/24` clashes on the host.
 
