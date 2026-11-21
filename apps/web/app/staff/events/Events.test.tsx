@@ -108,8 +108,12 @@ it.each([
   ["missing start", { starts_at: "" }, "Enter when the event starts and ends."],
   ["missing end", { ends_at: "" }, "Enter when the event starts and ends."],
   ["unparseable start", { starts_at: "soon" }, "Enter when the event starts and ends."],
-  ["non-numeric capacity", { capacity: "ten" }, "Enter the capacity as a whole number, or 0 for no limit."],
-  ["negative capacity", { capacity: "-1" }, "Enter the capacity as a whole number, or 0 for no limit."],
+  [
+    "non-numeric capacity",
+    { capacity: "ten" },
+    "Enter the capacity as a whole number up to 1,000,000, or 0 for no limit.",
+  ],
+  ["negative capacity", { capacity: "-1" }, "Enter the capacity as a whole number up to 1,000,000, or 0 for no limit."],
   ["unparseable booking open", { booking_opens_at: "later" }, "Enter when booking opens, or leave it empty."],
 ])("rejects %s", (_name, override, message) => {
   const form = new FormData();
