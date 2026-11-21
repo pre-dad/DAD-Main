@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -24,7 +25,7 @@ func TestPhoneSignIn(t *testing.T) {
 	if _, err := pool.Exec(ctx, "UPDATE donors SET phone=$2 WHERE id=$1", id, phone); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { pool.Exec(ctx, "DELETE FROM donor_phone_codes WHERE phone=$1", phone) })
+	cleanup(t, "DELETE FROM donor_phone_codes WHERE phone=$1", phone)
 
 	sender := &sms.StubSender{}
 	sends := &sync.WaitGroup{}
@@ -218,9 +219,15 @@ func TestPhoneChangeInvalidatesPendingCode(t *testing.T) {
 		phone,
 		HashToken("123456"),
 	)
-	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_phone_codes WHERE phone=$1", phone) })
+	cleanup(t, "DELETE FROM donor_phone_codes WHERE phone=$1", phone)
+	// An empty update clears the donor's phone, which must also drop the code
+	// pending for the number they no longer hold.
 	if _, err := s.SaveProfile(ctx, token, ProfileUpdate{}); err != nil {
 		t.Fatal(err)
+	}
+	var pending int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_phone_codes WHERE phone=$1", phone).Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("pending codes after the phone was cleared = %d: %v", pending, err)
 	}
 	other, _ := donor(t, pool)
 	mustExec(t, pool, "UPDATE donors SET phone=$2 WHERE id=$1", other, phone)
@@ -235,7 +242,7 @@ func TestOIDCSignInLinksAndAuthenticates(t *testing.T) {
 	api := as(t, dbroles.API)
 	id, email := donor(t, pool)
 	ctx := context.Background()
-	t.Cleanup(func() { pool.Exec(ctx, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id) })
+	cleanup(t, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id)
 
 	settings := &oidc.Settings{Mode: "stub", StubKey: "secret", ClientIDs: map[oidc.Provider][]string{
 		oidc.Apple: {"com.dad.app"}, oidc.Google: {"g.apps"},
@@ -302,7 +309,7 @@ func TestOIDCNonceBinding(t *testing.T) {
 	api := as(t, dbroles.API)
 	id, email := donor(t, pool)
 	ctx := context.Background()
-	t.Cleanup(func() { pool.Exec(ctx, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id) })
+	cleanup(t, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id)
 	settings := &oidc.Settings{Mode: "stub", StubKey: "secret", ClientIDs: map[oidc.Provider][]string{oidc.Google: {"g.apps"}}}
 	svc := OIDCService{DB: api, Verifier: oidc.NewVerifier(settings), Settings: settings}
 	required := *settings
@@ -386,22 +393,16 @@ func TestOIDCLinkRechecksEmailAfterDonorLock(t *testing.T) {
 	}
 }
 
+var sixDigitCode = regexp.MustCompile(`\b\d{6}\b`)
+
 // extractCode pulls the 6-digit code out of the stub SMS message.
 func extractCode(t *testing.T, msg string) string {
 	t.Helper()
-	var code string
-	for _, f := range []byte(msg) {
-		if f >= '0' && f <= '9' {
-			code += string(f)
-		}
+	code := sixDigitCode.FindString(msg)
+	if code == "" {
+		t.Fatalf("no code in %q", msg)
 	}
-	// The message contains only the code's digits and the "10 minutes" literal;
-	// take the first run of 6 digits.
-	for i := 0; i+6 <= len(code); i++ {
-		return code[i : i+6]
-	}
-	t.Fatalf("no code in %q", msg)
-	return ""
+	return code
 }
 
 type unreachableProvider struct{}
