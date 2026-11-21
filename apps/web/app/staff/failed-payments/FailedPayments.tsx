@@ -2,11 +2,13 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
+import { KeysetPager } from "@/components/donor/KeysetPager";
 import { Page } from "@/components/donor/Page";
 import type { Schema } from "@/lib/api";
 import { formatDate } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
-import { resourceMessages, useApiResource } from "@/lib/useApiResource";
+import { resourceMessages } from "@/lib/useApiResource";
+import { useKeysetResource } from "@/lib/useKeysetResource";
 
 const filters = [
   { value: "all", label: "All unresolved" },
@@ -17,19 +19,6 @@ type Filter = (typeof filters)[number]["value"];
 
 export default function FailedPayments() {
   const [state, setState] = useState<Filter>("all");
-  // Keyset paging: each entry is the cursor that opened a page, the first being none.
-  const [cursors, setCursors] = useState<string[]>([]);
-  const cursor = cursors.at(-1);
-  const query = new URLSearchParams({ state });
-  if (cursor) query.set("cursor", cursor);
-  const { resource, data, reload } = useApiResource<Schema<"FailedPaymentPage">>(
-    `/donor/staff/failed-payments?${query}`,
-  );
-  const messages = resourceMessages(resource, {
-    loading: "Loading failed payments…",
-    failure: "Failed payments could not be loaded right now. Please retry in a moment.",
-    forbidden: "Failed payments require donors and money access.",
-  });
   return (
     <Page wide eyebrow="Staff" back={{ href: "/staff", label: "Staff back office" }} title="Failed payments">
       <p>
@@ -38,13 +27,7 @@ export default function FailedPayments() {
       </p>
       <label>
         Show
-        <select
-          value={state}
-          onChange={(event) => {
-            setState(event.target.value as Filter);
-            setCursors([]);
-          }}
-        >
+        <select value={state} onChange={(event) => setState(event.target.value as Filter)}>
           {filters.map((filter) => (
             <option key={filter.value} value={filter.value}>
               {filter.label}
@@ -52,6 +35,27 @@ export default function FailedPayments() {
           ))}
         </select>
       </label>
+      <FailedPaymentList key={state} state={state} />
+    </Page>
+  );
+}
+
+function FailedPaymentList({ state }: { state: Filter }) {
+  const { resource, data, reload, heading, newer, older } = useKeysetResource<Schema<"FailedPaymentPage">>((cursor) => {
+    const query = new URLSearchParams({ state });
+    if (cursor) query.set("cursor", cursor);
+    return `/donor/staff/failed-payments?${query}`;
+  });
+  const messages = resourceMessages(resource, {
+    loading: "Loading failed payments…",
+    failure: "Failed payments could not be loaded right now. Please retry in a moment.",
+    forbidden: "Failed payments require donors and money access.",
+  });
+  return (
+    <section aria-labelledby="failed-payment-results">
+      <h2 id="failed-payment-results" ref={heading} tabIndex={-1}>
+        Unresolved renewals
+      </h2>
       {resource.state === "signedOut" && (
         <p>
           <Link className="button" href="/staff/sign-in">
@@ -107,29 +111,21 @@ export default function FailedPayments() {
           <p>No failed payments{state === "all" ? "" : " in this view"}.</p>
         ))}
       {data && (
-        <p className="actions">
-          {cursors.length > 0 && (
-            <button type="button" className="secondary" onClick={() => setCursors(cursors.slice(0, -1))}>
-              Newer failures
-            </button>
-          )}
-          {data.next_cursor !== null && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setCursors([...cursors, data.next_cursor ?? ""])}
-            >
-              Older failures
-            </button>
-          )}
-        </p>
+        <KeysetPager newer={newer} older={older} labels={{ newer: "Newer failures", older: "Older failures" }} />
       )}
       <Announcer status={messages.status} alert={messages.alert} />
       {resource.state !== "signedOut" && (
-        <button type="button" className="secondary" onClick={reload}>
-          Refresh failed payments
-        </button>
+        <p className="actions">
+          {(resource.state === "offline" || resource.state === "error") && (
+            <button type="button" className="secondary" onClick={reload}>
+              Retry loading
+            </button>
+          )}
+          <button type="button" className="secondary" onClick={reload}>
+            Refresh failed payments
+          </button>
+        </p>
       )}
-    </Page>
+    </section>
   );
 }

@@ -66,7 +66,6 @@ export function LogoEditor({
       return;
     }
     setBusy(true);
-    setError("");
     try {
       const dataURL = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();

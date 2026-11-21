@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { api, failureMessage, type Schema } from "@/lib/api";
@@ -55,6 +55,15 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  // Remount the main form on a reload only after saving it; rotation and publish also bump updated_at.
+  const [formVersion, setFormVersion] = useState(0);
+  const mainFormSaved = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per loaded record.
+  useEffect(() => {
+    if (!mainFormSaved.current) return;
+    mainFormSaved.current = false;
+    setFormVersion((version) => version + 1);
+  }, [data]);
   const messages = id
     ? resourceMessages(resource, {
         loading: "Loading initiative…",
@@ -89,15 +98,22 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
+  function invalid(message: string) {
+    setStatus("");
+    setError(message);
+  }
+
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const input = initiativeInput(new FormData(event.currentTarget));
     if (typeof input === "string") {
-      setError(input);
+      invalid(input);
       return;
     }
     if (id) {
-      void run(null, "Initiative saved.", () => post(`/${id}`, input));
+      void run(null, "Initiative saved.", () => post(`/${id}`, input)).then((saved) => {
+        mainFormSaved.current = saved;
+      });
       return;
     }
     void run(null, "Draft initiative created.", async () => {
@@ -112,9 +128,10 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
     const values = new FormData(form);
     const unit = field(values, "unit") as Schema<"MetricInput">["unit"];
     const raw = field(values, "value");
-    const value = unit === "USD_CENTS" ? parseDollars(raw) : /^\d+$/.test(raw) ? Number(raw) : null;
+    const whole = /^\d+$/.test(raw) && Number.isSafeInteger(Number(raw)) ? Number(raw) : null;
+    const value = unit === "USD_CENTS" ? parseDollars(raw) : whole;
     if (value === null) {
-      setError(unit === "USD_CENTS" ? "Enter the metric in dollars." : "Enter the metric as a whole number.");
+      invalid(unit === "USD_CENTS" ? "Enter the metric in dollars." : "Enter the metric as a whole number.");
       return;
     }
     const position = Number(field(values, "position"));
@@ -136,7 +153,7 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
     const values = new FormData(form);
     const amount = parseDollars(field(values, "amount"));
     if (amount === null) {
-      setError("Enter the category total in dollars.");
+      invalid("Enter the category total in dollars.");
       return;
     }
     void run(form, "Spend saved as a draft.", () =>
@@ -173,7 +190,7 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
               {!detail.in_rotation && " · Excluded from the daily rotation"}
             </p>
           )}
-          <form onSubmit={save} key={detail?.updated_at ?? "new"}>
+          <form onSubmit={save} key={`${detail?.id ?? "new"}-${formVersion}`}>
             <label>
               Slug
               <input name="slug" defaultValue={detail?.slug} readOnly={Boolean(detail)} maxLength={100} required />
@@ -254,7 +271,10 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
                     type="button"
                     className="button"
                     disabled={busy}
-                    onClick={() => run(null, "Initiative published.", () => post(`/${id}/publish`))}
+                    onClick={() =>
+                      window.confirm(`Publish ${detail.title}? Donors will see it.`) &&
+                      run(null, "Initiative published.", () => post(`/${id}/publish`))
+                    }
                   >
                     Publish initiative
                   </button>
@@ -308,6 +328,7 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
                         className="link"
                         disabled={busy}
                         onClick={() =>
+                          window.confirm(`Delete metric ${metric.position + 1}, ${metric.label}?`) &&
                           run(null, `Metric ${metric.position + 1} deleted.`, () =>
                             post(`/${id}/metrics/${metric.position}/delete`),
                           )
@@ -374,7 +395,9 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
                         <button
                           type="button"
                           disabled={busy}
+                          className="link"
                           onClick={() =>
+                            window.confirm(`Publish ${row.category} spend? Donors will see it.`) &&
                             run(null, "Spend published.", () =>
                               post(`/${id}/spend/publish`, { category: row.category }),
                             )
@@ -388,6 +411,7 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
                         className="link"
                         disabled={busy}
                         onClick={() =>
+                          window.confirm(`Remove ${row.category} from spend?`) &&
                           run(null, `${row.category} removed.`, () =>
                             post(`/${id}/spend/delete`, { category: row.category }),
                           )

@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -482,5 +484,28 @@ func TestTouchRetentionPurgesLapsedPartnerCredentials(t *testing.T) {
 		if found != want.kept {
 			t.Errorf("%s present = %t, want %t", name, found, want.kept)
 		}
+	}
+}
+
+func TestPurgeStagesRunPastAFailingStage(t *testing.T) {
+	boom := errors.New("grant missing")
+	var ran []string
+	stage := func(name string, size int32, deleted int64, err error) purgeStage {
+		return purgeStage{size, func(batch int32) (int64, error) {
+			if batch != size {
+				t.Errorf("%s ran with batch %d, want its size %d", name, batch, size)
+			}
+			ran = append(ran, name)
+			return deleted, err
+		}}
+	}
+	full, err := runPurgeStages([]purgeStage{stage("a", 10, 0, boom), stage("b", 10, 3, nil), stage("c", 10, 0, nil)})
+	if full || !errors.Is(err, boom) || !slices.Equal(ran, []string{"a", "b", "c"}) {
+		t.Fatalf("full=%v err=%v ran=%v, want every stage run and the failure reported", full, err, ran)
+	}
+	ran = nil
+	full, err = runPurgeStages([]purgeStage{stage("a", 10, 0, boom), stage("b", 10, 10, nil), stage("c", 10, 0, nil)})
+	if !full || !errors.Is(err, boom) || !slices.Equal(ran, []string{"a", "b"}) {
+		t.Fatalf("full=%v err=%v ran=%v, want a full batch to end the run and keep the earlier failure", full, err, ran)
 	}
 }

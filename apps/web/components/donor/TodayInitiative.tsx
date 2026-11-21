@@ -12,24 +12,28 @@ export function metricValue(metric: Schema<"TodayMetric">): string {
     case "USD_CENTS":
       return formatMoney(metric.value);
     case "PEOPLE":
-      return `${metric.value.toLocaleString()} ${metric.value === 1 ? "person" : "people"}`;
+      return `${metric.value.toLocaleString("en-US")} ${metric.value === 1 ? "person" : "people"}`;
     case "INITIATIVES":
-      return `${metric.value.toLocaleString()} ${metric.value === 1 ? "initiative" : "initiatives"}`;
+      return `${metric.value.toLocaleString("en-US")} ${metric.value === 1 ? "initiative" : "initiatives"}`;
     case "PARTNERS":
-      return `${metric.value.toLocaleString()} ${metric.value === 1 ? "partner" : "partners"}`;
+      return `${metric.value.toLocaleString("en-US")} ${metric.value === 1 ? "partner" : "partners"}`;
   }
 }
 
 function Spend({ initiative }: { initiative: string }) {
   const [spend, setSpend] = useState<Schema<"InitiativeSpend"> | null>(null);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   async function load() {
-    if (spend) return;
+    if (spend || loading) return;
     setError("");
+    setLoading(true);
     try {
       setSpend(await api<Schema<"InitiativeSpend">>(`/initiatives/${encodeURIComponent(initiative)}/spend`));
     } catch (cause) {
       setError(failureMessage(cause, "Spending could not be loaded right now. Please retry in a moment."));
+    } finally {
+      setLoading(false);
     }
   }
   return (
@@ -48,6 +52,7 @@ function Spend({ initiative }: { initiative: string }) {
         ) : (
           <p>No spending has been recorded yet.</p>
         ))}
+      {loading && <p role="status">Loading spending…</p>}
       {error && <p role="alert">{error}</p>}
     </details>
   );

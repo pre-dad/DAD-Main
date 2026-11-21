@@ -40,7 +40,7 @@ it("retains the challenge after an incorrect code and allows retry", async () =>
   fireEvent.click(screen.getByRole("button", { name: "Text me a code" }));
   fireEvent.change(await screen.findByLabelText("Verification code"), { target: { value: "123456" } });
   fireEvent.click(screen.getByRole("button", { name: "Verify and sign in" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("That code is incorrect or has expired");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("That code is incorrect or has expired"));
   await waitFor(() => expect(screen.getByRole("button", { name: "Verify and sign in" })).toBeEnabled());
   expect(fetch).toHaveBeenLastCalledWith(
     "/api/donor/phone/sign-in",
@@ -59,9 +59,28 @@ it("explains delivery unavailability and permits another request", async () => {
   fireEvent.click(screen.getByText("Sign in with your phone"));
   fireEvent.change(screen.getByLabelText("Phone number"), { target: { value: "+14155550123" } });
   fireEvent.click(screen.getByRole("button", { name: "Text me a code" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Phone sign-in could not be completed. Please retry, or use an email link.",
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Phone sign-in could not be completed. Please retry, or use an email link.",
+    ),
   );
   expect(screen.queryByLabelText("Verification code")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Text me a code" })).toBeEnabled();
+});
+
+it("opens the dashboard after a correct code", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ sent: true }))
+    .mockResolvedValueOnce(Response.json({}));
+  const assign = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  vi.stubGlobal("location", { ...window.location, assign });
+  render(<PhoneSignIn />);
+  fireEvent.click(screen.getByText("Sign in with your phone"));
+  fireEvent.change(screen.getByLabelText("Phone number"), { target: { value: "+14155550123" } });
+  fireEvent.click(screen.getByRole("button", { name: "Text me a code" }));
+  fireEvent.change(await screen.findByLabelText("Verification code"), { target: { value: "123456" } });
+  fireEvent.click(screen.getByRole("button", { name: "Verify and sign in" }));
+  await waitFor(() => expect(assign).toHaveBeenCalledWith("/account/dashboard"));
 });

@@ -114,6 +114,13 @@ func (s CheckoutService) begin(ctx context.Context, request payments.CheckoutReq
 		return empty, payments.ErrCheckoutInput
 	}
 	request.Email = email
+	request.Name, request.Zip, request.City = identity.TrimSpace(
+		request.Name,
+	), identity.TrimSpace(
+		request.Zip,
+	), identity.TrimSpace(
+		request.City,
+	)
 	preimage, err := credentials.CheckoutPreimage(email, request.Amount, request.Frequency, request.Visitor)
 	if err != nil {
 		return empty, payments.ErrCheckoutInput

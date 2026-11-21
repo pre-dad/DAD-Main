@@ -40,7 +40,6 @@ it("redirects after a successful retry without claiming the link is missing", as
   vi.stubGlobal("location", { ...window.location, assign });
   render(<Accept />);
   fireEvent.click(await screen.findByRole("button", { name: "Confirm and sign in" }));
-  await screen.findByRole("alert");
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("We couldn’t sign you in right now."));
   fireEvent.click(screen.getByRole("button", { name: "Confirm and sign in" }));
   await waitFor(() => expect(assign).toHaveBeenCalledWith("/partner"));

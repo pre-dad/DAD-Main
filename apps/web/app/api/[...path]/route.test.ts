@@ -281,3 +281,20 @@ it("answers 502 when the upstream times out", async () => {
   expect(response.status).toBe(502);
   expect((await response.json()).detail.code).toBe("API_UNREACHABLE");
 });
+
+it("holds an ordinary route to a small body but lets the upload routes take what the API accepts", async () => {
+  const fetch = vi.fn().mockResolvedValue(Response.json({}));
+  vi.stubGlobal("fetch", fetch);
+  const post = (size: number, ...path: string[]) =>
+    POST(
+      new NextRequest(`http://localhost:3000/api/${path.join("/")}`, { method: "POST", body: new Uint8Array(size) }),
+      context(...path),
+    );
+  expect((await post((1 << 20) + 1, "donor", "sign-in", "email")).status).toBe(413);
+  expect(fetch).not.toHaveBeenCalled();
+  expect((await post(1 << 20, "donor", "sign-in", "email")).status).toBe(200);
+  expect((await post((5 << 20) + 1, "donor", "staff", "founding-claims")).status).toBe(413);
+  expect((await post(5 << 20, "donor", "staff", "founding-claims")).status).toBe(200);
+  expect((await post(10 << 20, "donor", "staff", "content", "rules")).status).toBe(200);
+  expect((await post(10 << 20, "donor", "staff", "content", "sources")).status).toBe(200);
+});

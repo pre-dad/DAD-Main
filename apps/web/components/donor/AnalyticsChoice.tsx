@@ -2,6 +2,15 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { analyticsAllowed, analyticsChoice, analyticsHasChoice, observe } from "@/lib/analytics";
+
+function emit(path: string) {
+  observe("app_opened");
+  if (path.startsWith("/r/"))
+    observe("attribution_captured", {
+      source: new URLSearchParams(location.search).get("via") === "irl" ? "IRL" : "link",
+    });
+  if (path.startsWith("/c/")) observe("attribution_captured", { source: "company" });
+}
 export function AnalyticsChoice() {
   const path = usePathname(),
     [ready, setReady] = useState(false),
@@ -11,14 +20,7 @@ export function AnalyticsChoice() {
     setChosen(analyticsHasChoice());
   }, []);
   useEffect(() => {
-    if (analyticsAllowed()) {
-      observe("app_opened");
-      if (path.startsWith("/r/"))
-        observe("attribution_captured", {
-          source: new URLSearchParams(location.search).get("via") === "irl" ? "IRL" : "link",
-        });
-      if (path.startsWith("/c/")) observe("attribution_captured", { source: "company" });
-    }
+    if (analyticsAllowed()) emit(path);
   }, [path]);
   if (!ready) return null;
   return (
@@ -37,7 +39,7 @@ export function AnalyticsChoice() {
               onClick={() => {
                 analyticsChoice(true);
                 setChosen(true);
-                observe("app_opened");
+                emit(path);
               }}
             >
               Allow usage analytics
@@ -55,14 +57,7 @@ export function AnalyticsChoice() {
           </div>
         </>
       ) : (
-        <button
-          className="quiet"
-          type="button"
-          onClick={() => {
-            analyticsChoice(false);
-            setChosen(false);
-          }}
-        >
+        <button className="quiet" type="button" onClick={() => setChosen(false)}>
           Change analytics preference
         </button>
       )}

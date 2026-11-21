@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import type { Schema } from "@/lib/api";
+import { PAGE_SIZE, type Schema } from "@/lib/api";
 import { formatDate } from "@/lib/dates";
 import { formatDollars } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
@@ -65,7 +65,7 @@ export default function Partners() {
             <p>No partners have been approved yet.</p>
           )}
           {offset > 0 && (
-            <button type="button" className="secondary" onClick={() => setOffset(Math.max(0, offset - 50))}>
+            <button type="button" className="secondary" onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
               Previous partners
             </button>
           )}

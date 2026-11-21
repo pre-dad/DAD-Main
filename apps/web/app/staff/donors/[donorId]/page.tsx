@@ -5,5 +5,5 @@ export const metadata: Metadata = { title: "Donor record" };
 
 export default async function Page({ params }: PageProps<"/staff/donors/[donorId]">) {
   const { donorId } = await params;
-  return <DonorDetail donor={donorId} />;
+  return <DonorDetail key={donorId} donor={donorId} />;
 }

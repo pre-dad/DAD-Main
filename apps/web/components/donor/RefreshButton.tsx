@@ -7,13 +7,20 @@ export function RefreshButton({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   return (
-    <button
-      type="button"
-      className="secondary"
-      disabled={pending}
-      onClick={() => startTransition(() => router.refresh())}
-    >
-      {pending ? "Checking again…" : children}
-    </button>
+    <>
+      <button
+        type="button"
+        className="secondary"
+        aria-disabled={pending}
+        onClick={() => {
+          if (!pending) startTransition(() => router.refresh());
+        }}
+      >
+        {pending ? "Checking again…" : children}
+      </button>
+      <span role="status" className="visuallyHidden">
+        {pending ? "Checking again…" : ""}
+      </span>
+    </>
   );
 }

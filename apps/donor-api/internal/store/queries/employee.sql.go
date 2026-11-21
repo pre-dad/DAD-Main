@@ -343,18 +343,20 @@ SELECT s.id FROM donor_partner_signups s
 WHERE s.approved_at IS NOT NULL
 AND EXISTS(SELECT 1 FROM donor_partner_employees e WHERE e.partner_id = s.id AND e.team_id IS NOT NULL)
 AND NOT EXISTS(SELECT 1 FROM donor_team_months m WHERE m.partner_id = s.id AND m.month = $1::date)
+AND ($2::uuid IS NULL OR s.id > $2::uuid)
 ORDER BY s.id
-LIMIT $2::int
+LIMIT $3::int
 `
 
 type PartnersDueTeamMonthParams struct {
 	Month pgtype.Date `json:"month"`
+	After pgtype.UUID `json:"after"`
 	Batch int32       `json:"batch"`
 }
 
 // Approved partners with a team whose standings for the month are not yet recorded.
 func (q *Queries) PartnersDueTeamMonth(ctx context.Context, arg PartnersDueTeamMonthParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, partnersDueTeamMonth, arg.Month, arg.Batch)
+	rows, err := q.db.Query(ctx, partnersDueTeamMonth, arg.Month, arg.After, arg.Batch)
 	if err != nil {
 		return nil, err
 	}

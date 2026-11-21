@@ -11,16 +11,16 @@ import (
 
 // StaffPartner is one approved partner org in the §8 Partnerships list.
 type StaffPartner struct {
-	ID              string             `json:"id"`
-	Organization    string             `json:"organization"`
-	Type            string             `json:"type"`
-	CompanyCode     string             `json:"company_code"`
-	WorkforceSize   int32              `json:"workforce_size"`
-	MatchRateBP     int32              `json:"match_rate_bp"`
-	MatchCapMinor   int64              `json:"match_cap_minor"`
-	ApprovedAt      pgtype.Timestamptz `json:"approved_at"`
-	UserCount       int64              `json:"user_count"`
-	InitiativeCount int64              `json:"initiative_count"`
+	ID              string     `json:"id"`
+	Organization    string     `json:"organization"`
+	Type            string     `json:"type"`
+	CompanyCode     string     `json:"company_code"`
+	WorkforceSize   int32      `json:"workforce_size"`
+	MatchRateBP     int32      `json:"match_rate_bp"`
+	MatchCapMinor   int64      `json:"match_cap_minor"`
+	ApprovedAt      *time.Time `json:"approved_at"`
+	UserCount       int64      `json:"user_count"`
+	InitiativeCount int64      `json:"initiative_count"`
 }
 
 type StaffPartnerPage struct {
@@ -69,7 +69,7 @@ func (s PartnerApplicationService) Partners(ctx context.Context, token string, o
 				out.Partners = append(out.Partners, StaffPartner{
 					ID: r.ID.String(), Organization: r.Organization, Type: r.PartnerType, CompanyCode: r.CompanyCode.String,
 					WorkforceSize: r.WorkforceSize, MatchRateBP: r.MatchRateBp, MatchCapMinor: r.MatchCapMinor,
-					ApprovedAt: r.ApprovedAt, UserCount: r.UserCount, InitiativeCount: r.InitiativeCount,
+					ApprovedAt: timePointer(r.ApprovedAt), UserCount: r.UserCount, InitiativeCount: r.InitiativeCount,
 				})
 			}
 			return out, nil
@@ -99,7 +99,7 @@ func (s PartnerApplicationService) Partner(ctx context.Context, token string, pa
 				StaffPartner: StaffPartner{
 					ID: org.ID.String(), Organization: org.Organization, Type: org.PartnerType, CompanyCode: org.CompanyCode.String,
 					WorkforceSize: org.WorkforceSize, MatchRateBP: org.MatchRateBp, MatchCapMinor: org.MatchCapMinor,
-					ApprovedAt: org.ApprovedAt, UserCount: int64(len(users)), InitiativeCount: int64(len(initiatives)),
+					ApprovedAt: timePointer(org.ApprovedAt), UserCount: int64(len(users)), InitiativeCount: int64(len(initiatives)),
 				},
 				Website:     org.Website,
 				HasLogo:     org.HasLogo,

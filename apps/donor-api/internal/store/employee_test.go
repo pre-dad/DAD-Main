@@ -69,7 +69,12 @@ func TestMatchOwed(t *testing.T) {
 // terms, returning its id.
 func approvedPartner(t *testing.T, pool *pgxpool.Pool, org, code string, rateBP int32, capMinor int64) pgtype.UUID {
 	t.Helper()
-	id := mustNewID(t)
+	return approvedPartnerWithID(t, pool, mustNewID(t), org, code, rateBP, capMinor)
+}
+
+// approvedPartnerWithID is approvedPartner for a chosen id, for tests that depend on id order.
+func approvedPartnerWithID(t *testing.T, pool *pgxpool.Pool, id pgtype.UUID, org, code string, rateBP int32, capMinor int64) pgtype.UUID {
+	t.Helper()
 	mustExec(
 		t,
 		pool,
