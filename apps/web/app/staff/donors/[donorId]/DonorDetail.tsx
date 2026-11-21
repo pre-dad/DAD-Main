@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { KeysetPager } from "@/components/donor/KeysetPager";
 import { Page } from "@/components/donor/Page";
-import { api, type Schema } from "@/lib/api";
+import type { Schema } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
