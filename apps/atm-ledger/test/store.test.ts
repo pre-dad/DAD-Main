@@ -12,6 +12,7 @@ import {
 import {
 	ARCHIVE_QUOTA_BYTES,
 	DAILY_EVENT_QUOTA,
+	DAILY_READ_QUOTA,
 	DAILY_REQUEST_QUOTA,
 } from "../src/store";
 
@@ -458,6 +459,72 @@ describe("durable ledger", () => {
 					.one(),
 			).toEqual({ requests: 1, events: 0, archive_bytes: 42 });
 		});
+	});
+
+	it("stops reads at their own quota and keeps publication and admin calls available", async () => {
+		const { stub, snapshot } = await setup();
+		const reader: Principal = { ...admin, role: "read", execution: "125:1" };
+		await runInDurableObject(stub, async (_instance, state) => {
+			state.storage.sql.exec(
+				`UPDATE budget SET requests=${DAILY_READ_QUOTA} WHERE id=1`,
+			);
+		});
+		await expect(call(stub, "snapshot", null, reader)).rejects.toThrow(
+			"Daily ledger request quota reached",
+		);
+		await call(stub, "snapshot", null, admin);
+		await call(
+			stub,
+			"publish",
+			{
+				expectedVersion: snapshot.version,
+				previousDigest: snapshot.digest,
+				ledger: collected(snapshot.ledger),
+			},
+			publisher,
+		);
+	});
+
+	it("validates the history cursor before touching the archive", async () => {
+		const { stub } = await setup();
+		await runInDurableObject(stub, async (_instance, state) => {
+			state.storage.sql.exec("INSERT INTO archive_pending VALUES(1)");
+		});
+		for (const cursor of [-1, Number.NaN]) {
+			expect(await stub.request("history", cursor, admin)).toMatchObject({
+				ok: false,
+				status: 400,
+			});
+		}
+		await runInDurableObject(stub, async (_instance, state) => {
+			expect(
+				state.storage.sql
+					.exec<{ n: number }>("SELECT COUNT(*) n FROM archive_pending")
+					.one().n,
+			).toBe(1);
+		});
+	});
+
+	it("refuses a migration chain that repeats a commit", async () => {
+		const m = migration();
+		m.history.push(
+			{ ...m.history[0], commit: "c".repeat(40), parent: m.history[0].commit },
+			{ ...m.history[0], commit: "c".repeat(40), parent: "c".repeat(40) },
+		);
+		const stub = env.LEDGERS.getByName(source);
+		await expect(call(stub, "migrate", m)).rejects.toThrow(
+			"Migration chain repeats a commit",
+		);
+	});
+
+	it("refuses a migration longer than the daily event quota", async () => {
+		const m = migration();
+		for (let i = 1; i <= DAILY_EVENT_QUOTA; i++)
+			m.history.push({ ...m.history[0], commit: String(i), parent: null });
+		const stub = env.LEDGERS.getByName(source);
+		await expect(call(stub, "migrate", m)).rejects.toThrow(
+			"Invalid migration history",
+		);
 	});
 
 	it.each([
