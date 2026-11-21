@@ -458,7 +458,7 @@ test("authenticated accessible surface: /partner", async ({ page }) => {
   await expect(page.getByText("$1,500.00")).toBeVisible();
   // Every portal panel is a laboured region a screen reader can navigate to.
   for (const name of ["Overview", "Initiatives", "Spend", "Our People", "Reports", "Users"]) {
-    await expect(page.getByRole("region", { name })).toBeVisible();
+    await expect(page.getByRole("region", { name, exact: true })).toBeVisible();
   }
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect(results.violations).toEqual([]);
