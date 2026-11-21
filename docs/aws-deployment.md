@@ -130,10 +130,11 @@ so the task definitions always set it; it is not the switch.
 
 ### 4.2 api networking and trust
 
-- `api` listens `0.0.0.0:8002` and is reachable **only from the web tier** (api SG inbound
-  8002 from web SG only).
-- `DONOR_TRUSTED_PROXY_CIDRS` must be the web tier's subnet CIDR so the API trusts
-  `X-Real-IP` only from web. In Compose this is the `app` network `172.30.43.0/24`; on AWS
+- `api` listens `0.0.0.0:8002` and is reachable **only from the web tier and, when native ingress is on, the nginx tier**
+  (api SG inbound 8002 from the web and nginx SGs only).
+- `DONOR_TRUSTED_PROXY_CIDRS` must include the web tier's subnet CIDR, and the nginx tier's when native ingress is on,
+  so the API trusts `X-Real-IP` only from those forwarders (without nginx's, native
+  clients share one rate-limit bucket). In Compose this is the `app` network `172.30.43.0/24`; on AWS
   it becomes the web tier's private-subnet CIDR(s). The API refuses a trusted-proxy range
   broader than IPv4 /8 or IPv6 /32, so per-subnet CIDRs are used, not a supernet.
 - web→api and nginx→web discovery use **ECS Service Connect** (Cloud Map namespace per
@@ -286,7 +287,8 @@ Security-group chain (mirrors the Compose network isolation):
 
 - NLB → nginx (nginx SG inbound 8080/8443 from NLB / Cloudflare ranges only).
 - nginx → web (web SG inbound 3000 from nginx SG only).
-- web → api (api SG inbound 8002 from web SG only).
+- web → api (api SG inbound 8002 from web SG only); with native ingress, nginx → api
+  (api SG inbound 8002 from nginx SG).
 - api/workers → RDS Proxy (proxy SG inbound 5432 from app SGs only).
 - RDS SG inbound 5432 from the proxy SG and the one-off `bootstrap-owner` task's SG only.
 - Workers: no inbound.

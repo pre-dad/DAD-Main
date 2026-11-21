@@ -41,7 +41,7 @@ export function nativeContract(source) {
       paths[path] = operations;
     }
   }
-  const components = { securitySchemes: structuredClone(source.components.securitySchemes) };
+  const components = { securitySchemes: {} };
   const visit = (value) => {
     if (!value || typeof value !== "object") return;
     if (value.$ref) {
@@ -59,6 +59,12 @@ export function nativeContract(source) {
     for (const child of Object.values(value)) visit(child);
   };
   visit(paths);
+  for (const item of Object.values(paths))
+    for (const operation of Object.values(item).filter((value) => !Array.isArray(value))) {
+      for (const requirement of operation.security ?? source.security ?? [])
+        for (const name of Object.keys(requirement))
+          components.securitySchemes[name] = structuredClone(source.components.securitySchemes[name]);
+    }
   return {
     openapi: source.openapi,
     info: { ...source.info, title: "DAD donor mobile API" },
@@ -148,7 +154,11 @@ export function tokenSources(document) {
   const { schema_version: _, ...tokens } = document;
   for (const group of ["color", "radius", "space", "text"]) {
     if (!tokens[group] || typeof tokens[group] !== "object") throw new Error(`Missing token group: ${group}`);
-    if (!Object.values(tokens[group]).every((value) => validToken(group, value))) {
+  }
+  for (const [group, values] of Object.entries(tokens)) {
+    if (!/^[a-z][A-Za-z0-9]*$/.test(group)) throw new Error(`Invalid token group name: ${group}`);
+    if (!values || typeof values !== "object") throw new Error(`Invalid design token in ${group}`);
+    if (!Object.values(values).every((value) => validToken(group, value))) {
       throw new Error(`Invalid design token in ${group}`);
     }
   }

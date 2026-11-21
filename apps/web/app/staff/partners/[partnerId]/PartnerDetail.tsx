@@ -12,7 +12,7 @@ import { matchTerms } from "../Partners";
 
 type PendingPayment = { key: string; year: number; amount_minor: number };
 
-type MatchStatus = ResponseBody<"/donor/staff/partners/{partnerID}/match-status", "get">;
+type MatchStatus = ResponseBody<"/donor/staff/partners/{partner_id}/match-status", "get">;
 
 export default function PartnerDetail({ partner }: { partner: string }) {
   const id = encodeURIComponent(partner);

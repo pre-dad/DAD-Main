@@ -132,7 +132,7 @@ lint-scripts:
 
 check-ingress:
 	node scripts/native-ingress.mjs --check
-	node --test scripts/native-ingress.test.mjs
+	node --test scripts/native-ingress.test.mjs scripts/ingress-template.test.mjs
 	./scripts/check-ingress.sh config
 
 smoke-ingress:

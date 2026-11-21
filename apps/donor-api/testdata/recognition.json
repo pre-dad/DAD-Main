@@ -701,6 +701,110 @@
     }
   },
   {
+    "name": "non-USD gift rejected",
+    "operation": "net",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "EUR"
+      }
+    ],
+    "refunds": [],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "error": "invalid"
+  },
+  {
+    "name": "non-USD refund rejected",
+    "operation": "net",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [
+      {
+        "id": "r1",
+        "gift_id": "g1",
+        "amount_minor": 1000,
+        "status": "SUCCEEDED",
+        "updated_at": "2027-01-10T00:00:00Z",
+        "currency": "EUR"
+      }
+    ],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "error": "invalid"
+  },
+  {
+    "name": "refund at exactly as_of applies",
+    "operation": "net",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [
+      {
+        "id": "r1",
+        "gift_id": "g1",
+        "amount_minor": 1000,
+        "status": "SUCCEEDED",
+        "updated_at": "2027-02-01T00:00:00Z",
+        "currency": "USD"
+      }
+    ],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "expected": {
+      "g1": 2000
+    }
+  },
+  {
     "name": "founding before New York cutoff",
     "operation": "founding",
     "as_of": "2027-01-01T04:00:00Z",
@@ -1259,6 +1363,78 @@
       "at_risk": false,
       "grace_ends_at": null,
       "since": "2027-02-01T00:00:00Z"
+    }
+  },
+  {
+    "name": "streak continues across the March 2027 DST change",
+    "operation": "streak",
+    "as_of": "2027-04-15T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-02-01T05:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "feb",
+        "currency": "USD"
+      },
+      {
+        "id": "g2",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-03-01T05:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "mar",
+        "currency": "USD"
+      },
+      {
+        "id": "g3",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-04-01T04:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "apr",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [
+      {
+        "id": "feb",
+        "donor_id": "ben",
+        "due_at": "2027-02-01T05:00:00Z",
+        "ends_at": "2027-03-01T05:00:00Z",
+        "status": "EXPECTED"
+      },
+      {
+        "id": "mar",
+        "donor_id": "ben",
+        "due_at": "2027-03-01T05:00:00Z",
+        "ends_at": "2027-04-01T04:00:00Z",
+        "status": "EXPECTED"
+      },
+      {
+        "id": "apr",
+        "donor_id": "ben",
+        "due_at": "2027-04-01T04:00:00Z",
+        "ends_at": "2027-05-01T04:00:00Z",
+        "status": "EXPECTED"
+      }
+    ],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "expected": {
+      "current": 3,
+      "best": 3,
+      "at_risk": false,
+      "grace_ends_at": null,
+      "since": "2027-02-01T05:00:00Z"
     }
   }
 ]
