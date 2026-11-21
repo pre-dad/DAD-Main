@@ -93,6 +93,9 @@ export function classifyFailure(cause: unknown): Failure {
   return cause instanceof SyntaxError ? "unavailable" : "offline";
 }
 
+/** Rows per offset-paged staff list; the API serves pages of this size. */
+export const PAGE_SIZE = 50;
+
 export const OFFLINE_MESSAGE = "You appear to be offline. Check your connection, then retry.";
 export const RATE_LIMITED_MESSAGE = "Too many requests from this connection. Wait a minute, then retry.";
 export const UNCONFIGURED_MESSAGE = "This isn’t available in this environment yet. Nothing was changed.";

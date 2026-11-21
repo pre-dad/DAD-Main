@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from "vitest";
-import { loadInitiative, loadOverallSpend } from "./publicContent";
+import { loadInitiative, loadInitiatives, loadOverallSpend } from "./publicContent";
 
 vi.mock("next/server", () => ({ connection: async () => {} }));
 afterEach(() => {
@@ -43,5 +43,26 @@ it("tells a missing initiative from an unavailable API", async () => {
       .mockResolvedValueOnce(Response.json({ detail: "Donor database unavailable" }, { status: 503 })),
   );
   await expect(loadInitiative("no-such-plan")).resolves.toBeUndefined();
+  await expect(loadInitiative("water")).resolves.toBeNull();
+});
+
+it("returns the published initiatives, and the unavailable state for a bad body", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValueOnce(Response.json([{ slug: "water" }]))
+      .mockResolvedValueOnce(new Response("<html>gateway</html>", { status: 200 })),
+  );
+  await expect(loadInitiatives()).resolves.toEqual([{ slug: "water" }]);
+  await expect(loadInitiatives()).resolves.toBeNull();
+});
+
+it("treats a non-JSON spend or initiative body as unavailable", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => Promise.resolve(new Response("oops", { status: 200 }))),
+  );
+  await expect(loadOverallSpend()).resolves.toBeNull();
   await expect(loadInitiative("water")).resolves.toBeNull();
 });

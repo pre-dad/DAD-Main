@@ -107,3 +107,19 @@ it("shows a running initiative without its partner when none is linked", async (
   expect(screen.getByText(/Started/)).toBeInTheDocument();
   expect(screen.queryByText(/not a recipient enrollment form/)).toBeNull();
 });
+
+it("switches from planned to started at the UTC midnight of the start date", async () => {
+  vi.useFakeTimers();
+  try {
+    respond([{ ...initiative, started_on: "2026-03-01" }]);
+    vi.setSystemTime(new Date("2026-02-28T23:59:59Z"));
+    const before = render(await InitiativesPage());
+    expect(screen.getByText(/Partner: Partner Org/)).toHaveTextContent("Planned start");
+    before.unmount();
+    vi.setSystemTime(new Date("2026-03-01T00:00:00Z"));
+    render(await InitiativesPage());
+    expect(screen.getByText(/Partner: Partner Org/)).toHaveTextContent("Started");
+  } finally {
+    vi.useRealTimers();
+  }
+});

@@ -1,12 +1,6 @@
-import AxeBuilder from "@axe-core/playwright";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { expectAccessible } from "./a11y";
 import { addPasskeyDevice, administratorInvitation, buildExports, staffURL } from "./staff";
-
-async function expectAccessible(page: Page) {
-  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
-  expect(results.violations).toEqual([]);
-  expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
-}
 
 // Runs against the real API and database: the invitation comes from the operator command.
 test("an invited administrator creates a passkey, then signs out and back in with it", async ({ page }) => {

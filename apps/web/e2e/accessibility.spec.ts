@@ -1,5 +1,5 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import { axe, expectNoHorizontalScroll } from "./a11y";
 import { staffURL } from "./staff";
 
 for (const path of [
@@ -29,9 +29,9 @@ for (const path of [
     const response = await page.goto(path.startsWith("/staff") ? staffURL(path) : path);
     expect(response?.status()).toBe(200);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+    const results = await axe(page);
     expect(results.violations).toEqual([]);
     expect(runtimeErrors).toEqual([]);
-    expect(await page.locator("body").evaluate((body) => body.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    await expectNoHorizontalScroll(page);
   });
 }

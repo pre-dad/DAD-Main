@@ -89,6 +89,42 @@ it("backs off while a long export makes no visible progress", async () => {
   expect(polls).toBeLessThan(20);
 });
 
+it("polls after 1s, then at intervals growing by half", async () => {
+  const calls = backend(() => [job("queued", 0)]);
+  render(<Exports />);
+  await screen.findByText("Waiting to start");
+  const listed = () => calls.filter((call) => call === "GET /api/donor/staff/exports/jobs").length;
+  const initial = listed();
+  const advance = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  await advance(900);
+  expect(listed() - initial).toBe(0);
+  await advance(200);
+  expect(listed() - initial).toBe(1);
+  await advance(1_300);
+  expect(listed() - initial).toBe(1);
+  await advance(300);
+  expect(listed() - initial).toBe(2);
+  await advance(2_000);
+  expect(listed() - initial).toBe(2);
+  await advance(400);
+  expect(listed() - initial).toBe(3);
+});
+
+it("offers a retry when the job list cannot be loaded at all", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      url === "/api/donor/staff/exports" ? reply(200, { datasets: ["gifts"] }) : reply(500, { detail: "boom" }),
+    ),
+  );
+  render(<Exports />);
+  expect(await screen.findByText("Your exports could not be refreshed. They will keep building.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Request gifts CSV" })).toBeEnabled();
+});
+
 it.each([
   ["too_large", "The export is larger than the 50 MB limit. Nothing was kept."],
   ["forbidden", "Your access changed before the export was built. Nothing was kept."],

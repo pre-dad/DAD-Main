@@ -7,7 +7,7 @@ type Props = {
 export function KeysetPager({ newer, older, labels }: Props) {
   if (!newer && !older) return null;
   return (
-    <p className="actions">
+    <nav aria-label="Pagination" className="actions">
       {newer && (
         <button type="button" className="secondary" onClick={newer}>
           {labels.newer}
@@ -18,6 +18,6 @@ export function KeysetPager({ newer, older, labels }: Props) {
           {labels.older}
         </button>
       )}
-    </p>
+    </nav>
   );
 }

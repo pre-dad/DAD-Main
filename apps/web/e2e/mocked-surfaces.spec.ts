@@ -1,21 +1,9 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
+import { collectErrors, expectAccessible } from "./a11y";
 import { staffURL } from "./staff";
 
 // These isolate rendering of states that need a session or a live referral code; Go
 // journey tests exercise the real authorization and attribution behind them.
-async function expectAccessible(page: Page) {
-  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
-  expect(results.violations).toEqual([]);
-  expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
-}
-
-function collectErrors(page: Page) {
-  const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  return errors;
-}
-
 // Development StrictMode replays effects, so a dev server may send the capture twice;
 // every request must still carry the same kind.
 const kinds = (captures: unknown[]) => [...new Set(captures.map((capture) => JSON.stringify(capture)))];

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { formatDateTime, formatDay, formatLongDay } from "./dates";
+import { formatDate, formatDateTime, formatDay, formatLongDay } from "./dates";
 
 it("keeps a calendar date on its own day in every time zone", () => {
   expect(formatDay("2026-09-30")).toBe("Sep 30, 2026");
@@ -24,4 +24,11 @@ it("falls back to the device's zone for a zone it does not know", () => {
 it("spells the month out for a calendar date, whatever the device's zone", () => {
   expect(formatLongDay("2026-09-30")).toBe("September 30, 2026");
   expect(formatLongDay("2027-01-01")).toBe("January 1, 2027");
+});
+it("shows an instant on the reader's calendar day", () => {
+  expect(formatDate("2026-10-15T12:00:00Z")).toMatch(/^Oct 1[45], 2026$/);
+});
+it("returns nothing for a malformed calendar date instead of throwing", () => {
+  expect(formatDay("not-a-date")).toBe("");
+  expect(formatLongDay("")).toBe("");
 });

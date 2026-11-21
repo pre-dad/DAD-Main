@@ -126,3 +126,15 @@ it("keeps the previous data on screen while a new path loads when asked to", asy
   await act(async () => release(reply(200, { n: 2 })));
   await waitFor(() => expect(result.current.data).toEqual({ n: 2 }));
 });
+
+it("reports a throwing onLoad as an error, not as being offline", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply(200, { n: 1 })));
+  const { result } = renderHook(() =>
+    useApiResource<{ n: number }>("/x", {
+      onLoad: () => {
+        throw new Error("caller bug");
+      },
+    }),
+  );
+  await waitFor(() => expect(result.current.resource).toEqual({ state: "error", rateLimited: false }));
+});

@@ -52,8 +52,15 @@ export function observe(name: string, properties: Record<string, string> = {}) {
   }
 }
 export function observeAPI(path: string, method: string, result: unknown, body?: BodyInit | null) {
+  try {
+    sendAPIObservation(path, method, result, body);
+  } catch {
+    /* Observations must never block the product. */
+  }
+}
+function sendAPIObservation(path: string, method: string, result: unknown, body?: BodyInit | null) {
   if (!analyticsAllowed()) return;
-  const data = result as Record<string, unknown>;
+  const data = (result ?? {}) as Record<string, unknown>;
   if (method === "POST") {
     const names: Record<string, string> = {
       "/donor/signup": "signup_started",

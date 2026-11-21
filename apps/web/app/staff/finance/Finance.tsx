@@ -22,6 +22,9 @@ export default function Finance({ donor, gift }: { donor: string; gift: string }
   const [reason, setReason] = useState("");
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [requestKey, setRequestKey] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
   const [invalid, setInvalid] = useState<"amount" | "reason" | null>(null);
   const { resource, data, reload } = useApiResource<Loaded>(donor ? path : null, {
     load: async (signal) => {
@@ -61,9 +64,6 @@ export default function Finance({ donor, gift }: { donor: string; gift: string }
     },
   });
   const quote = data?.quote;
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
   const amountInput = useRef<HTMLInputElement>(null);
   const reasonInput = useRef<HTMLTextAreaElement>(null);
   const step = useStepFocus(confirmation !== null);

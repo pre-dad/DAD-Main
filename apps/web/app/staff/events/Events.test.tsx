@@ -3,9 +3,11 @@ import { afterEach, expect, it, vi } from "vitest";
 import EventEditor, { eventInput, instant, localInput } from "./[eventId]/EventEditor";
 import Events from "./Events";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+const { push } = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 
 afterEach(() => {
+  push.mockClear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -102,6 +104,45 @@ it("validates the editor form", () => {
   expect(eventInput(form)).toMatchObject({ time_zone: "America/Chicago" });
 });
 
+it.each([
+  ["missing start", { starts_at: "" }, "Enter when the event starts and ends."],
+  ["missing end", { ends_at: "" }, "Enter when the event starts and ends."],
+  ["unparseable start", { starts_at: "soon" }, "Enter when the event starts and ends."],
+  ["non-numeric capacity", { capacity: "ten" }, "Enter the capacity as a whole number, or 0 for no limit."],
+  ["negative capacity", { capacity: "-1" }, "Enter the capacity as a whole number, or 0 for no limit."],
+  ["unparseable booking open", { booking_opens_at: "later" }, "Enter when booking opens, or leave it empty."],
+])("rejects %s", (_name, override, message) => {
+  const form = new FormData();
+  for (const [name, value] of Object.entries({
+    slug: "s",
+    title: "t",
+    type: "COMMUNITY",
+    starts_at: "2026-11-07T10:00",
+    ends_at: "2026-11-07T12:00",
+    capacity: "5",
+    ...override,
+  }))
+    form.set(name, value);
+  expect(eventInput(form)).toBe(message);
+});
+
+it("keeps the qualifying perk only for invite-only events", () => {
+  const form = new FormData();
+  for (const [name, value] of Object.entries({
+    slug: "s",
+    title: "t",
+    type: "INVITE_ONLY",
+    perk: "FOUNDING_EVENTS",
+    starts_at: "2026-11-07T10:00",
+    ends_at: "2026-11-07T12:00",
+    capacity: "5",
+  }))
+    form.set(name, value);
+  expect(eventInput(form)).toMatchObject({ qualifying_perk: "FOUNDING_EVENTS" });
+  form.set("type", "COMMUNITY");
+  expect(eventInput(form)).toMatchObject({ qualifying_perk: "" });
+});
+
 it("checks an attendee in by hand and cancels the event", async () => {
   const fetch = stubApi();
   vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -116,11 +157,49 @@ it("checks an attendee in by hand and cancels the event", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Cancel event" }));
   expect(window.confirm).toHaveBeenCalledWith("Cancel Beach cleanup? 2 people will be notified.");
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Event cancelled."));
+});
+
+it("shows the check-in QR code for a published event", async () => {
+  stubApi();
+  render(<EventEditor event="e-1" />);
   fireEvent.click(await screen.findByRole("button", { name: "Show check-in QR code" }));
   expect(screen.getByRole("img", { name: "Check-in QR code for Beach cleanup" })).toHaveAttribute(
     "src",
     "/api/donor/staff/events/e-1/check-in.svg",
   );
+});
+
+it("locks a cancelled event and offers no publish, cancel or QR actions", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() =>
+      Promise.resolve(
+        Response.json({ ...event, cancelled_at: "2026-11-01T00:00:00Z", next_offset: null, attendees: [] }),
+      ),
+    ),
+  );
+  const { container } = render(<EventEditor event="e-1" />);
+  expect(await screen.findByText(/cancelled/i)).toBeInTheDocument();
+  expect(container.querySelector("fieldset")).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Cancel event" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Publish event" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Show check-in QR code" })).not.toBeInTheDocument();
+});
+
+it("creates a draft and opens it", async () => {
+  const fetch = vi.fn(() => Promise.resolve(Response.json({ id: "new/1" })));
+  vi.stubGlobal("fetch", fetch);
+  const { container } = render(<EventEditor event={null} />);
+  const set = (name: string, value: string) =>
+    fireEvent.change(container.querySelector(`[name="${name}"]`) as HTMLInputElement, { target: { value } });
+  set("slug", "new-event");
+  set("title", "New event");
+  set("starts_at", "2026-11-07T10:00");
+  set("ends_at", "2026-11-07T12:00");
+  set("capacity", "10");
+  fireEvent.submit(container.querySelector("form") as HTMLFormElement);
+  await waitFor(() => expect(push).toHaveBeenCalledWith("/staff/events/new%2F1"));
+  expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/events$/), expect.objectContaining({ method: "POST" }));
 });
 
 it("pages the RSVP roster while retaining full event totals", async () => {
