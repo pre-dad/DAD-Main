@@ -5,7 +5,10 @@ import Initiatives from "./Initiatives";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 const initiative = {
   id: "i-1",
@@ -99,6 +102,7 @@ it("reads the editor form into an initiative", () => {
 
 it("edits metrics, spend, rotation, and publishing", async () => {
   const fetch = stubApi();
+  vi.spyOn(window, "confirm").mockReturnValue(true);
   render(<InitiativeEditor initiative="i-1" />);
   expect(await screen.findByText(/Meals: 1,200 people · Draft/)).toBeInTheDocument();
 
@@ -164,4 +168,83 @@ it("shows the start date as a calendar day regardless of zone", async () => {
   stubApi();
   render(<Initiatives />);
   expect(await screen.findByText(/Started Mar 1, 2026/)).toBeInTheDocument();
+});
+
+it.each([
+  ["Publish initiative", "/i-1/publish"],
+  ["Remove Food", "/i-1/spend/delete"],
+  ["Delete metric 1", "/i-1/metrics/0/delete"],
+])("does nothing when %s is not confirmed", async (button, suffix) => {
+  const fetch = stubApi();
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  render(<InitiativeEditor initiative="i-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: button }));
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(posted(fetch, suffix)).toBeUndefined();
+});
+
+it("confirms before publishing a spend category", async () => {
+  const fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST") return Promise.resolve(Response.json({ updated: true }));
+    return Promise.resolve(
+      Response.json({
+        ...initiative,
+        metrics: [],
+        spend: [{ category: "Food", amount_minor: 90_000, publish_state: "DRAFT" }],
+      }),
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  render(<InitiativeEditor initiative="i-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Publish Food" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Spend published."));
+  expect(posted(fetch as ReturnType<typeof stubApi>, "/i-1/spend/publish")).toEqual({ category: "Food" });
+});
+
+it("clears the last success message when a new entry is invalid", async () => {
+  stubApi();
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  render(<InitiativeEditor initiative="i-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Exclude from rotation" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Excluded from the daily rotation."));
+  fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Meals" } });
+  fireEvent.change(screen.getByLabelText("Value"), { target: { value: "lots" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save metric" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("Enter the metric as a whole number.");
+  expect(screen.getByRole("status")).toBeEmptyDOMElement();
+});
+
+it("rejects a metric too large to store exactly", async () => {
+  const fetch = stubApi();
+  render(<InitiativeEditor initiative="i-1" />);
+  await screen.findByText(/Meals: 1,200 people/);
+  fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Meals" } });
+  fireEvent.change(screen.getByLabelText("Value"), { target: { value: "9007199254740993" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save metric" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("Enter the metric as a whole number.");
+  expect(posted(fetch, "/i-1/metrics/0")).toBeUndefined();
+});
+
+it("keeps unsaved edits across a rotation change but refreshes the form after saving it", async () => {
+  let current = { ...initiative, in_rotation: true, updated_at: "2026-10-01T12:00:00Z", metrics: [], spend: [] };
+  const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (init?.method === "POST") {
+      current = url.endsWith("/rotation")
+        ? { ...current, in_rotation: false, updated_at: "2026-10-02T12:00:00Z" }
+        : { ...current, title: "Saved title", updated_at: "2026-10-03T12:00:00Z" };
+      return Promise.resolve(Response.json({ updated: true }));
+    }
+    return Promise.resolve(Response.json(current));
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<InitiativeEditor initiative="i-1" />);
+  const title = await screen.findByLabelText("Title");
+  fireEvent.change(title, { target: { value: "Unsaved edit" } });
+  fireEvent.click(screen.getByRole("button", { name: "Exclude from rotation" }));
+  await screen.findByRole("button", { name: "Include in rotation" });
+  expect(screen.getByLabelText("Title")).toHaveValue("Unsaved edit");
+  fireEvent.click(screen.getByRole("button", { name: "Save initiative" }));
+  await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Saved title"));
 });
