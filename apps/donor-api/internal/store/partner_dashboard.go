@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
+	"math/rand/v2"
 	"strconv"
 	"time"
 
@@ -224,16 +225,25 @@ const (
 	partnerReportLimit   = 1000
 	partnerReportBytes   = 128 << 20
 	partnerReportsPerDay = 20
+	// partnerReportPDFMax bounds a single rendered report PDF.
+	partnerReportPDFMax = 2 << 20
+	// partnerReportRetryBackoff is the base delay, jittered, before retrying a conflicting export.
+	partnerReportRetryBackoff = 25 * time.Millisecond
 )
 
+// ErrPartnerReportStorage is returned when the organization's stored reports reach the count or byte limit.
 var ErrPartnerReportStorage = errors.New("report storage limit reached; existing reports remain available")
 
+// PartnerReportDailyLimit is returned when the organization has created its quota of new reports today.
+// RetryAt is the next UTC midnight.
 type PartnerReportDailyLimit struct{ RetryAt time.Time }
 
 func (PartnerReportDailyLimit) Error() string {
 	return "Today's new report limit has been reached. Download an existing report or try again after midnight UTC."
 }
 
+// ExportReport returns the organization's report PDF, reusing the stored one when the figures are unchanged.
+// Serialization conflicts are retried a few times with a short jittered pause.
 func (s PartnerDashboardService) ExportReport(ctx context.Context, token string) ([]byte, error) {
 	for attempt := 0; ; attempt++ {
 		pdf, err := s.exportReport(ctx, token)
@@ -242,6 +252,12 @@ func (s PartnerDashboardService) ExportReport(ctx context.Context, token string)
 			(databaseError.Code == "23505" && databaseError.ConstraintName == "donor_partner_reports_snapshot_key"))
 		if !retryable || attempt >= 2 || ctx.Err() != nil {
 			return pdf, err
+		}
+		pause := partnerReportRetryBackoff * time.Duration(attempt+1)
+		select {
+		case <-time.After(pause/2 + rand.N(pause)):
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
 	}
 }
@@ -311,7 +327,7 @@ func (s PartnerDashboardService) exportReport(ctx context.Context, token string)
 			if err != nil {
 				return nil, err
 			}
-			if len(pdf) > 2<<20 {
+			if len(pdf) > partnerReportPDFMax {
 				return nil, ErrPartnerReportTooLarge
 			}
 			if usage.Bytes+int64(len(pdf)) > partnerReportBytes {
