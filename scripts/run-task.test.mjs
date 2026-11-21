@@ -96,7 +96,9 @@ test("runs the task, waits for it to stop, and succeeds when the container exits
 
 test("fails when the container exits non-zero, so the next step does not run", () => {
   const r = run(["staging", "migrate"], {
-    STUB_DESCRIBE_JSON: stoppedWith([maint("migrate", { exitCode: 3 })], { stoppedReason: "Essential container in task exited" }),
+    STUB_DESCRIBE_JSON: stoppedWith([maint("migrate", { exitCode: 3 })], {
+      stoppedReason: "Essential container in task exited",
+    }),
   });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /dad-maint-migrate: container exit code 3: Essential container in task exited/);
@@ -152,10 +154,11 @@ test("DAD_WAIT=false starts the task and returns without waiting", () => {
 });
 
 test("with a task-definitions file, runs the pinned revision of dad-maint-<task>", () => {
-  const r = run(["staging", "provision-roles"], { STUB_DESCRIBE_JSON: stoppedWith([maint("provision-roles", { exitCode: 0 })]) }, [
-    `dad-maint-migrate=${TD("dad-maint-migrate")}`,
-    `dad-maint-provision-roles=${TD("dad-maint-provision-roles")}`,
-  ]);
+  const r = run(
+    ["staging", "provision-roles"],
+    { STUB_DESCRIBE_JSON: stoppedWith([maint("provision-roles", { exitCode: 0 })]) },
+    [`dad-maint-migrate=${TD("dad-maint-migrate")}`, `dad-maint-provision-roles=${TD("dad-maint-provision-roles")}`],
+  );
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.calls, new RegExp(`--task-definition ${TD("dad-maint-provision-roles")} `));
   assert.doesNotMatch(r.calls, /dad-maint-migrate/);

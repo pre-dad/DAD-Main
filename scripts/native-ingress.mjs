@@ -9,6 +9,7 @@ const methods = new Set(["get", "post", "put", "patch", "delete"]);
 const categories = new Set(["read", "auth", "visitor", "account", "analytics"]);
 const escapePattern = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+// PCRE's `$` also matches before a final newline in the decoded URI, so patterns end with `\z`.
 export function nativeRules(source) {
   const rules = [];
   for (const [path, item] of Object.entries(nativeContract(source).paths)) {
@@ -21,8 +22,8 @@ export function nativeRules(source) {
         .split(/(\{[^{}]+\})/)
         .map((part) => (part.startsWith("{") ? "[^/]+" : escapePattern(part)))
         .join("");
-      rules.push({ pattern: `^${method.toUpperCase()}:${pattern}$`, category });
-      if (method === "get") rules.push({ pattern: `^HEAD:${pattern}$`, category });
+      rules.push({ pattern: `^${method.toUpperCase()}:${pattern}\\z`, category });
+      if (method === "get") rules.push({ pattern: `^HEAD:${pattern}\\z`, category });
     }
   }
   return rules;

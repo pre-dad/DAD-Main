@@ -251,7 +251,7 @@ check 'native host refuses browser requests' 403 "$(status https://native.test/d
 check 'native host refuses cookies' 403 "$(status -H 'X-DAD-Client: native' -H 'Cookie: dad_session=synthetic' https://native.test/donor/me/profile)"
 check 'native host refuses Origin' 403 "$(status -H 'X-DAD-Client: native' -H 'Origin: https://native.test' https://native.test/donor/me/profile)"
 check 'native host admits its supported sign-in operation' 200 "$(status -X POST -H 'X-DAD-Client: native' https://native.test/donor/login)"
-for path in /donor/staff/me /donor/staff/sign-in /donor/checkouts /api/donor/me/profile /health/ready /staff; do
+for path in /donor/staff/me /donor/staff/sign-in /donor/checkouts /api/donor/me/profile /health/ready /staff /donor/login%0A; do
   check "native host hides $path" 404 "$(status -X POST -H 'X-DAD-Client: native' "https://native.test$path")"
 done
 check 'native ingress refuses unsupported methods' 405 "$(status -X DELETE -H 'X-DAD-Client: native' https://native.test/donor/login)"

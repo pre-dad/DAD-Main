@@ -5,7 +5,8 @@ import { nativeRules, render } from "./native-ingress.mjs";
 
 const source = JSON.parse(await readFile(new URL("../apps/donor-api/api/openapi.json", import.meta.url)));
 const rules = nativeRules(source);
-const permits = (method, path) => rules.some(({ pattern }) => new RegExp(pattern).test(`${method}:${path}`));
+const permits = (method, path) =>
+  rules.some(({ pattern }) => new RegExp(pattern.replaceAll("\\z", "$(?![\\s\\S])")).test(`${method}:${path}`));
 test("native ingress admits supported authentication and donor operations", () => {
   for (const [method, path] of [
     ["POST", "/donor/login"],
@@ -32,6 +33,7 @@ test("native path parameters cannot cross a path segment or regex boundary", () 
     "/events/example/calendarXics",
     "/events/example/extra/calendar.ics",
     "/events/example/calendar.ics/extra",
+    "/events/example/calendar.ics\n",
   ])
     assert.equal(permits("GET", path), false, path);
 });
@@ -44,10 +46,10 @@ test("native HEAD inherits the admitted GET operation", () => {
 test("render emits parameterised operations, HEAD entries and allowed methods", () => {
   const out = render(source);
   assert.match(out, /map "\$request_method:\$uri" \$native_operation_class \{/);
-  assert.ok(out.includes('"~^POST:/donor/referrals/[^/]+$" visitor;'));
-  assert.ok(out.includes('"~^HEAD:/health/live$" read;'));
-  assert.ok(out.includes('"~^/health/live$" "GET, HEAD";'));
-  assert.ok(out.includes('"~^/donor/login$" "POST";'));
+  assert.ok(out.includes('"~^POST:/donor/referrals/[^/]+\\\\z" visitor;'));
+  assert.ok(out.includes('"~^HEAD:/health/live\\\\z" read;'));
+  assert.ok(out.includes('"~^/health/live\\\\z" "GET, HEAD";'));
+  assert.ok(out.includes('"~^/donor/login\\\\z" "POST";'));
 });
 
 const synthetic = (path, operation) => ({
