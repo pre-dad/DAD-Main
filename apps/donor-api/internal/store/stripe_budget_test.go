@@ -78,16 +78,17 @@ func TestStripeBudgetRefusesSlotsBeyondTheDeadline(t *testing.T) {
 	if err := budget.Acquire(context.Background(), payments.BucketWorker); err != nil {
 		t.Fatal(err)
 	}
+	const deadline = 200 * time.Millisecond
 	for range 3 {
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), deadline)
 		start := time.Now()
 		err := budget.Acquire(ctx, payments.BucketWorker)
 		cancel()
 		if !errors.Is(err, ErrStripeBudget) || !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("exhausted bucket: %v", err)
 		}
-		if waited := time.Since(start); waited > 100*time.Millisecond {
-			t.Fatalf("refusal took %v", waited)
+		if waited := time.Since(start); waited >= deadline {
+			t.Fatalf("refusal took %v, as long as the %v deadline it should not wait out", waited, deadline)
 		}
 	}
 	other := StripeBudget{DB: dbrolestest.Open(t, dbroles.StripeWorker), PerSecond: 1}

@@ -133,7 +133,7 @@ func TestAppBindsItsCompanyTouchAfterSignIn(t *testing.T) {
 	cleanup(t, "DELETE FROM donor_company_touches WHERE token_hash=$1", HashToken(capture.Token))
 	id, _ := donor(t, pool)
 	cleanup(t, "DELETE FROM donor_partner_employees WHERE donor_id=$1", id)
-	token := claimSession(t, pool, id, app).Access
+	token := claimSession(t, pool, id, appClient).Access
 
 	if _, err := donors.BindCompanyTouch(ctx, strings.Repeat("x", 43), capture.Token); !errors.Is(err, ErrDenied) {
 		t.Fatalf("bound without a session: %v", err)

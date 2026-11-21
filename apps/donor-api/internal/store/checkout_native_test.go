@@ -24,7 +24,7 @@ func nativeCheckoutParams(t *testing.T, gateway *checkoutGateway, call int) map[
 func TestNativeCheckoutOpensTheSignedInDonorsMonthlyGift(t *testing.T) {
 	service, request, id, gateway := checkoutFixture(t)
 	ctx := context.Background()
-	token := claimSession(t, database(t), id, app).Access
+	token := claimSession(t, database(t), id, appClient).Access
 
 	result, err := service.BeginNativeCheckout(ctx, token, request.RequestID, 6000, nil)
 	if err != nil {
@@ -81,7 +81,7 @@ func reservationHolder(t *testing.T, f *workerFixture) (holder string, count int
 func nativeRestartFixture(t *testing.T) (*workerFixture, *checkoutGateway, string, payments.NativeCheckoutResult) {
 	t.Helper()
 	f := newWorkerFixture(t, "MONTHLY")
-	token := claimSession(t, f.db, f.donorID, app).Access
+	token := claimSession(t, f.db, f.donorID, appClient).Access
 	first, err := f.service.BeginNativeCheckout(context.Background(), token, f.request.RequestID, 3000, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -268,7 +268,7 @@ func TestNativeCheckoutRestartsRaceToOneOpenSession(t *testing.T) {
 func TestNativeCheckoutRefusesAnInvalidAmountOrSession(t *testing.T) {
 	service, request, id, gateway := checkoutFixture(t)
 	ctx := context.Background()
-	token := claimSession(t, database(t), id, app).Access
+	token := claimSession(t, database(t), id, appClient).Access
 	for _, amount := range []int64{0, 2999, 4500, 93000} {
 		if _, err := service.BeginNativeCheckout(ctx, token, request.RequestID, amount, nil); !errors.Is(err, payments.ErrCheckoutInput) {
 			t.Errorf("amount %d: %v", amount, err)
@@ -289,7 +289,7 @@ func TestNativeCheckoutRefusesAnInvalidAmountOrSession(t *testing.T) {
 
 func TestNativeCheckoutReturnsToItsOwnOrigin(t *testing.T) {
 	service, request, id, gateway := checkoutFixture(t)
-	token := claimSession(t, database(t), id, app).Access
+	token := claimSession(t, database(t), id, appClient).Access
 	service.NativeReturnOrigin = "https://app.example.org"
 	if _, err := service.BeginNativeCheckout(context.Background(), token, request.RequestID, 3000, nil); err != nil {
 		t.Fatal(err)
@@ -306,7 +306,7 @@ func TestNativeCheckoutReturnsToItsOwnOrigin(t *testing.T) {
 func TestNativeCheckoutCompletesThroughTheWebhook(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
 	ctx := context.Background()
-	token := claimSession(t, f.db, f.donorID, app).Access
+	token := claimSession(t, f.db, f.donorID, appClient).Access
 	started, err := f.service.BeginNativeCheckout(ctx, token, f.request.RequestID, 3000, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -362,7 +362,7 @@ func TestNativeCheckoutCreditsTheAppsReferral(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	token := claimSession(t, pool, id, app).Access
+	token := claimSession(t, pool, id, appClient).Access
 	referrerOf := func(call int) any {
 		params := nativeCheckoutParams(t, gateway, call)
 		return params["subscription_data"].(map[string]any)["metadata"].(map[string]any)["dad_referrer_id"]

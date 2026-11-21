@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var app = Client{App: true, Device: "Test phone", Platform: "ANDROID"}
+var appClient = Client{App: true, Device: "Test phone", Platform: "ANDROID"}
 
 func claimSession(t *testing.T, pool *pgxpool.Pool, donor pgtype.UUID, client Client) Tokens {
 	t.Helper()
@@ -104,7 +104,7 @@ func TestRefreshRotatesAndRetiresTheOldAccessToken(t *testing.T) {
 	pool := database(t)
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
-	first := claimSession(t, pool, id, app)
+	first := claimSession(t, pool, id, appClient)
 	second := refresh(t, first.Refresh)
 	if signedInAs(t, pool, first.Access) || !signedInAs(t, pool, second.Access) {
 		t.Fatal("refresh must replace the access token at once")
@@ -125,10 +125,10 @@ func TestReusedRefreshTokenRevokesTheWholeSession(t *testing.T) {
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	ctx := context.Background()
-	stolen := claimSession(t, pool, id, app)
+	stolen := claimSession(t, pool, id, appClient)
 	rotated := refresh(t, stolen.Refresh)
 	latest := refresh(t, rotated.Refresh)
-	other := claimSession(t, pool, id, app)
+	other := claimSession(t, pool, id, appClient)
 	if _, err := (AccountService{DB: api}).Refresh(ctx, stolen.Refresh); !errors.Is(err, ErrDenied) {
 		t.Fatalf("reused token: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestRefreshGraceAnswersALostResponseOnce(t *testing.T) {
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	ctx := context.Background()
-	original := claimSession(t, pool, id, app)
+	original := claimSession(t, pool, id, appClient)
 	lost := refresh(t, original.Refresh)
 	retried := refresh(t, original.Refresh)
 	if signedInAs(t, pool, lost.Access) || !signedInAs(t, pool, retried.Access) {
@@ -164,7 +164,7 @@ func TestRefreshGraceAnswersALostResponseOnce(t *testing.T) {
 		t.Fatalf("a superseded token must count as reuse: %v", err)
 	}
 
-	original = claimSession(t, pool, id, app)
+	original = claimSession(t, pool, id, appClient)
 	next := refresh(t, original.Refresh)
 	if _, err := pool.Exec(ctx, "UPDATE donor_sessions SET refreshed_at=refreshed_at-$2::interval WHERE token_hash=$1", HashToken(next.Access), (refreshGrace + time.Second).String()); err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestConcurrentRefreshesLetTheLaterAnswerWin(t *testing.T) {
 	api := as(t, dbroles.API)
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
-	original := claimSession(t, pool, id, app)
+	original := claimSession(t, pool, id, appClient)
 	results := make(chan Tokens, 2)
 	start := make(chan struct{})
 	var wg sync.WaitGroup
@@ -231,7 +231,7 @@ func TestSessionExpiry(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	tokens := claimSession(t, pool, id, app)
+	tokens := claimSession(t, pool, id, appClient)
 	expire("expires_at", tokens.Access)
 	if signedInAs(t, pool, tokens.Access) {
 		t.Fatal("expired access token accepted")
@@ -248,7 +248,7 @@ func TestSessionExpiry(t *testing.T) {
 		t.Fatal("expiry recorded as reuse")
 	}
 
-	tokens = claimSession(t, pool, id, app)
+	tokens = claimSession(t, pool, id, appClient)
 	if _, err := pool.Exec(ctx, "UPDATE donor_sessions SET created_at=now()-$2::interval WHERE token_hash=$1", HashToken(tokens.Access), (refreshLimit - 5*time.Minute).String()); err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestDonorListsAndSignsOutSessions(t *testing.T) {
 	ctx := context.Background()
 	service := DonorService{DB: api}
 	browser := claimSession(t, pool, id, Client{})
-	phone := claimSession(t, pool, id, app)
+	phone := claimSession(t, pool, id, appClient)
 	tablet := claimSession(t, pool, id, Client{App: true, Platform: "IOS"})
 	ended := claimSession(t, pool, id, Client{})
 	if err := (AccountService{DB: api}).SignOut(ctx, ended.Access); err != nil {
@@ -406,7 +406,7 @@ func TestDisabledDonorAndRevokedSessionsAreDeniedAtOnce(t *testing.T) {
 	pool := database(t)
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
-	revoked := claimSession(t, pool, id, app)
+	revoked := claimSession(t, pool, id, appClient)
 	live := claimSession(t, pool, id, Client{})
 	if _, err := pool.Exec(context.Background(), "UPDATE donor_sessions SET revoked_at=now() WHERE token_hash=$1", HashToken(revoked.Access)); err != nil {
 		t.Fatal(err)

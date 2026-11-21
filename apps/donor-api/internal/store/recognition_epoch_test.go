@@ -12,6 +12,7 @@ import (
 	"dad/donor-api/internal/store/queries"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // epochFixture seeds donors whose projections are current, then restores the
@@ -79,14 +80,35 @@ func currentVersion(t *testing.T) int32 {
 // save stores a milestone ladder that differs from the previous call's.
 func (f epochFixture) save(t *testing.T, first int64) {
 	t.Helper()
+	if err := f.trySave(first); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// trySave is save for goroutines, where FailNow is not allowed.
+func (f epochFixture) trySave(first int64) error {
 	rules, err := f.rules.Rules(context.Background(), f.admin)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	rules.Milestones = []int64{first, 30, 100, 365}
-	if err := f.rules.SetRules(context.Background(), f.admin, rules); err != nil {
-		t.Fatal(err)
+	return f.rules.SetRules(context.Background(), f.admin, rules)
+}
+
+// drain refreshes due projections in batches until none remain, failing the
+// test if that takes more batches than the fixture has donors.
+func (f epochFixture) drain(t *testing.T, worker *pgxpool.Pool, batch int) {
+	t.Helper()
+	for range len(f.ids) + 1 {
+		n, err := RefreshDueProjections(context.Background(), worker, f.now, batch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			return
+		}
 	}
+	t.Fatalf("projections still due after %d batches of %d", len(f.ids)+1, batch)
 }
 
 func (f epochFixture) current(t *testing.T, pool queries.DBTX) int {
@@ -160,7 +182,7 @@ func TestOutdatedProjectionsConvergeInBoundedResumableSteps(t *testing.T) {
 		t.Fatalf("interrupted step refreshed %d donors", n)
 	}
 	steps := 0
-	for {
+	for range len(f.ids) + 1 {
 		n, err := RefreshDueProjections(ctx, worker, f.now, batch)
 		if err != nil {
 			t.Fatal(err)
@@ -234,32 +256,19 @@ func TestRulesSavedDuringARefreshConvergeToTheLatestEpoch(t *testing.T) {
 	if n := f.current(t, pool); n != 0 {
 		t.Fatalf("%d projections current after a second save", n)
 	}
-	var wg sync.WaitGroup
-	wg.Add(1)
+	saved := make(chan error, 1)
 	go func() {
-		defer wg.Done()
-		f.save(t, 11)
-		f.save(t, 13)
+		if err := f.trySave(11); err != nil {
+			saved <- err
+			return
+		}
+		saved <- f.trySave(13)
 	}()
-	for {
-		n, err := RefreshDueProjections(ctx, worker, f.now, 6)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n == 0 {
-			break
-		}
+	f.drain(t, worker, 6)
+	if err := <-saved; err != nil {
+		t.Fatal(err)
 	}
-	wg.Wait()
-	for {
-		n, err := RefreshDueProjections(ctx, worker, f.now, 6)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n == 0 {
-			break
-		}
-	}
+	f.drain(t, worker, 6)
 	if n := f.current(t, pool); n != len(f.ids) {
 		t.Fatalf("%d of %d donors current at the latest epoch", n, len(f.ids))
 	}

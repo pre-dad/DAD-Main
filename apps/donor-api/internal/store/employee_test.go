@@ -343,7 +343,7 @@ func TestEmployeeEnrollAndTeams(t *testing.T) {
 				t.Fatal(err)
 			}
 			mustExec(t, pool, `UPDATE donor_metric_projections SET active=$2, current_monthly_minor=$3,
-				streak_since=now()-interval '40 days' WHERE donor_id=$1`, id, amount > 0, amount)
+				streak_since=(now() AT TIME ZONE 'America/New_York' - interval '40 days') AT TIME ZONE 'America/New_York' WHERE donor_id=$1`, id, amount > 0, amount)
 		}
 	}
 	fill("Ops", []int64{9000, 0, 0, 0, 0})

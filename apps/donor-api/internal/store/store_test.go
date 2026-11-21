@@ -110,7 +110,15 @@ func donor(t *testing.T, pool *pgxpool.Pool) (pgtype.UUID, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		for _, query := range []string{"DELETE FROM donor_session_events WHERE donor_id=$1", "DELETE FROM donor_sessions WHERE donor_id=$1", "DELETE FROM donor_login_links WHERE donor_id=$1", "DELETE FROM donor_metric_projections WHERE donor_id=$1", "DELETE FROM donor_payment_methods WHERE donor_id=$1", "DELETE FROM donor_device_marks WHERE donor_id=$1", "DELETE FROM donors WHERE id=$1"} {
+		for _, query := range []string{
+			"DELETE FROM donor_session_events WHERE donor_id=$1",
+			"DELETE FROM donor_sessions WHERE donor_id=$1",
+			"DELETE FROM donor_login_links WHERE donor_id=$1",
+			"DELETE FROM donor_metric_projections WHERE donor_id=$1",
+			"DELETE FROM donor_payment_methods WHERE donor_id=$1",
+			"DELETE FROM donor_device_marks WHERE donor_id=$1",
+			"DELETE FROM donors WHERE id=$1",
+		} {
 			if _, err := pool.Exec(ctx, query, id); err != nil {
 				t.Error(err)
 			}
@@ -143,6 +151,9 @@ func link(t *testing.T, pool *pgxpool.Pool, id pgtype.UUID, now time.Time) strin
 func TestOpenSizesThePoolFromTheDatabaseURL(t *testing.T) {
 	database(t)
 	url := os.Getenv("TEST_DATABASE_URL")
+	if strings.Contains(url, "pool_max_conns") {
+		t.Skip("TEST_DATABASE_URL already sets pool_max_conns")
+	}
 	separator := "?"
 	if strings.Contains(url, "?") {
 		separator = "&"
@@ -172,10 +183,8 @@ func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 	results := make(chan error, 2)
 	sessions := make(chan string, 2)
 	start := make(chan struct{})
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 2 {
+		wg.Go(func() {
 			<-start
 			ctx := context.Background()
 			tx, err := api.Begin(ctx)
@@ -192,7 +201,7 @@ func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 				}
 			}
 			results <- err
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()

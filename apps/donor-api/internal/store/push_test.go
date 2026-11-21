@@ -157,7 +157,7 @@ func TestEndingASessionClearsItsPushToken(t *testing.T) {
 	accountCleanup(t, pool, id)
 	register := func(token string) Tokens {
 		t.Helper()
-		session := claimSession(t, pool, id, app)
+		session := claimSession(t, pool, id, appClient)
 		if _, err := service.RegisterDevice(ctx, session.Access, PushDevice{Platform: push.Android, Token: token}); err != nil {
 			t.Fatal(err)
 		}
