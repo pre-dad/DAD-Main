@@ -1,13 +1,17 @@
 import { authenticate } from "./auth";
-import { LedgerError } from "./ledger";
+import { LedgerError, type Principal } from "./ledger";
 
 export { LedgerStore } from "./store";
 
-const LIMIT = 16 * 1024 * 1024;
-async function body(request: Request): Promise<unknown> {
+const MIGRATION_LIMIT = 16 * 1024 * 1024;
+// A ledger is capped at 1 MiB; the allowance covers the request envelope.
+const COMMAND_LIMIT = 1024 * 1024 + 64 * 1024;
+async function body(request: Request, limit: number): Promise<unknown> {
 	if (!request.headers.get("content-type")?.startsWith("application/json"))
 		throw new LedgerError("JSON required", 415);
 	if (!request.body) throw new LedgerError("Body required");
+	const declared = Number(request.headers.get("content-length") ?? "0");
+	if (declared > limit) throw new LedgerError("Body too large", 413);
 	const reader = request.body.getReader();
 	const chunks: Uint8Array[] = [];
 	let size = 0;
@@ -15,7 +19,7 @@ async function body(request: Request): Promise<unknown> {
 		const next = await reader.read();
 		if (next.done) break;
 		size += next.value.byteLength;
-		if (size > LIMIT) {
+		if (size > limit) {
 			await reader.cancel();
 			throw new LedgerError("Body too large", 413);
 		}
@@ -36,6 +40,12 @@ async function body(request: Request): Promise<unknown> {
 	}
 }
 
+function cursor(value: string | null): number {
+	if (value !== null && !/^\d+$/.test(value))
+		throw new LedgerError("Invalid history cursor");
+	return Number(value ?? "0");
+}
+
 export default {
 	async fetch(request: Request, env: Env): Promise<Response> {
 		const headers = {
@@ -44,7 +54,13 @@ export default {
 			"Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
 		};
 		try {
-			if (!(await env.INGRESS.limit({ key: "atm-ledger" })).success)
+			if (
+				!(
+					await env.INGRESS.limit({
+						key: request.headers.get("cf-connecting-ip") ?? "unknown",
+					})
+				).success
+			)
 				throw new LedgerError("Ledger ingress rate limit reached", 429);
 			const authorization = request.headers.get("authorization");
 			if (!authorization?.startsWith("Bearer "))
@@ -60,28 +76,59 @@ export default {
 				if (!result.ok) throw new LedgerError(result.detail, result.status);
 				return Response.json(result.value, { headers });
 			};
-			if (request.method === "GET" && url.pathname === "/v1/ledger")
-				return await call("snapshot", null);
-			if (
-				request.method === "GET" &&
-				url.pathname === "/v1/history" &&
-				principal.role === "admin"
-			)
-				return await call(
-					"history",
-					Number(url.searchParams.get("after") ?? "0"),
+			const routes: Record<
+				string,
+				{
+					method: string;
+					role: Principal["role"] | null;
+					run: () => Promise<Response>;
+				}
+			> = {
+				"/v1/ledger": {
+					method: "GET",
+					role: null,
+					run: () => call("snapshot", null),
+				},
+				"/v1/history": {
+					method: "GET",
+					role: "admin",
+					run: () => call("history", cursor(url.searchParams.get("after"))),
+				},
+				"/v1/publications": {
+					method: "POST",
+					role: "publish",
+					run: async () => call("publish", await body(request, COMMAND_LIMIT)),
+				},
+				"/v1/triage": {
+					method: "POST",
+					role: "admin",
+					run: async () => call("triage", await body(request, COMMAND_LIMIT)),
+				},
+				"/v1/migration": {
+					method: "POST",
+					role: "admin",
+					run: async () =>
+						call("migrate", await body(request, MIGRATION_LIMIT)),
+				},
+				"/v1/recovery": {
+					method: "POST",
+					role: "admin",
+					run: async () =>
+						call("recover", await body(request, MIGRATION_LIMIT)),
+				},
+			};
+			const route = Object.hasOwn(routes, url.pathname)
+				? routes[url.pathname]
+				: undefined;
+			if (!route) throw new LedgerError("Not found", 404);
+			if (request.method !== route.method)
+				return Response.json(
+					{ detail: "Method not allowed" },
+					{ status: 405, headers: { ...headers, Allow: route.method } },
 				);
-			if (request.method === "POST") {
-				if (url.pathname === "/v1/publications" && principal.role === "publish")
-					return await call("publish", await body(request));
-				if (url.pathname === "/v1/triage" && principal.role === "admin")
-					return await call("triage", await body(request));
-				if (url.pathname === "/v1/migration" && principal.role === "admin")
-					return await call("migrate", await body(request));
-				if (url.pathname === "/v1/recovery" && principal.role === "admin")
-					return await call("recover", await body(request));
-			}
-			throw new LedgerError("Operation is not authorized", 403);
+			if (route.role && principal.role !== route.role)
+				throw new LedgerError("Operation is not authorized", 403);
+			return await route.run();
 		} catch (error) {
 			if (error instanceof LedgerError)
 				return Response.json(
