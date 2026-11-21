@@ -249,7 +249,7 @@ func (a *api) partnerSaveProfile(w http.ResponseWriter, r *http.Request, session
 }
 
 func (a *api) partnerRemoveUser(w http.ResponseWriter, r *http.Request, session string) {
-	id, ok := pathID(w, r, "userID")
+	id, ok := pathID(w, r, "user_id")
 	if !ok {
 		return
 	}
@@ -415,7 +415,7 @@ func writeLogo(w http.ResponseWriter, r *http.Request, logo []byte) {
 }
 
 func (a *api) staffPartnerSaveLogo(w http.ResponseWriter, r *http.Request, session string) {
-	id, ok := pathID(w, r, "partnerID")
+	id, ok := pathID(w, r, "partner_id")
 	if !ok {
 		return
 	}
@@ -429,7 +429,7 @@ func (a *api) staffPartnerSaveLogo(w http.ResponseWriter, r *http.Request, sessi
 }
 
 func (a *api) staffPartnerLogo(w http.ResponseWriter, r *http.Request, session string) {
-	id, ok := pathID(w, r, "partnerID")
+	id, ok := pathID(w, r, "partner_id")
 	if !ok || !a.staffPartner().available(w, r) {
 		return
 	}
@@ -453,7 +453,7 @@ func (a *api) staffPartners(w http.ResponseWriter, r *http.Request, session stri
 }
 
 func (a *api) staffPartnerDetail(w http.ResponseWriter, r *http.Request, session string) {
-	id, ok := pathID(w, r, "partnerID")
+	id, ok := pathID(w, r, "partner_id")
 	if !ok {
 		return
 	}
@@ -461,7 +461,7 @@ func (a *api) staffPartnerDetail(w http.ResponseWriter, r *http.Request, session
 }
 
 func (a *api) staffPartnerInviteUser(w http.ResponseWriter, r *http.Request, session string) {
-	id, ok := pathID(w, r, "partnerID")
+	id, ok := pathID(w, r, "partner_id")
 	if !ok {
 		return
 	}
@@ -479,11 +479,11 @@ func (a *api) staffPartnerInviteUser(w http.ResponseWriter, r *http.Request, ses
 }
 
 func (a *api) staffPartnerRemoveUser(w http.ResponseWriter, r *http.Request, session string) {
-	id, ok := pathID(w, r, "partnerID")
+	id, ok := pathID(w, r, "partner_id")
 	if !ok {
 		return
 	}
-	userID, ok := pathID(w, r, "userID")
+	userID, ok := pathID(w, r, "user_id")
 	if !ok {
 		return
 	}
@@ -503,7 +503,7 @@ func (a *api) staffPartnerPending(w http.ResponseWriter, r *http.Request, sessio
 }
 
 func (a *api) staffPartnerApprove(w http.ResponseWriter, r *http.Request, session string) {
-	id, ok := pathID(w, r, "appID")
+	id, ok := pathID(w, r, "app_id")
 	if !ok {
 		return
 	}
@@ -517,7 +517,7 @@ func (a *api) staffPartnerApprove(w http.ResponseWriter, r *http.Request, sessio
 }
 
 func (a *api) staffPartnerReject(w http.ResponseWriter, r *http.Request, session string) {
-	id, ok := pathID(w, r, "appID")
+	id, ok := pathID(w, r, "app_id")
 	if !ok {
 		return
 	}
@@ -533,7 +533,7 @@ func (a *api) staffPartnerReject(w http.ResponseWriter, r *http.Request, session
 }
 
 func (a *api) staffPartnerLink(w http.ResponseWriter, r *http.Request, session string) {
-	id, ok := pathID(w, r, "partnerID")
+	id, ok := pathID(w, r, "partner_id")
 	if !ok {
 		return
 	}
@@ -555,7 +555,7 @@ func (a *api) staffPartnerLink(w http.ResponseWriter, r *http.Request, session s
 }
 
 func (a *api) staffPartnerMatch(w http.ResponseWriter, r *http.Request, session string) {
-	id, ok := pathID(w, r, "partnerID")
+	id, ok := pathID(w, r, "partner_id")
 	if !ok {
 		return
 	}
