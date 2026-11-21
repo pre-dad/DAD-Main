@@ -18,6 +18,11 @@ type Options<T> = {
   load?: (signal: AbortSignal) => Promise<T>;
   /** Runs once per successful load, before the page renders the data. */
   onLoad?: (data: T) => void;
+  /**
+   * Keeps the loaded data on screen while a different `path` loads, for paging
+   * within a record whose form or siblings must not unmount on every turn.
+   */
+  keepPrevious?: boolean;
 };
 
 /**
@@ -39,8 +44,8 @@ export function useApiResource<T>(path: string | null, options: Options<T> = {})
   useEffect(() => {
     if (path === null) return;
     const controller = new AbortController();
-    if (loaded.current !== path) setResource({ state: "loading" });
-    const { load = (signal: AbortSignal) => api<T>(path, { signal }) } = latest.current;
+    const { load = (signal: AbortSignal) => api<T>(path, { signal }), keepPrevious } = latest.current;
+    if (loaded.current !== path && !keepPrevious) setResource({ state: "loading" });
     load(controller.signal)
       .then((data) => {
         if (controller.signal.aborted) return;

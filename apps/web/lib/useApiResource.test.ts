@@ -109,3 +109,20 @@ it("gives each non-ready state its own copy", () => {
     "No such record.",
   );
 });
+
+it("keeps the previous data on screen while a new path loads when asked to", async () => {
+  let release: (value: unknown) => void = () => undefined;
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(reply(200, { n: 1 }))
+    .mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
+  vi.stubGlobal("fetch", fetch);
+  const { result, rerender } = renderHook(({ path }) => useApiResource<{ n: number }>(path, { keepPrevious: true }), {
+    initialProps: { path: "/donor/me/thing?page=1" },
+  });
+  await waitFor(() => expect(result.current.data).toEqual({ n: 1 }));
+  rerender({ path: "/donor/me/thing?page=2" });
+  expect(result.current.resource).toEqual({ state: "ready", data: { n: 1 } });
+  await act(async () => release(reply(200, { n: 2 })));
+  await waitFor(() => expect(result.current.data).toEqual({ n: 2 }));
+});
