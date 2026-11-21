@@ -327,8 +327,9 @@ it("downloads the verified report through a temporary object URL and refreshes t
   expect(createObjectURL).toHaveBeenCalledTimes(1);
   expect(click).toHaveBeenCalledTimes(1);
   expect(revokeObjectURL).toHaveBeenCalledWith("blob:report");
-  const historyReads = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith("/exports"));
-  expect(historyReads).toHaveLength(2);
+  await waitFor(() =>
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith("/exports"))).toHaveLength(2),
+  );
   click.mockRestore();
   Object.assign(URL, { createObjectURL: original.create, revokeObjectURL: original.revoke });
 });

@@ -19,7 +19,7 @@ it("tells the donor a wrong current password is wrong, not that they are signed 
   fireEvent.change(screen.getByLabelText(/Current password/), { target: { value: "typo" } });
   fireEvent.change(screen.getByLabelText("New password"), { target: { value: "a long and unique password" } });
   fireEvent.click(screen.getByRole("button", { name: "Save password" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Your current password is incorrect");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Your current password is incorrect"));
   expect(fetch).toHaveBeenCalledWith("/api/donor/me/password", expect.objectContaining({ method: "POST" }));
 });
 

@@ -30,7 +30,7 @@ it("says the code was not saved when the request fails, and retries on demand", 
     .mockResolvedValue(Response.json({ captured: true }));
   vi.stubGlobal("fetch", fetch);
   render(<CompanyLanding code="DELTA-7KQ4MX" />);
-  expect(await screen.findByRole("alert")).toHaveTextContent(/offline/);
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/offline/));
   expect(screen.getByText(/was not saved for this browser/)).toBeVisible();
   expect(screen.getByRole("link", { name: "Start giving $1 a day" })).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Try saving the code again" }));

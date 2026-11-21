@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { PasskeySignIn } from "./PasskeySignIn";
 
@@ -58,8 +58,10 @@ it("treats a cancelled prompt as a choice and lets the donor retry from the same
   const button = screen.getByRole("button", { name: "Sign in with a passkey" });
   button.focus();
   fireEvent.click(button);
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Passkey sign-in was cancelled or timed out. Try again, or use an email link.",
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Passkey sign-in was cancelled or timed out. Try again, or use an email link.",
+    ),
   );
   expect(fetch).toHaveBeenCalledTimes(1);
   expect(button).not.toHaveAttribute("aria-disabled");
@@ -71,8 +73,10 @@ it("points a donor whose passkey is refused to the email link", async () => {
   api(new Response(JSON.stringify({ detail: "Passkey or ceremony invalid or expired" }), { status: 401 }));
   render(<PasskeySignIn />);
   fireEvent.click(screen.getByRole("button", { name: "Sign in with a passkey" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "That passkey isn’t linked to a donor account. Sign in with an email link",
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "That passkey isn’t linked to a donor account. Sign in with an email link",
+    ),
   );
 });
 

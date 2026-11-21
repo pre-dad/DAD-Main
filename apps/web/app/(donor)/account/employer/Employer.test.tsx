@@ -83,7 +83,9 @@ it("reports the API's reason when a company code cannot be linked", async () => 
   render(<Employer />);
   fireEvent.change(await screen.findByLabelText("Company code"), { target: { value: "DELTA" } });
   fireEvent.click(screen.getByRole("button", { name: "Link my employer" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Your account is already linked to another employer");
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent("Your account is already linked to another employer"),
+  );
 });
 
 it("offers a retry when the employer details cannot load", async () => {
@@ -93,7 +95,7 @@ it("offers a retry when the employer details cannot load", async () => {
     .mockResolvedValueOnce(Response.json({ partner_id: "", organization: "", leaderboard: [] }));
   vi.stubGlobal("fetch", fetch);
   render(<Employer />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("could not be loaded");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("could not be loaded"));
   fireEvent.click(screen.getByRole("button", { name: "Retry loading" }));
   expect(await screen.findByLabelText("Company code")).toBeInTheDocument();
 });
@@ -109,7 +111,7 @@ it("joins a team with the trimmed name, then reloads the employer", async () => 
   render(<Employer />);
   fireEvent.change(await screen.findByLabelText("Join a team"), { target: { value: "  Platform  " } });
   fireEvent.click(screen.getByRole("button", { name: "Join team" }));
-  expect(await screen.findByRole("status")).toHaveTextContent("You’ve joined the Platform team.");
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("You’ve joined the Platform team."));
   const post = fetch.mock.calls.find(([, init]) => init?.method === "POST");
   expect(JSON.parse(String(post?.[1]?.body))).toEqual({ name: "Platform" });
   expect(await screen.findByRole("button", { name: "Change team" })).toBeVisible();

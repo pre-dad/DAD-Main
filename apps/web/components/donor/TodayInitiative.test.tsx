@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { TodayInitiative } from "./TodayInitiative";
 
@@ -63,7 +63,7 @@ it("shows a loading status while spending is fetched, then the categories", asyn
   let finish: (response: Response) => void = () => {};
   respond(() => new Promise<Response>((resolve) => (finish = resolve)));
   await openSpend();
-  expect(await screen.findByRole("status")).toHaveTextContent("Loading spending…");
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Loading spending…"));
   finish(Response.json({ total_minor: 5000, categories: [{ category: "Food", amount_minor: 5000 }] }));
   expect(await screen.findByText("Food: $50.00")).toBeInTheDocument();
   expect(screen.getByText("Total: $50.00")).toBeInTheDocument();

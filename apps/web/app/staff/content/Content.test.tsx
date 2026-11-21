@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import Content from "./Content";
 
@@ -55,7 +55,7 @@ it("explains a rejected upload for a role without permission", async () => {
     target: { files: [new File(["signed"], "approval.pdf")] },
   });
   submitUpload();
-  expect(await screen.findByRole("alert")).toHaveTextContent("does not permit storing source documents");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("does not permit storing source documents"));
 });
 
 it("clears the previous success message when the next file is too large", async () => {
@@ -91,6 +91,7 @@ it("empties the file chooser after a successful upload so the same file is not r
   });
   submitUpload();
   await screen.findByText(/Source stored:/);
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
   submitUpload();
   expect(fetch).toHaveBeenCalledTimes(3);
 });

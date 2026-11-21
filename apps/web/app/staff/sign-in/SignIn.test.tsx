@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import SignIn from "./SignIn";
 
@@ -90,8 +90,10 @@ it("blames the device, not the browser, when no suitable passkey is available", 
   api(new Response("{}", { status: 500 }));
   render(<SignIn />);
   fireEvent.click(screen.getByRole("button", { name: "Sign in with a passkey" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "This device can’t use a passkey here. Try another browser, your phone, or a security key.",
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This device can’t use a passkey here. Try another browser, your phone, or a security key.",
+    ),
   );
 });
 
@@ -100,7 +102,7 @@ it("explains a passkey the server refuses", async () => {
   api(new Response(JSON.stringify({ detail: "Passkey, invitation, or session invalid or expired" }), { status: 401 }));
   render(<SignIn />);
   fireEvent.click(screen.getByRole("button", { name: "Sign in with a passkey" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("That passkey wasn’t accepted.");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("That passkey wasn’t accepted."));
 });
 
 it("says when the browser cannot use passkeys", () => {

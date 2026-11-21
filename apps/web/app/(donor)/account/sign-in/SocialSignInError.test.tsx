@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import { SocialSignInError } from "./SocialSignInError";
 
@@ -10,7 +10,7 @@ it.each([
 ])("explains social_error=%s", async (value, copy) => {
   window.history.replaceState(null, "", `/account/sign-in?social_error=${value}`);
   render(<SocialSignInError />);
-  expect(await screen.findByRole("alert")).toHaveTextContent(copy);
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(copy));
 });
 
 it("says nothing without a social sign-in error", () => {
