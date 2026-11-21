@@ -25,8 +25,8 @@ func TestSignupDoesNotOverwriteConcurrentlyCreatedProfile(t *testing.T) {
 	defer first.Rollback(ctx)
 	q := queries.New(first)
 	mustExec(t, first, "DELETE FROM donors WHERE id=$1", id)
-	// Use a fresh address: the committed fixture above must remain invisible to
-	// the second signup's initial lookup.
+	// The address differs from the fixture donor's, so the second signup finds
+	// no account until the open transaction commits.
 	email := "signup-" + id.String() + "@example.org"
 	if err = q.LockEmailIdentity(ctx, email); err != nil {
 		t.Fatal(err)
@@ -81,6 +81,10 @@ func TestSignupCreatesProfileAndQueuesSupportedSignInDestination(t *testing.T) {
 	id, _ := donor(t, pool)
 	mustExec(t, pool, "DELETE FROM donors WHERE id=$1", id)
 	email := "new-signup-" + id.String() + "@example.org"
+	for _, table := range []string{"donor_login_emails", "donor_metric_projections"} {
+		cleanup(t, "DELETE FROM "+table+" WHERE donor_id IN (SELECT id FROM donors WHERE email=$1)", email)
+	}
+	cleanup(t, "DELETE FROM donors WHERE email=$1", email)
 	s := PasswordService{DB: as(t, dbroles.API)}
 	if err := s.Signup(ctx, SignupInput{Name: "New Donor", Email: email, City: "Boston", Zip: "02108"}); err != nil {
 		t.Fatal(err)
@@ -89,11 +93,6 @@ func TestSignupCreatesProfileAndQueuesSupportedSignInDestination(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT id,full_name FROM donors WHERE email=$1", email).Scan(&id, &name); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		cleanExec(t, "DELETE FROM donor_login_emails WHERE donor_id=$1", id)
-		cleanExec(t, "DELETE FROM donor_metric_projections WHERE donor_id=$1", id)
-		cleanExec(t, "DELETE FROM donors WHERE id=$1", id)
-	})
 	if err := pool.QueryRow(ctx, "SELECT return_path FROM donor_login_emails WHERE donor_id=$1", id).Scan(&path); err != nil {
 		t.Fatal(err)
 	}
