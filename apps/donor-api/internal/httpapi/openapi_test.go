@@ -200,7 +200,7 @@ func TestContractDocumentsWrapperStatuses(t *testing.T) {
 }
 
 // pathIDWildcard matches both wildcard spellings of a record ID, snake_case
-// ({gift_id}) and camelCase ({partnerID}).
+// ({gift_id}) and camelCase ({partner_id}).
 var pathIDWildcard = regexp.MustCompile(`\{[A-Za-z_]+(_id|ID)\}`)
 
 // A path ID that is not a UUID answers 404 from the handler, after the wrapper
@@ -337,7 +337,7 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"GET /donor/staff/initiatives":                               store.StaffInitiativePage{},
 		"GET /donor/staff/initiatives/{initiative_id}":               store.StaffInitiativeDetail{},
 		"GET /donor/staff/partners":                                  store.StaffPartnerPage{},
-		"GET /donor/staff/partners/{partnerID}":                      store.StaffPartnerDetail{},
+		"GET /donor/staff/partners/{partner_id}":                     store.StaffPartnerDetail{},
 		"POST /donor/staff/content/sources":                          store.StoredSource{},
 		"GET /initiatives/{initiative_id}/spend":                     store.InitiativeSpend{},
 		"GET /donor/me/today-initiative":                             store.TodayInitiative{},

@@ -4,8 +4,8 @@
 # task definitions created by DAD-infra apps/dad-main/lib/maintenance-stack.ts
 # (https://github.com/pre-dad/DAD-infra).
 #
-# This script is DOCUMENTED, NOT AUTO-RUN by CDK. An operator invokes it by hand
-# (or the app pipeline invokes `aws ecs run-task` directly in the same shape).
+# Called by .github/workflows/deploy.yml for migrate and provision-roles; operators
+# run the other tasks by hand.
 #
 # Deploy ordering (mirrors scripts/deploy.sh): run `migrate` first, then
 # `provision-roles`, before bringing services up. The reconcile task runs on an
@@ -49,7 +49,7 @@ set -euo pipefail
 
 env="${1:?usage: run-task.sh <env> <task> [args...]}"
 task="${2:?usage: run-task.sh <env> <task> [args...]}"
-shift 2 || true
+shift 2
 
 case "$env" in
   staging | production) ;;
@@ -115,7 +115,7 @@ if [ "${DAD_WAIT:-true}" != "true" ]; then
 fi
 
 # Wait for the task to stop (the aws waiter polls for about ten minutes), then judge it
-# by its container's exit code. A task that never started a container (for example an
+# by the exit code of its maint container. A task that never started a container (for example an
 # image pull failure) has no exit code and is a failure.
 aws ecs wait tasks-stopped \
   --cluster "$DAD_CLUSTER" \
@@ -127,11 +127,14 @@ stopped="$(aws ecs describe-tasks \
   --tasks "$task_arn" \
   --region "$AWS_REGION" \
   --output json)"
-exit_code="$(printf '%s' "$stopped" | jq -r '.tasks[0].containers[0].exitCode // "none"')"
+container="maint-${task}-Container"
+exit_code="$(printf '%s' "$stopped" | jq -r --arg name "$container" \
+  '[.tasks[0].containers[] | select(.name == $name)][0].exitCode // "none"')"
 if [ "$exit_code" = "0" ]; then
   echo "$task_definition: container exited 0" >&2
   exit 0
 fi
-reason="$(printf '%s' "$stopped" | jq -r '[.tasks[0].stoppedReason, .tasks[0].containers[0].reason] | map(select(. != null)) | join("; ")')"
+reason="$(printf '%s' "$stopped" | jq -r --arg name "$container" \
+  '[.tasks[0].stoppedReason, ([.tasks[0].containers[] | select(.name == $name)][0].reason)] | map(select(. != null)) | join("; ")')"
 echo "::error::$task_definition: container exit code ${exit_code}: ${reason:-no reason reported}" >&2
 exit 1

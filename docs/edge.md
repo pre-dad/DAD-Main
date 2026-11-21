@@ -55,9 +55,10 @@ which picks up renewed certificates without dropping any. Use those commands rat
 
 Store the key as `root:101`, mode `0640`. TLS 1.2 and 1.3 with ECDHE suites only. There
 is no OCSP stapling: Origin CA certificates have no responder and Let's Encrypt no longer
-runs one. HSTS comes from the web app on every response it serves, so nginx does not add
-a copy; nginx's own refusals (404, 421, 429) carry none, and browsers keep the policy
-from the app's responses.
+runs one. HSTS on the public and staff hosts comes from the web app on every response it serves,
+so nginx does not add a copy there; nginx's own refusals (404, 421, 429) carry none, and
+browsers keep the policy from the app's responses. The native host has no web app, so
+nginx adds HSTS to its responses.
 
 ## Hosts and paths
 
@@ -87,8 +88,8 @@ nginx sets `X-Real-IP` and `X-Forwarded-For` to the client address on every requ
 drops `Forwarded`, `CF-Connecting-IP`, `True-Client-IP`, and Next's internal
 `X-Middleware-Subrequest`. The web service forwards `X-Real-IP` (its
 `DONOR_CLIENT_IP_HEADER`) to the API, which trusts it only from the internal `app`
-network that the web containers alone share with it
-(`DONOR_TRUSTED_PROXY_CIDRS=172.30.43.0/24`), however many web replicas run.
+network that the web containers and, when native ingress is on, the nginx container
+share with it (`DONOR_TRUSTED_PROXY_CIDRS=172.30.43.0/24`), however many web replicas run.
 
 `deploy/nginx/conf/cloudflare/edge-ranges.conf` is generated from
 <https://www.cloudflare.com/ips-v4> and <https://www.cloudflare.com/ips-v6>. The
@@ -115,7 +116,7 @@ before each costs a signature check.
 
 | Class | Paths (POST unless noted) | Cloudflare per IP | nginx per IP | API per client |
 | --- | --- | --- | --- | --- |
-| Auth | `/api/donor/login`, `/claim`, `/email-change/confirm`, `/passkeys/sign-in`, `/phone/sign-in`, `/oidc/{provider}/sign-in`, `/partner/sign-in`, `/partner/accept-invite`; `/api/donor/staff/sign-in`, `/activate`; and each sign-in and activation's `/options` | 30/min, block 10 min | 20/min, burst 20 | 10/min |
+| Auth | `/api/donor/login`, `/signup`, `/password/sign-in`, `/claim`, `/email-change/confirm`, `/passkeys/sign-in`, `/phone/sign-in`, `/oidc/{provider}/sign-in`, `/partner/sign-in`, `/partner/accept-invite`; `/api/donor/staff/sign-in`, `/activate`; and each sign-in and activation's `/options` | 30/min, block 10 min | 20/min, burst 20 | 10/min |
 | Visitor | `/api/donor/checkouts`, `/api/donor/referrals/{code}`, `/api/donor/company/{code}`, `/api/donor/public/partner-apply`, `/api/donor/partner/applications` | 240/min, block 1 min | 120/min, burst 60 | visitor writes 60/min; authenticated checkout 30/min |
 | General | pages, assets, other API calls | 1,200/min uncached, challenge | 30/s, burst 300 | account writes 30/min, analytics 120/min, staff writes 60/min |
 | Stripe webhook | `/api/donor/stripe/webhook` | skipped | 20/s, burst 500 | signature verified |
@@ -130,8 +131,10 @@ nginx also caps each client at 100 concurrent requests and answers rejections wi
 an IPv6 client by its /64, which one subscriber typically holds whole
 (`deploy/nginx/conf/client-key.js`, run by the image's njs module). The general zone tracks
 about half a million clients before evicting the least recent. Bodies are
-limited to 256 KiB (the API's JSON and webhook limit), except staff source uploads at
-10 MiB. Exports stream unbuffered.
+limited to 256 KiB (the API's JSON and webhook limit), except the logo uploads (360,000
+bytes), staff founding-claim imports (5 MiB), and staff source uploads and recognition
+artwork batches (10 MiB); `deploy/nginx/templates/ingress.conf.template` is the
+authority. Exports stream unbuffered.
 
 ## Cloudflare configuration
 
@@ -208,7 +211,7 @@ Counted per IP, with a custom JSON response
 `{"detail":"Too many requests"}` and status 429 where the plan allows:
 
 1. Auth: `http.request.method eq "POST" and (http.request.uri.path in {"/api/donor/login"
-   "/api/donor/claim" "/api/donor/email-change/confirm" "/api/donor/passkeys/sign-in"
+   "/api/donor/signup" "/api/donor/password/sign-in" "/api/donor/claim" "/api/donor/email-change/confirm" "/api/donor/passkeys/sign-in"
    "/api/donor/passkeys/sign-in/options" "/api/donor/phone/sign-in"
    "/api/donor/phone/sign-in/options" "/api/donor/partner/sign-in"
    "/api/donor/partner/accept-invite" "/api/donor/staff/sign-in"
@@ -217,7 +220,8 @@ Counted per IP, with a custom JSON response
    "/api/donor/oidc/") and ends_with(http.request.uri.path, "/sign-in")))` — 30 per
    minute, Block for 10 minutes.
 2. Visitor: `http.request.method eq "POST" and (http.request.uri.path in
-   {"/api/donor/checkouts" "/api/donor/public/partner-apply"} or
+   {"/api/donor/checkouts" "/api/donor/public/partner-apply"
+   "/api/donor/partner/applications"} or
    starts_with(http.request.uri.path, "/api/donor/referrals/") or
    starts_with(http.request.uri.path, "/api/donor/company/"))` — 240 per minute, Block
    for 1 minute.
@@ -263,7 +267,7 @@ as well as the API. In order of what limits an origin:
 - **Web processes.** Each Next.js process renders on about one core, and a referral
   landing is rendered per request. Set `WEB_REPLICAS` to the cores left after the API and
   nginx. nginx balances across them, re-resolving the service every 10 seconds, and the
-  API trusts each one's `X-Real-IP` because they alone share its `app` network.
+  API trusts each one's `X-Real-IP` because they share its `app` network. Native ingress makes nginx a trusted forwarder too, so its subnet must also be in `DONOR_TRUSTED_PROXY_CIDRS`.
 - **The API** is one Go process that uses every core. Donor reads are indexed lookups of
   one donor's rows, so their cost barely grows with the population.
 - **PostgreSQL.** Move it to a managed service before adding origins. Each origin's API

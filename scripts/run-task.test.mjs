@@ -38,6 +38,7 @@ esac
 `;
 
 const started = JSON.stringify({ tasks: [{ taskArn: TASK_ARN }], failures: [] });
+const maint = (task, container) => ({ name: `maint-${task}-Container`, ...container });
 const stoppedWith = (containers, extra = {}) => JSON.stringify({ tasks: [{ containers, ...extra }] });
 
 const baseEnv = {
@@ -46,7 +47,7 @@ const baseEnv = {
   DAD_SECURITY_GROUPS: "sg-1",
   AWS_REGION: "us-east-2",
   STUB_RUN_JSON: started,
-  STUB_DESCRIBE_JSON: stoppedWith([{ exitCode: 0 }]),
+  STUB_DESCRIBE_JSON: stoppedWith([maint("migrate", { exitCode: 0 })]),
 };
 
 function run(args, env = {}, taskdefs = null) {
@@ -95,7 +96,9 @@ test("runs the task, waits for it to stop, and succeeds when the container exits
 
 test("fails when the container exits non-zero, so the next step does not run", () => {
   const r = run(["staging", "migrate"], {
-    STUB_DESCRIBE_JSON: stoppedWith([{ exitCode: 3 }], { stoppedReason: "Essential container in task exited" }),
+    STUB_DESCRIBE_JSON: stoppedWith([maint("migrate", { exitCode: 3 })], {
+      stoppedReason: "Essential container in task exited",
+    }),
   });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /dad-maint-migrate: container exit code 3: Essential container in task exited/);
@@ -103,12 +106,28 @@ test("fails when the container exits non-zero, so the next step does not run", (
 
 test("fails when no container ever ran (for example an image pull failure)", () => {
   const r = run(["staging", "migrate"], {
-    STUB_DESCRIBE_JSON: stoppedWith([{ reason: "CannotPullContainerError: manifest unknown" }], {
+    STUB_DESCRIBE_JSON: stoppedWith([maint("migrate", { reason: "CannotPullContainerError: manifest unknown" })], {
       stoppedReason: "Task failed to start",
     }),
   });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /container exit code none: Task failed to start; CannotPullContainerError: manifest unknown/);
+});
+
+test("judges the maint container, not whichever container is listed first", () => {
+  const r = run(["staging", "migrate"], {
+    STUB_DESCRIBE_JSON: stoppedWith([{ name: "sidecar", exitCode: 0 }, maint("migrate", { exitCode: 3 })], {
+      stoppedReason: "Essential container in task exited",
+    }),
+  });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /container exit code 3/);
+});
+
+test("fails when the maint container is absent from the stopped task", () => {
+  const r = run(["staging", "migrate"], { STUB_DESCRIBE_JSON: stoppedWith([{ name: "sidecar", exitCode: 0 }]) });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /container exit code none/);
 });
 
 test("fails with the AWS reason when run-task places no task, and never waits", () => {
@@ -135,10 +154,11 @@ test("DAD_WAIT=false starts the task and returns without waiting", () => {
 });
 
 test("with a task-definitions file, runs the pinned revision of dad-maint-<task>", () => {
-  const r = run(["staging", "provision-roles"], {}, [
-    `dad-maint-migrate=${TD("dad-maint-migrate")}`,
-    `dad-maint-provision-roles=${TD("dad-maint-provision-roles")}`,
-  ]);
+  const r = run(
+    ["staging", "provision-roles"],
+    { STUB_DESCRIBE_JSON: stoppedWith([maint("provision-roles", { exitCode: 0 })]) },
+    [`dad-maint-migrate=${TD("dad-maint-migrate")}`, `dad-maint-provision-roles=${TD("dad-maint-provision-roles")}`],
+  );
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.calls, new RegExp(`--task-definition ${TD("dad-maint-provision-roles")} `));
   assert.doesNotMatch(r.calls, /dad-maint-migrate/);
@@ -161,7 +181,10 @@ test("passes extra arguments as a single command override", () => {
 });
 
 test("accepts bootstrap-owner and runs family dad-maint-bootstrap-owner", () => {
-  const r = run(["staging", "bootstrap-owner"], { DAD_SECURITY_GROUPS: "sg-bootstrap" });
+  const r = run(["staging", "bootstrap-owner"], {
+    DAD_SECURITY_GROUPS: "sg-bootstrap",
+    STUB_DESCRIBE_JSON: stoppedWith([maint("bootstrap-owner", { exitCode: 0 })]),
+  });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.calls, /--task-definition dad-maint-bootstrap-owner /);
   assert.match(r.calls, /securityGroups=\[sg-bootstrap\]/);

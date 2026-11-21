@@ -2174,7 +2174,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/partner/users/{userID}/remove": {
+    "/donor/partner/users/{user_id}/remove": {
         parameters: {
             query?: never;
             header?: never;
@@ -2225,7 +2225,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{appID}/approve": {
+    "/donor/staff/partners/{app_id}/approve": {
         parameters: {
             query?: never;
             header?: never;
@@ -2245,7 +2245,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{appID}/reject": {
+    "/donor/staff/partners/{app_id}/reject": {
         parameters: {
             query?: never;
             header?: never;
@@ -2262,7 +2262,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}/link": {
+    "/donor/staff/partners/{partner_id}/link": {
         parameters: {
             query?: never;
             header?: never;
@@ -2279,7 +2279,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}/match": {
+    "/donor/staff/partners/{partner_id}/match": {
         parameters: {
             query?: never;
             header?: never;
@@ -2411,7 +2411,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}/match-status": {
+    "/donor/staff/partners/{partner_id}/match-status": {
         parameters: {
             query?: never;
             header?: never;
@@ -2428,7 +2428,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}/match-payment": {
+    "/donor/staff/partners/{partner_id}/match-payment": {
         parameters: {
             query?: never;
             header?: never;
@@ -2462,7 +2462,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}": {
+    "/donor/staff/partners/{partner_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2479,7 +2479,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}/users": {
+    "/donor/staff/partners/{partner_id}/users": {
         parameters: {
             query?: never;
             header?: never;
@@ -2499,7 +2499,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}/logo": {
+    "/donor/staff/partners/{partner_id}/logo": {
         parameters: {
             query?: never;
             header?: never;
@@ -2520,7 +2520,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}/users/{userID}/remove": {
+    "/donor/staff/partners/{partner_id}/users/{user_id}/remove": {
         parameters: {
             query?: never;
             header?: never;
@@ -2868,7 +2868,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * /donor/staff/donors/{donor_id}/recognition/reset
+         * Replay recognition from recorded facts
          * @description Replays recorded facts without editing financial history or granting arbitrary continuity. Requires donor.recompute and a reason. Permanent earned badges and historical best streaks remain permanent.
          */
         post: operations["postDonorStaffDonorsDonorIdRecognitionReset"];
@@ -2885,11 +2885,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** /donor/staff/content/rules */
+        /** Read recognition rules */
         get: operations["getDonorStaffContentRules"];
         put?: never;
         /**
-         * /donor/staff/content/rules
+         * Replace recognition rules
          * @description Replaces badge earning thresholds, minimum ranking populations, PNG/JPEG artwork, and the milestone ladder. Every catalog badge must be supplied. The JSON body may be up to 10 MiB to hold the complete artwork batch. Wording changes use /donor/staff/content/wording.
          */
         post: operations["postDonorStaffContentRules"];
@@ -2909,7 +2909,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * /donor/signup
+         * Start account creation
          * @description Starts account creation by emailing a verification link; no session is issued here. Answers 200 `{"sent":true}` whether or not the address already has an account, so it never reveals which. 503 `EMAIL_UNCONFIGURED` when the deployment has no email. The link (`/account/claim#token=…`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim, which takes the optional `device_name` and `platform` that label the resulting session. The response does not reveal whether an email belongs to a disabled donor, staff or partner; unavailable identities receive the same sent:true response without creating a donor account.
          */
         post: operations["postDonorSignup"];
@@ -2929,7 +2929,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * /donor/password/sign-in
+         * Sign in with a password
          * @description Signs in with an email and password. 401 covers a wrong password, an unknown email, an unclaimed account and a disabled account alike, so none reveals whether an account exists. A browser request receives an HttpOnly cookie; a native request (`X-DAD-Client: native`, no Origin, no cookies) receives NativeSession and may describe its device so the donor can recognize the session later.
          */
         post: operations["postDonorPasswordSignIn"];
@@ -2949,7 +2949,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * /donor/me/password
+         * Set or change the password
          * @description Sets or changes the signed-in donor's password. `current_password` is required unless the session proved its password within the last 15 minutes; leave it empty when setting a first password right after signing in by email link. A successful change signs out the donor's other sessions and keeps the calling one. 401 means the session is missing, expired or revoked: sign in again. 422 with `code` `CURRENT_PASSWORD_INCORRECT` means the session is fine but `current_password` was missing or wrong: keep the donor signed in and let them retry (attempts are rate limited). Contract versions before 2.4 answered 401 with the same `detail` ("The email or password is incorrect"); a client that must still talk to such a server should treat that 401 on this route as a wrong current password when the access token is otherwise valid.
          */
         post: operations["postDonorMePassword"];
@@ -8764,7 +8764,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                userID: string;
+                user_id: string;
             };
             cookie?: never;
         };
@@ -8874,7 +8874,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                appID: string;
+                app_id: string;
             };
             cookie?: never;
         };
@@ -8909,7 +8909,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                appID: string;
+                app_id: string;
             };
             cookie?: never;
         };
@@ -8947,7 +8947,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -8987,7 +8987,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -9259,7 +9259,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -9302,7 +9302,7 @@ export interface operations {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
             };
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -9377,7 +9377,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -9403,7 +9403,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -9444,7 +9444,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -9470,7 +9470,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -9508,8 +9508,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                partnerID: string;
-                userID: string;
+                partner_id: string;
+                user_id: string;
             };
             cookie?: never;
         };
