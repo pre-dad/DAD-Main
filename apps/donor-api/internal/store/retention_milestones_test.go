@@ -158,7 +158,10 @@ func paidMonths(t *testing.T, id pgtype.UUID, first time.Time, months int) histo
 	for month := range months {
 		start := first.AddDate(0, month, 0)
 		period := mustNewID(t).String()
-		h.Periods = append(h.Periods, recognition.Period{ID: period, DonorID: id.String(), DueAt: start, EndsAt: first.AddDate(0, month+1, 0), Status: "EXPECTED"})
+		h.Periods = append(
+			h.Periods,
+			recognition.Period{ID: period, DonorID: id.String(), DueAt: start, EndsAt: first.AddDate(0, month+1, 0), Status: "EXPECTED"},
+		)
 		h.Gifts = append(h.Gifts, recognition.Gift{
 			ID: "gift-" + period, DonorID: id.String(), Amount: 3000, Currency: "USD", Frequency: "MONTHLY", PaidAt: start, PeriodID: period,
 		})

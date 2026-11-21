@@ -226,7 +226,8 @@ func TestPhoneChangeInvalidatesPendingCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	var pending int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_phone_codes WHERE phone=$1", phone).Scan(&pending); err != nil || pending != 0 {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_phone_codes WHERE phone=$1", phone).Scan(&pending); err != nil ||
+		pending != 0 {
 		t.Fatalf("pending codes after the phone was cleared = %d: %v", pending, err)
 	}
 	other, _ := donor(t, pool)
