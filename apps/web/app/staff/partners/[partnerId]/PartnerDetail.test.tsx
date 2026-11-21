@@ -105,11 +105,15 @@ it("records a match payment and removes a user", async () => {
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Recorded a $250.00 match payment"));
   expect(posted(fetch, "/p-1/match-payment")).toEqual({ year: match.year, amount_minor: 25_000 });
   await reloaded(fetch, 2);
-  const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true);
   fireEvent.click(await screen.findByRole("button", { name: "Remove dana@delta.example" }));
+  expect(screen.getByRole("button", { name: "Confirm removal of dana@delta.example" })).toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: "Keep dana@delta.example" }));
   expect(fetch.mock.calls.some(([u]) => String(u).endsWith("/remove"))).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "Remove dana@delta.example" }));
-  expect(confirm).toHaveBeenCalledWith("Remove dana@delta.example from Delta Inc's portal?");
+  expect(screen.getByRole("button", { name: "Confirm removal of dana@delta.example" })).toHaveAccessibleDescription(
+    "Remove dana@delta.example from Delta Inc's portal?",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Confirm removal of dana@delta.example" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Removed dana@delta.example."));
   expect(fetch.mock.calls.some(([u, i]) => String(u).endsWith("/p-1/users/u-1/remove") && i?.method === "POST")).toBe(
     true,

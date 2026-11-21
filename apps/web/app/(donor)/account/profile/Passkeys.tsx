@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import { Announcer } from "@/components/donor/Announcer";
 import { ApiError, api, failureMessage, type Schema } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/dates";
@@ -106,7 +107,6 @@ export function Passkeys({ onSignedOut }: { onSignedOut: () => void }) {
     );
   };
   const remove = (passkey: Passkey) => {
-    if (!window.confirm(`Remove ${label(passkey)}? It will no longer be able to sign in to your account.`)) return;
     const position = data?.passkeys.indexOf(passkey) ?? 0;
     run(
       async () => {
@@ -168,23 +168,22 @@ export function Passkeys({ onSignedOut }: { onSignedOut: () => void }) {
                       )}
                     </p>
                   </div>
-                  <button
-                    type="button"
+                  <ConfirmButton
                     className="quiet danger"
                     disabled={busy}
-                    onClick={() => remove(passkey)}
-                    ref={(button) => {
+                    prompt="It will no longer be able to sign in to your account."
+                    confirmLabel="Confirm removal"
+                    onConfirm={() => remove(passkey)}
+                    target={`${label(passkey)}, added ${formatDate(passkey.created_at)}`}
+                    buttonRef={(button) => {
                       if (button) buttons.current.set(passkey.id, button);
                       return () => {
                         buttons.current.delete(passkey.id);
                       };
                     }}
                   >
-                    Remove{" "}
-                    <span className="visuallyHidden">
-                      {label(passkey)}, added {formatDate(passkey.created_at)}
-                    </span>
-                  </button>
+                    Remove
+                  </ConfirmButton>
                 </li>
               ))}
             </ul>

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useState } from "react";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { PasswordAccess } from "@/components/donor/PasswordAccess";
@@ -136,7 +137,6 @@ export default function Profile() {
     }, "Your details were not saved. Please retry in a moment.");
   };
   const deleteAccount = () => {
-    if (!window.confirm("Delete your DAD account? This can’t be undone.")) return;
     run(async () => {
       await api("/donor/me/delete", { method: "POST" });
       setDeleted(true);
@@ -371,9 +371,16 @@ export default function Profile() {
                   your places at upcoming events. Gift records the law requires are kept without your details. If your
                   monthly gift is still set to renew, <Link href="/account/recurring">cancel it</Link> first.
                 </p>
-                <button type="button" className="secondary danger" disabled={busy} onClick={deleteAccount}>
+                <ConfirmButton
+                  className="secondary danger"
+                  disabled={busy}
+                  prompt="Delete your DAD account? This can’t be undone."
+                  confirmLabel="Confirm deletion"
+                  keepLabel="Keep my account"
+                  onConfirm={deleteAccount}
+                >
                   Delete my account
-                </button>
+                </ConfirmButton>
               </details>
             </>
           )}

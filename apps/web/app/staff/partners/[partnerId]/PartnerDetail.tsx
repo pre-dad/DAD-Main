@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import { Announcer } from "@/components/donor/Announcer";
 import { LogoEditor } from "@/components/donor/LogoEditor";
 import { Page } from "@/components/donor/Page";
@@ -345,12 +346,13 @@ export default function PartnerDetail({ partner }: { partner: string }) {
                       </button>{" "}
                     </>
                   )}
-                  <button
-                    type="button"
+                  <ConfirmButton
                     className="link"
                     disabled={busy}
-                    onClick={() =>
-                      window.confirm(`Remove ${user.email} from ${detail.organization}'s portal?`) &&
+                    prompt={`Remove ${user.email} from ${detail.organization}'s portal?`}
+                    confirmLabel={`Confirm removal of ${user.email}`}
+                    keepLabel={`Keep ${user.email}`}
+                    onConfirm={() =>
                       run(null, `Removed ${user.email}.`, () =>
                         api(`/donor/staff/partners/${id}/users/${encodeURIComponent(user.id)}/remove`, {
                           method: "POST",
@@ -359,7 +361,7 @@ export default function PartnerDetail({ partner }: { partner: string }) {
                     }
                   >
                     Remove {user.email}
-                  </button>
+                  </ConfirmButton>
                 </li>
               ))}
             </ul>

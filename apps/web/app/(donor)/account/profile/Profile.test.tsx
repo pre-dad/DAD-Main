@@ -186,20 +186,26 @@ it("saves ZIP, city and phone", async () => {
 
 it("deletes the account after confirmation", async () => {
   const fetch = stubFetch({ "POST /api/donor/me/delete": () => json({ deleted: true }) });
-  const confirm = vi.fn(() => true);
-  vi.stubGlobal("confirm", confirm);
+  const confirm = vi.spyOn(window, "confirm");
   render(<Profile />);
   fireEvent.click(await screen.findByRole("button", { name: "Delete my account" }));
-  expect(confirm).toHaveBeenCalledOnce();
+  expect(fetch.mock.calls.some(([url]) => url === "/api/donor/me/delete")).toBe(false);
+  const confirmButton = screen.getByRole("button", { name: "Confirm deletion" });
+  expect(confirmButton).toHaveFocus();
+  expect(confirmButton).toHaveAccessibleDescription("Delete your DAD account? This can’t be undone.");
+  fireEvent.click(confirmButton);
+  expect(confirm).not.toHaveBeenCalled();
   expect(await screen.findByText(/Your account has been deleted/)).toHaveAttribute("role", "status");
   expect(fetch.mock.calls.some(([url]) => url === "/api/donor/me/delete")).toBe(true);
 });
 
 it("leaves the account alone when deletion is not confirmed", async () => {
   const fetch = stubFetch();
-  vi.stubGlobal("confirm", () => false);
   render(<Profile />);
-  fireEvent.click(await screen.findByRole("button", { name: "Delete my account" }));
+  const trigger = await screen.findByRole("button", { name: "Delete my account" });
+  fireEvent.click(trigger);
+  fireEvent.click(screen.getByRole("button", { name: "Keep my account" }));
+  expect(screen.getByRole("button", { name: "Delete my account" })).toHaveFocus();
   expect(fetch.mock.calls.some(([url]) => url === "/api/donor/me/delete")).toBe(false);
 });
 
@@ -211,9 +217,9 @@ it("explains that renewing giving must be cancelled before deletion", async () =
         409,
       ),
   });
-  vi.stubGlobal("confirm", () => true);
   render(<Profile />);
   fireEvent.click(await screen.findByRole("button", { name: "Delete my account" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm deletion" }));
   expect(
     await screen.findByText(
       "Cancel your monthly giving, or let a checkout in progress finish, before deleting your account",

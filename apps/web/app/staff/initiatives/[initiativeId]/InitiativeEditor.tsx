@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { api, failureMessage, type Schema } from "@/lib/api";
@@ -267,17 +268,16 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
             <>
               <p>
                 {detail.publish_state === "DRAFT" && (
-                  <button
-                    type="button"
+                  <ConfirmButton
                     className="button"
+                    confirmClassName="button"
                     disabled={busy}
-                    onClick={() =>
-                      window.confirm(`Publish ${detail.title}? Donors will see it.`) &&
-                      run(null, "Initiative published.", () => post(`/${id}/publish`))
-                    }
+                    prompt={`Publish ${detail.title}? Donors will see it.`}
+                    confirmLabel="Confirm publish"
+                    onConfirm={() => run(null, "Initiative published.", () => post(`/${id}/publish`))}
                   >
                     Publish initiative
-                  </button>
+                  </ConfirmButton>
                 )}{" "}
                 <button
                   type="button"
@@ -323,19 +323,20 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
                           Publish metric {metric.position + 1}
                         </button>
                       )}{" "}
-                      <button
-                        type="button"
+                      <ConfirmButton
                         className="link"
                         disabled={busy}
-                        onClick={() =>
-                          window.confirm(`Delete metric ${metric.position + 1}, ${metric.label}?`) &&
+                        prompt={`Delete metric ${metric.position + 1}, ${metric.label}?`}
+                        confirmLabel={`Confirm deletion of metric ${metric.position + 1}`}
+                        keepLabel={`Keep metric ${metric.position + 1}`}
+                        onConfirm={() =>
                           run(null, `Metric ${metric.position + 1} deleted.`, () =>
                             post(`/${id}/metrics/${metric.position}/delete`),
                           )
                         }
                       >
                         Delete metric {metric.position + 1}
-                      </button>
+                      </ConfirmButton>
                     </li>
                   ))}
                 </ol>
@@ -392,33 +393,35 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
                       {row.category}: {formatMoney(row.amount_minor)} ·{" "}
                       {row.publish_state === "DRAFT" ? "Draft" : "Published"}{" "}
                       {row.publish_state === "DRAFT" && (
-                        <button
-                          type="button"
+                        <ConfirmButton
                           disabled={busy}
                           className="link"
-                          onClick={() =>
-                            window.confirm(`Publish ${row.category} spend? Donors will see it.`) &&
+                          prompt={`Publish ${row.category} spend? Donors will see it.`}
+                          confirmLabel={`Confirm publish of ${row.category}`}
+                          keepLabel={`Keep ${row.category} as draft`}
+                          onConfirm={() =>
                             run(null, "Spend published.", () =>
                               post(`/${id}/spend/publish`, { category: row.category }),
                             )
                           }
                         >
                           Publish {row.category}
-                        </button>
+                        </ConfirmButton>
                       )}
-                      <button
-                        type="button"
+                      <ConfirmButton
                         className="link"
                         disabled={busy}
-                        onClick={() =>
-                          window.confirm(`Remove ${row.category} from spend?`) &&
+                        prompt={`Remove ${row.category} from spend?`}
+                        confirmLabel={`Confirm removal of ${row.category}`}
+                        keepLabel={`Keep ${row.category}`}
+                        onConfirm={() =>
                           run(null, `${row.category} removed.`, () =>
                             post(`/${id}/spend/delete`, { category: row.category }),
                           )
                         }
                       >
                         Remove {row.category}
-                      </button>
+                      </ConfirmButton>
                     </li>
                   ))}
                 </ul>
