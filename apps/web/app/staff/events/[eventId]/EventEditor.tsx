@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { api, classifyFailure, failureMessage, type Schema } from "@/lib/api";
@@ -172,15 +173,13 @@ export default function EventEditor({ event }: { event: string | null }) {
     });
   }
 
-  function cancelEvent(detail: Detail) {
-    const holders = detail.reserved + detail.waitlisted;
-    if (!window.confirm(`Cancel ${detail.title}? ${holders} ${holders === 1 ? "person" : "people"} will be notified.`))
-      return;
+  function cancelEvent() {
     void run("Event cancelled. Everyone holding a place is being notified.", () => post(`/${id}/cancel`));
   }
 
   const detail = data;
   const cancelled = Boolean(detail?.cancelled_at);
+  const holders = detail ? detail.reserved + detail.waitlisted : 0;
   return (
     <Page
       wide
@@ -328,9 +327,15 @@ export default function EventEditor({ event }: { event: string | null }) {
                   Publish event
                 </button>
               )}{" "}
-              <button type="button" className="secondary" disabled={busy} onClick={() => cancelEvent(detail)}>
+              <ConfirmButton
+                disabled={busy}
+                prompt={`Cancel ${detail.title}? ${holders} ${holders === 1 ? "person" : "people"} will be notified.`}
+                confirmLabel="Confirm cancellation"
+                keepLabel="Keep event"
+                onConfirm={() => cancelEvent()}
+              >
                 Cancel event
-              </button>
+              </ConfirmButton>
             </p>
           )}
           {detail && detail.publish_state === "PUBLISHED" && !cancelled && (

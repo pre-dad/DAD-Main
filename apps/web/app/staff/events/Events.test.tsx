@@ -149,7 +149,6 @@ it("keeps the qualifying perk only for invite-only events", () => {
 
 it("checks an attendee in by hand and cancels the event", async () => {
   const fetch = stubApi();
-  vi.spyOn(window, "confirm").mockReturnValue(true);
   render(<EventEditor event="e-1" />);
   fireEvent.click(await screen.findByRole("button", { name: "Check in ann@example.org" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("ann@example.org checked in."));
@@ -159,7 +158,9 @@ it("checks an attendee in by hand and cancels the event", async () => {
   ).toBe(true);
 
   fireEvent.click(await screen.findByRole("button", { name: "Cancel event" }));
-  expect(window.confirm).toHaveBeenCalledWith("Cancel Beach cleanup? 2 people will be notified.");
+  const confirm = screen.getByRole("button", { name: "Confirm cancellation" });
+  expect(confirm).toHaveAccessibleDescription("Cancel Beach cleanup? 2 people will be notified.");
+  fireEvent.click(confirm);
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Event cancelled."));
 });
 

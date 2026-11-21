@@ -28,3 +28,10 @@ it("shows three step cards under the section heading and no sandbox sentence, an
   // FoundingLine owns the deadline (it may be hidden after the window); no other block repeats it.
   expect(screen.queryAllByText(/December 31, 2026/).length).toBeLessThanOrEqual(1);
 });
+
+it("marks the hero copy's gift framing so narrow screens show the facts panel's framing only", () => {
+  const { container } = render(<DonorHome />);
+  expect(container.querySelectorAll(".heroGift .framing")).toHaveLength(1);
+  expect(container.querySelectorAll(".heroFacts .framing")).toHaveLength(1);
+  expect(container.querySelector(".heroGift")).not.toContainElement(container.querySelector(".heroFacts"));
+});

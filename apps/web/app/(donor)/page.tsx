@@ -29,7 +29,7 @@ export default function DonorHome() {
               See how it works
             </Link>
           </div>
-          <div>
+          <div className="heroGift">
             <GiftFraming minor={3000} />
           </div>
           <FoundingLine />

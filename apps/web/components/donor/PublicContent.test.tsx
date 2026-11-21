@@ -75,6 +75,21 @@ it.each([
   expect(screen.queryByText("$150.00")).not.toBeInTheDocument();
 });
 
+it.each([
+  ["an unreachable API", () => vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")))],
+  ["a server error", () => respond({ detail: "boom" }, 503)],
+])("shows the unavailable alert, not an empty list, on the initiative pages for %s", async (_label, fail) => {
+  fail();
+  const list = render(await InitiativesPage());
+  expect(screen.getByRole("alert")).toHaveTextContent("Published records are unavailable");
+  expect(screen.getByRole("button", { name: "Retry records" })).toBeVisible();
+  expect(screen.queryByText(/No initiatives/)).not.toBeInTheDocument();
+  list.unmount();
+  fail();
+  render(await InitiativePage({ params: Promise.resolve({ slug: "water" }), searchParams: Promise.resolve({}) }));
+  expect(screen.getByRole("alert")).toHaveTextContent("Published records are unavailable");
+});
+
 it("shows an empty-state message when no spend has been published", async () => {
   respond({ total_minor: 0, categories: [] });
   render(await SpendPage());

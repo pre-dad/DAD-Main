@@ -526,6 +526,10 @@ details[open] > summary::after {
 .metrics.pair {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+/* An odd final card spans the row instead of sitting alone beside empty space. */
+.metrics.pair > :last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
 .metric {
   margin: 0;
   display: flex;
@@ -1155,6 +1159,12 @@ footer .tagline {
 }
 :is(.header, .hero) .button:focus-visible {
   outline-color: var(--paper);
+}
+/* Below the breakpoint where the facts panel sits beside the hero, the panel carries the framing alone. */
+@media (max-width: 879.98px) {
+  .heroGift {
+    display: none;
+  }
 }
 .heroFacts {
   padding: var(--space-1) var(--space-5);

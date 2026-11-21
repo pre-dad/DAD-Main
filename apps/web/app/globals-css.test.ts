@@ -16,3 +16,11 @@ it("keeps the interest list rules ahead of the media blocks, as the header says"
 it("carries no rules for classes no component uses", () => {
   expect(css).not.toContain(".segmented");
 });
+
+it("lets an odd final tile in a paired metrics grid span the row", () => {
+  expect(css).toMatch(/\.metrics\.pair > :last-child:nth-child\(odd\) \{\s*grid-column: 1 \/ -1;/);
+});
+
+it("shows the hero gift framing once on narrow screens", () => {
+  expect(css).toMatch(/@media \(max-width: 879\.98px\) \{\s*\.heroGift \{\s*display: none;/);
+});

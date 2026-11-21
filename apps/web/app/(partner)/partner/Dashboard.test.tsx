@@ -271,7 +271,13 @@ it("lets a partner admin resend an unused invitation and shows the throttle", as
     expect.objectContaining({ method: "POST" }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Resend invitation to v@delta.test" }));
-  expect(await screen.findByText(/Too many requests/)).toBeInTheDocument();
+  const throttled = await screen.findByText(/Too many requests/);
+  expect(throttled).toHaveAttribute("role", "alert");
+  const list = screen.getByText(/v@delta.test · Viewer/).closest("ul");
+  const invite = screen.getByRole("heading", { name: "Invite a colleague" }).closest("form");
+  if (!list || !invite) throw new Error("Missing users list or invite form");
+  expect(list.compareDocumentPosition(throttled) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(throttled.compareDocumentPosition(invite) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 it("keeps a partner viewer read-only", async () => {

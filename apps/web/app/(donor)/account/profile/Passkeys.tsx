@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import { Announcer } from "@/components/donor/Announcer";
 import { ApiError, api, failureMessage, type Schema } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/dates";
@@ -10,6 +11,7 @@ import {
   NO_SUITABLE_PASSKEY_MESSAGE,
   passkeyFailure,
   UNSUPPORTED_MESSAGE,
+  useOriginOffersPasskeys,
   usePasskeysSupported,
   WAITING_MESSAGE,
 } from "@/lib/passkeys";
@@ -39,7 +41,10 @@ function explainAdd(cause: unknown): string {
 /** Passkeys that sign the donor in without an email link, with a way to add or remove them. */
 export function Passkeys({ onSignedOut }: { onSignedOut: () => void }) {
   const supported = usePasskeysSupported(true);
-  const { resource, data, failed, reload, setData } = useApiResource<PasskeyList>("/donor/me/passkeys");
+  const offered = useOriginOffersPasskeys();
+  const { resource, data, failed, reload, setData } = useApiResource<PasskeyList>(
+    offered ? "/donor/me/passkeys" : null,
+  );
   const [busy, setBusy] = useState(false);
   const [prompting, setPrompting] = useState(false);
   const [name, setName] = useState("");
@@ -106,7 +111,6 @@ export function Passkeys({ onSignedOut }: { onSignedOut: () => void }) {
     );
   };
   const remove = (passkey: Passkey) => {
-    if (!window.confirm(`Remove ${label(passkey)}? It will no longer be able to sign in to your account.`)) return;
     const position = data?.passkeys.indexOf(passkey) ?? 0;
     run(
       async () => {
@@ -137,7 +141,7 @@ export function Passkeys({ onSignedOut }: { onSignedOut: () => void }) {
   };
 
   // A deployment without passkeys offers none to add or manage.
-  if (resource.state === "unconfigured") return null;
+  if (!offered || resource.state === "unconfigured") return null;
   return (
     <section aria-labelledby="passkeys-heading">
       <h2 id="passkeys-heading" ref={heading} tabIndex={-1}>
@@ -168,23 +172,22 @@ export function Passkeys({ onSignedOut }: { onSignedOut: () => void }) {
                       )}
                     </p>
                   </div>
-                  <button
-                    type="button"
+                  <ConfirmButton
                     className="quiet danger"
                     disabled={busy}
-                    onClick={() => remove(passkey)}
-                    ref={(button) => {
+                    prompt="It will no longer be able to sign in to your account."
+                    confirmLabel="Confirm removal"
+                    onConfirm={() => remove(passkey)}
+                    target={`${label(passkey)}, added ${formatDate(passkey.created_at)}`}
+                    buttonRef={(button) => {
                       if (button) buttons.current.set(passkey.id, button);
                       return () => {
                         buttons.current.delete(passkey.id);
                       };
                     }}
                   >
-                    Remove{" "}
-                    <span className="visuallyHidden">
-                      {label(passkey)}, added {formatDate(passkey.created_at)}
-                    </span>
-                  </button>
+                    Remove
+                  </ConfirmButton>
                 </li>
               ))}
             </ul>

@@ -64,6 +64,11 @@ function posted(fetch: ReturnType<typeof stubApi>, suffix: string) {
   return call ? JSON.parse(String(call[1]?.body ?? "null")) : undefined;
 }
 
+const confirmed = async (name: string) => {
+  fireEvent.click(await screen.findByRole("button", { name }));
+  fireEvent.click(screen.getByRole("button", { name: /^Confirm / }));
+};
+
 it("lists initiatives with their state", async () => {
   stubApi();
   render(<Initiatives />);
@@ -102,7 +107,6 @@ it("reads the editor form into an initiative", () => {
 
 it("edits metrics, spend, rotation, and publishing", async () => {
   const fetch = stubApi();
-  vi.spyOn(window, "confirm").mockReturnValue(true);
   render(<InitiativeEditor initiative="i-1" />);
   expect(await screen.findByText(/Meals: 1,200 people · Draft/)).toBeInTheDocument();
 
@@ -118,11 +122,11 @@ it("edits metrics, spend, rotation, and publishing", async () => {
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Excluded from the daily rotation."));
   expect(posted(fetch, "/i-1/rotation")).toEqual({ in_rotation: false });
 
-  fireEvent.click(screen.getByRole("button", { name: "Remove Food" }));
+  await confirmed("Remove Food");
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Food removed."));
   expect(posted(fetch, "/i-1/spend/delete")).toEqual({ category: "Food" });
 
-  fireEvent.click(screen.getByRole("button", { name: "Publish initiative" }));
+  await confirmed("Publish initiative");
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Initiative published."));
 });
 
@@ -174,12 +178,13 @@ it.each([
   ["Publish initiative", "/i-1/publish"],
   ["Remove Food", "/i-1/spend/delete"],
   ["Delete metric 1", "/i-1/metrics/0/delete"],
-])("does nothing when %s is not confirmed", async (button, suffix) => {
+])("does nothing when %s is kept", async (button, suffix) => {
   const fetch = stubApi();
-  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
   render(<InitiativeEditor initiative="i-1" />);
   fireEvent.click(await screen.findByRole("button", { name: button }));
-  expect(confirm).toHaveBeenCalledOnce();
+  expect(screen.getByRole("button", { name: /^Confirm / })).toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: /^Keep/ }));
+  expect(screen.getByRole("button", { name: button })).toHaveFocus();
   expect(posted(fetch, suffix)).toBeUndefined();
 });
 
@@ -195,16 +200,14 @@ it("confirms before publishing a spend category", async () => {
     );
   });
   vi.stubGlobal("fetch", fetch);
-  vi.spyOn(window, "confirm").mockReturnValue(true);
   render(<InitiativeEditor initiative="i-1" />);
-  fireEvent.click(await screen.findByRole("button", { name: "Publish Food" }));
+  await confirmed("Publish Food");
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Spend published."));
   expect(posted(fetch as ReturnType<typeof stubApi>, "/i-1/spend/publish")).toEqual({ category: "Food" });
 });
 
 it("clears the last success message when a new entry is invalid", async () => {
   stubApi();
-  vi.spyOn(window, "confirm").mockReturnValue(true);
   render(<InitiativeEditor initiative="i-1" />);
   fireEvent.click(await screen.findByRole("button", { name: "Exclude from rotation" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Excluded from the daily rotation."));

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { choosePasskey, createPasskey, passkeyFailure } from "./passkeys";
+import { choosePasskey, createPasskey, isIpHostname, passkeyFailure } from "./passkeys";
 
 const bytes = (...values: number[]) => new Uint8Array(values).buffer;
 
@@ -117,4 +117,9 @@ it("encodes a large attestation without exceeding the argument limit", async () 
     pubKeyCredParams: [],
   })) as { response: { attestationObject: string } };
   expect(created.response.attestationObject).toHaveLength(Math.ceil((200_000 * 4) / 3));
+});
+
+it("recognises IP-address hosts, which cannot be a passkey relying party", () => {
+  expect(["127.0.0.1", "10.0.0.8", "[::1]", "::1"].map(isIpHostname)).toEqual([true, true, true, true]);
+  expect(["localhost", "dad.example", "staff.localhost"].map(isIpHostname)).toEqual([false, false, false]);
 });

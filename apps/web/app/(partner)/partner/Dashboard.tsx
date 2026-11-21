@@ -472,6 +472,7 @@ function UsersSection({ self }: { self: string }) {
           ))}
         </ul>
       )}
+      <Announcer status={status || messages.status} alert={error || messages.alert} />
       <form onSubmit={sendInvite}>
         <h3>Invite a colleague</h3>
         <p className="note">
@@ -515,7 +516,6 @@ function UsersSection({ self }: { self: string }) {
           Retry users
         </button>
       )}
-      <Announcer status={status || messages.status} alert={error || messages.alert} />
     </section>
   );
 }
