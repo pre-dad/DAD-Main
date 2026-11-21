@@ -258,3 +258,38 @@ func TestWebCheckoutRefusesInvalidInputBeforeTheProcessor(t *testing.T) {
 		t.Fatalf("refused requests reached the processor %d times", len(gateway.calls))
 	}
 }
+
+func TestWebCheckoutStoresTheDonorProfileTrimmed(t *testing.T) {
+	service, request, id, _ := checkoutFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+	request.Name, request.City, request.Zip = "  Alex Rivera \t", " Portland\u00a0", "\u00a0 97201 "
+	if _, err := service.BeginCheckout(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	var name, city, zip string
+	if err := pool.QueryRow(ctx, "SELECT full_name,city,zip FROM donors WHERE id=$1", id).Scan(&name, &city, &zip); err != nil {
+		t.Fatal(err)
+	}
+	if name != "Alex Rivera" || city != "Portland" || zip != "97201" {
+		t.Fatalf("stored %q, %q, %q; want trimmed values", name, city, zip)
+	}
+}
+
+func TestWebCheckoutTreatsWhitespaceLikeEmpty(t *testing.T) {
+	service, request, id, _ := checkoutFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+	request.Name, request.Zip = "Alex Rivera", "   "
+	if _, err := service.BeginCheckout(ctx, request); !errors.Is(err, payments.ErrCheckoutInput) {
+		t.Fatalf("whitespace-only zip: got %v, want an input error as for an empty zip", err)
+	}
+	request.Name, request.Zip = " \t ", "97201"
+	if _, err := service.BeginCheckout(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	var name *string
+	if err := pool.QueryRow(ctx, "SELECT full_name FROM donors WHERE id=$1", id).Scan(&name); err != nil || name != nil {
+		t.Fatalf("a whitespace-only name was stored as %v (%v), want none as for an empty name", name, err)
+	}
+}

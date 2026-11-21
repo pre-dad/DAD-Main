@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"dad/donor-api/internal/store/queries"
@@ -32,8 +33,9 @@ const (
 )
 
 // TouchRetention deletes analytics events past retention, lapsed credentials,
-// expired staff sign-in ceremonies, spent rate limits, referral touches past retention, and company-code touches once they expire,
-// since an expired one can never bind. A pass starts once an interval and deletes one batch per call
+// expired staff sign-in ceremonies, spent rate limits, company-code touches
+// once they expire (an expired one can never bind), and referral touches past
+// retention. A pass starts once an interval and deletes one batch per call
 // until a batch comes up short. Concurrent passes skip each other's rows, so
 // every worker may run one.
 type TouchRetention struct {
@@ -42,91 +44,112 @@ type TouchRetention struct {
 	cursor *queries.PurgeReferralTouchesRow
 }
 
+// purgeStage deletes at most size rows per call and reports how many it deleted.
+type purgeStage struct {
+	size  int32
+	purge func(batch int32) (int64, error)
+}
+
+// runPurgeStages runs each stage once. A failing stage is recorded and does
+// not stop the stages after it. A stage that deleted a full batch may have
+// more to delete, so the run ends there and reports full.
+func runPurgeStages(stages []purgeStage) (full bool, err error) {
+	var errs []error
+	for _, stage := range stages {
+		deleted, e := stage.purge(stage.size)
+		if e != nil {
+			errs = append(errs, e)
+			continue
+		}
+		if deleted == int64(stage.size) {
+			return true, errors.Join(errs...)
+		}
+	}
+	return false, errors.Join(errs...)
+}
+
 // PurgeNext deletes the next batch if a pass is due or under way, reporting
 // whether it deleted anything. A failure ends the pass until the next
 // interval, so it cannot hold up the work sharing the worker.
 func (r *TouchRetention) PurgeNext(ctx context.Context, now time.Time) (bool, error) {
+	var failed error
 	if r.cursor == nil {
 		if now.Before(r.next) {
 			return false, nil
 		}
-		q := queries.New(r.DB)
-		for _, batch := range []struct {
-			size  int32
-			purge func() (int64, error)
-		}{
-			{analyticsPurgeBatch, func() (int64, error) {
-				return q.PurgeAnalytics(ctx, queries.PurgeAnalyticsParams{
-					ReceivedBefore: timestamp(now.AddDate(0, -analyticsRetentionMonths, 0)),
-					Batch:          analyticsPurgeBatch,
-				})
-			}},
-			{credentialPurgeBatch, func() (int64, error) {
-				return q.PurgeDonorSessions(ctx, queries.PurgeDonorSessionsParams{
-					LapsedBefore: timestamp(now.Add(-sessionRetention)),
-					Batch:        credentialPurgeBatch,
-				})
-			}},
-			{credentialPurgeBatch, func() (int64, error) {
-				return q.PurgeLoginLinks(ctx, queries.PurgeLoginLinksParams{
-					ExpiredBefore: timestamp(now.Add(-loginRetention)),
-					Batch:         credentialPurgeBatch,
-				})
-			}},
-			{credentialPurgeBatch, func() (int64, error) {
-				return q.PurgeLoginEmails(ctx, queries.PurgeLoginEmailsParams{
-					CompletedBefore: timestamp(now.Add(-loginRetention)),
-					Batch:           credentialPurgeBatch,
-				})
-			}},
-			{credentialPurgeBatch, func() (int64, error) {
-				return q.PurgePartnerSessions(ctx, queries.PurgePartnerSessionsParams{
-					ExpiredBefore: timestamp(now.Add(-sessionRetention)),
-					Batch:         credentialPurgeBatch,
-				})
-			}},
-			{credentialPurgeBatch, func() (int64, error) {
-				return q.PurgePartnerLoginEmails(ctx, queries.PurgePartnerLoginEmailsParams{
-					CompletedBefore: timestamp(now.Add(-loginRetention)),
-					Batch:           credentialPurgeBatch,
-				})
-			}},
-			{credentialPurgeBatch, func() (int64, error) {
-				return q.PurgePhoneCodes(ctx, queries.PurgePhoneCodesParams{
-					ExpiredBefore: timestamp(now.Add(-phoneCodeRetention)),
-					Batch:         credentialPurgeBatch,
-				})
-			}},
-			{credentialPurgeBatch, func() (int64, error) {
-				return q.PurgeStaffCeremonies(ctx, queries.PurgeStaffCeremoniesParams{
-					ExpiredBefore: timestamp(now),
-					Batch:         credentialPurgeBatch,
-				})
-			}},
-			{rateLimitPurgeBatch, func() (int64, error) { return q.PurgeRateLimits(ctx, rateLimitPurgeBatch) }},
-		} {
-			deleted, err := batch.purge()
+		full, err := runPurgeStages(retentionStages(ctx, queries.New(r.DB), now))
+		if full {
 			if err != nil {
 				r.next = now.Add(touchPurgeInterval)
-				return false, err
 			}
-			if deleted == int64(batch.size) {
-				return true, nil
-			}
+			return true, err
 		}
-		if err := q.PurgeCompanyTouches(ctx, timestamp(now)); err != nil {
-			r.next = now.Add(touchPurgeInterval)
-			return false, err
-		}
+		failed = err
 		r.cursor = &queries.PurgeReferralTouchesRow{}
 	}
 	deleted, err := purgeTouches(ctx, r.DB, now, *r.cursor, touchPurgeBatch)
-	if err != nil || len(deleted) < touchPurgeBatch {
+	failed = errors.Join(failed, err)
+	if failed != nil || len(deleted) < touchPurgeBatch {
 		r.cursor, r.next = nil, now.Add(touchPurgeInterval)
 	} else {
 		r.cursor = &deleted[len(deleted)-1]
 	}
-	return len(deleted) > 0, err
+	return len(deleted) > 0, failed
+}
+
+func retentionStages(ctx context.Context, q *queries.Queries, now time.Time) []purgeStage {
+	return []purgeStage{
+		{analyticsPurgeBatch, func(batch int32) (int64, error) {
+			return q.PurgeAnalytics(ctx, queries.PurgeAnalyticsParams{
+				ReceivedBefore: timestamp(now.AddDate(0, -analyticsRetentionMonths, 0)),
+				Batch:          batch,
+			})
+		}},
+		{credentialPurgeBatch, func(batch int32) (int64, error) {
+			return q.PurgeDonorSessions(ctx, queries.PurgeDonorSessionsParams{
+				LapsedBefore: timestamp(now.Add(-sessionRetention)),
+				Batch:        batch,
+			})
+		}},
+		{credentialPurgeBatch, func(batch int32) (int64, error) {
+			return q.PurgeLoginLinks(ctx, queries.PurgeLoginLinksParams{
+				ExpiredBefore: timestamp(now.Add(-loginRetention)),
+				Batch:         batch,
+			})
+		}},
+		{credentialPurgeBatch, func(batch int32) (int64, error) {
+			return q.PurgeLoginEmails(ctx, queries.PurgeLoginEmailsParams{
+				CompletedBefore: timestamp(now.Add(-loginRetention)),
+				Batch:           batch,
+			})
+		}},
+		{credentialPurgeBatch, func(batch int32) (int64, error) {
+			return q.PurgePartnerSessions(ctx, queries.PurgePartnerSessionsParams{
+				ExpiredBefore: timestamp(now.Add(-sessionRetention)),
+				Batch:         batch,
+			})
+		}},
+		{credentialPurgeBatch, func(batch int32) (int64, error) {
+			return q.PurgePartnerLoginEmails(ctx, queries.PurgePartnerLoginEmailsParams{
+				CompletedBefore: timestamp(now.Add(-loginRetention)),
+				Batch:           batch,
+			})
+		}},
+		{credentialPurgeBatch, func(batch int32) (int64, error) {
+			return q.PurgePhoneCodes(ctx, queries.PurgePhoneCodesParams{
+				ExpiredBefore: timestamp(now.Add(-phoneCodeRetention)),
+				Batch:         batch,
+			})
+		}},
+		{credentialPurgeBatch, func(batch int32) (int64, error) {
+			return q.PurgeStaffCeremonies(ctx, queries.PurgeStaffCeremoniesParams{
+				ExpiredBefore: timestamp(now),
+				Batch:         batch,
+			})
+		}},
+		{rateLimitPurgeBatch, func(batch int32) (int64, error) { return q.PurgeRateLimits(ctx, batch) }},
+		{1, func(int32) (int64, error) { return 0, q.PurgeCompanyTouches(ctx, timestamp(now)) }},
+	}
 }
 
 // purgeTouches deletes up to batch touches past retention that follow after,
