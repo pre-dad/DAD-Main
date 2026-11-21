@@ -81,10 +81,11 @@ func TestSignupCreatesProfileAndQueuesSupportedSignInDestination(t *testing.T) {
 	id, _ := donor(t, pool)
 	mustExec(t, pool, "DELETE FROM donors WHERE id=$1", id)
 	email := "new-signup-" + id.String() + "@example.org"
+	// Cleanups run last-registered first: dependents go before the donor row.
+	cleanup(t, "DELETE FROM donors WHERE email=$1", email)
 	for _, table := range []string{"donor_login_emails", "donor_metric_projections"} {
 		cleanup(t, "DELETE FROM "+table+" WHERE donor_id IN (SELECT id FROM donors WHERE email=$1)", email)
 	}
-	cleanup(t, "DELETE FROM donors WHERE email=$1", email)
 	s := PasswordService{DB: as(t, dbroles.API)}
 	if err := s.Signup(ctx, SignupInput{Name: "New Donor", Email: email, City: "Boston", Zip: "02108"}); err != nil {
 		t.Fatal(err)
