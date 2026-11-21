@@ -164,13 +164,14 @@ it("dates a quote by its last recorded refund and still allows the action, which
       .mockResolvedValueOnce(response({ ...quote, available_minor: 2000, observed_at: observed }))
       .mockResolvedValueOnce(pending()),
   );
-  render(<StaffFinancePage donor="donor" gift="gift" />);
+  const { container } = render(<StaffFinancePage donor="donor" gift="gift" />);
   expect(
     await screen.findByText(
       `Original gift: $30.00. Available to refund: $20.00 USD. Last refund recorded ${formatDateTime(observed)}.`,
     ),
   ).toBeVisible();
-  expect(screen.queryByRole("note")).not.toBeInTheDocument();
+  expect(container.querySelector(".note")).toBeNull();
+  expect(screen.queryByText(/Last updated from Stripe/)).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Review financial action" })).toBeEnabled();
 });
 
