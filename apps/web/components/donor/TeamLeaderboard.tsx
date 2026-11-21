@@ -22,9 +22,13 @@ export function TeamLeaderboard({ teams, onRefresh }: { teams: Team[]; onRefresh
   const [view, setView] = useState<keyof typeof teamViews>("giving");
   const incomplete = teams.some((team) => !team.metrics_verified);
   const ranked = [...teams].sort((a, b) => {
-    if (view !== "volunteer" && a.metrics_verified !== b.metrics_verified) return a.metrics_verified ? -1 : 1;
+    if (view !== "volunteer") {
+      if (a.metrics_verified !== b.metrics_verified) return a.metrics_verified ? -1 : 1;
+      if (!a.metrics_verified) return a.name.localeCompare(b.name);
+    }
     return teamViews[view].sort(b) - teamViews[view].sort(a) || a.name.localeCompare(b.name);
   });
+  const rank = (t: Team) => ranked.filter((o) => teamViews[view].sort(o) > teamViews[view].sort(t)).length + 1;
   return (
     <>
       <label>
@@ -58,9 +62,9 @@ export function TeamLeaderboard({ teams, onRefresh }: { teams: Team[]; onRefresh
             </tr>
           </thead>
           <tbody>
-            {ranked.map((t, index) => (
+            {ranked.map((t) => (
               <tr key={t.team_id}>
-                <td>{incomplete && view !== "volunteer" ? "—" : index + 1}</td>
+                <td>{incomplete && view !== "volunteer" ? "—" : rank(t)}</td>
                 <td>{t.name}</td>
                 <td className="numeric">
                   {t.metrics_verified ? formatMoney(t.annualized_minor) : "Awaiting verification"}
