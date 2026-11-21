@@ -484,7 +484,7 @@ func TestViewsFollowWebhookSyncs(t *testing.T) {
 		}
 		return jsonTime(t, jsonView(t, details)["observed_at"])
 	}
-	states := func() string {
+	amountState := func() string {
 		amount, err := r.service.AmountOptions(ctx, r.token)
 		if err != nil {
 			t.Fatal(err)
@@ -496,7 +496,7 @@ func TestViewsFollowWebhookSyncs(t *testing.T) {
 	// A schedule made in Stripe holds every change until it is released.
 	r.changeRemotely(t, func(remote map[string]any) { remote["schedule"] = "sub_sched_fixture" })
 	r.syncSubscription(t, r.checkout)
-	if amount := states(); amount != "unavailable" {
+	if amount := amountState(); amount != "unavailable" {
 		t.Fatalf("changes offered under a processor schedule: amount %s", amount)
 	}
 	if _, err := r.service.ChangeAmount(ctx, r.token, AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 9000, Previous: 3000, EffectiveAt: r.end}); !errors.Is(
@@ -510,7 +510,7 @@ func TestViewsFollowWebhookSyncs(t *testing.T) {
 	}
 	r.changeRemotely(t, func(remote map[string]any) { delete(remote, "schedule") })
 	r.syncSubscription(t, r.checkout)
-	if amount := states(); amount != "ready" {
+	if amount := amountState(); amount != "ready" {
 		t.Fatalf("changes withheld once the schedule was released: amount %s", amount)
 	}
 
@@ -526,7 +526,7 @@ func TestViewsFollowWebhookSyncs(t *testing.T) {
 		!jsonTime(t, view["observed_at"]).After(first) {
 		t.Fatalf("webhook cancellation not shown: %v", view)
 	}
-	if amount := states(); amount != "unavailable" {
+	if amount := amountState(); amount != "unavailable" {
 		t.Fatalf("changes offered for a stopping gift: amount %s", amount)
 	}
 	if r.sub.retrievals != 1 {
@@ -714,6 +714,9 @@ func TestAmountChangeRespectsTheGiftCeiling(t *testing.T) {
 	over := AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 90001, Previous: 3000, EffectiveAt: r.end}
 	if _, err := r.service.ChangeAmount(ctx, r.token, over); !errors.Is(err, payments.ErrFacts) {
 		t.Fatal("amount above the ceiling accepted", err)
+	}
+	if r.sub.retrievals != 0 || len(r.sub.keys) != 0 {
+		t.Fatalf("over-ceiling amount reached the processor: %d reads, mutations %v", r.sub.retrievals, r.sub.keys)
 	}
 	// Exactly the ceiling ($30/day) is allowed.
 	at := AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 90000, Previous: 3000, EffectiveAt: r.end}
