@@ -148,6 +148,7 @@ SELECT s.id FROM donor_partner_signups s
 WHERE s.approved_at IS NOT NULL
 AND EXISTS(SELECT 1 FROM donor_partner_employees e WHERE e.partner_id = s.id AND e.team_id IS NOT NULL)
 AND NOT EXISTS(SELECT 1 FROM donor_team_months m WHERE m.partner_id = s.id AND m.month = sqlc.arg(month)::date)
+AND (sqlc.narg(after)::uuid IS NULL OR s.id > sqlc.narg(after)::uuid)
 ORDER BY s.id
 LIMIT sqlc.arg(batch)::int;
 

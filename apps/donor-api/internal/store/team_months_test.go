@@ -127,3 +127,45 @@ func TestTeamMonthWaitsForVerifiedMetrics(t *testing.T) {
 	}
 
 }
+
+// TestUnverifiedPartnersDoNotCrowdOutLaterOnes puts more unverified partners
+// ahead of a closable one, by id, than a batch holds.
+func TestUnverifiedPartnersDoNotCrowdOutLaterOnes(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	id := func(n byte) pgtype.UUID {
+		return pgtype.UUID{Bytes: [16]byte{0, 0, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0xf0, n}, Valid: true}
+	}
+	for n := range byte(teamMonthBatch + 1) {
+		partner := approvedPartnerWithID(t, pool, id(n), "Stuck Org", "STUCK-TM-"+string('A'+n), 0, 0)
+		team := mustNewID(t)
+		mustExec(t, pool, "INSERT INTO donor_partner_teams(id,partner_id,name) VALUES($1,$2,'Stuck')", team, partner)
+		var first pgtype.UUID
+		for range minimumGroup {
+			first = linkDonorWithGift(t, pool, partner, 3000, time.Now().UTC(), 1)
+			mustExec(t, pool, "UPDATE donor_partner_employees SET team_id=$2 WHERE donor_id=$1", first, team)
+		}
+		mustExec(t, pool, "UPDATE donor_metric_projections SET refresh_error='InvalidFacts' WHERE donor_id=$1", first)
+	}
+	ready := approvedPartnerWithID(t, pool, id(200), "Ready Org", "READY-TM", 0, 0)
+	team := mustNewID(t)
+	mustExec(t, pool, "INSERT INTO donor_partner_teams(id,partner_id,name) VALUES($1,$2,'Ready')", team, ready)
+	solo, _ := donor(t, pool)
+	mustExec(t, pool, "INSERT INTO donor_partner_employees(donor_id,partner_id,team_id) VALUES($1,$2,$3)", solo, ready, team)
+
+	closed, err := (TeamMonthService{DB: as(t, dbroles.ProjectionWorker)}).CloseDue(ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recorded int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_team_months WHERE partner_id=$1", ready).Scan(&recorded); err != nil ||
+		recorded != 1 || closed < 1 {
+		t.Fatalf(
+			"the closable partner behind %d unverified ones was not closed: recorded=%d closed=%d err=%v",
+			teamMonthBatch+1,
+			recorded,
+			closed,
+			err,
+		)
+	}
+}
