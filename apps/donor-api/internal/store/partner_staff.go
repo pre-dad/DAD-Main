@@ -162,6 +162,24 @@ func (s PartnerApplicationService) InviteUser(ctx context.Context, token string,
 	return err
 }
 
+// ReinviteUser resends the invitation of a partner user who has not accepted
+// it, replacing their old link. Audited.
+func (s PartnerApplicationService) ReinviteUser(ctx context.Context, token string, partnerID, userID pgtype.UUID) error {
+	_, err := staffWrite(ctx, s.Staff, token, partnerPermission,
+		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
+			q := queries.New(tx)
+			if _, err := q.LockPartnerOrg(ctx, partnerID); err != nil {
+				return struct{}{}, err
+			}
+			if err := partnerReinvite(ctx, q, partnerID, userID, now); err != nil {
+				return struct{}{}, err
+			}
+			return struct{}{}, auditStaff(ctx, q, actor.ID, "partner.user_reinvited", partnerID.String(),
+				map[string]string{"user_id": userID.String()}, now)
+		})
+	return err
+}
+
 // RemoveUser disables a partner user and ends their sessions. Audited.
 func (s PartnerApplicationService) RemoveUser(ctx context.Context, token string, partnerID, userID pgtype.UUID) error {
 	_, err := staffWrite(ctx, s.Staff, token, partnerPermission,

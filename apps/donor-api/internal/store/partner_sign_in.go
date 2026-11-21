@@ -121,7 +121,8 @@ func (w PartnerLoginEmailWorker) claim(ctx context.Context, site publicSite, now
 		if err != nil {
 			return err
 		}
-		if user.Disabled || !user.ApprovedAt.Valid || (job.ExpiresAt.Valid && !job.ExpiresAt.Time.After(now)) {
+		if user.Disabled || !user.ApprovedAt.Valid || (job.Kind == partnerLinkSignIn && !user.AcceptedAt.Valid) ||
+			(job.ExpiresAt.Valid && !job.ExpiresAt.Time.After(now)) {
 			return complete()
 		}
 		var token string
@@ -211,4 +212,25 @@ func partnerLoginEmail(kind string, user queries.LockPartnerLoginRecipientRow, l
 				lifetime +
 				"If you did not request it, ignore this email. No access is granted until you confirm on the page.\n"
 	}
+}
+
+// partnerReinvite replaces the invitation of a user who has not accepted yet:
+// it ends their live link and queued emails and queues a fresh invitation,
+// which mints a new link on delivery. Unknown, removed and already-accepted
+// users, and users of another organization, are not found.
+func partnerReinvite(ctx context.Context, q *queries.Queries, partnerID, userID pgtype.UUID, now time.Time) error {
+	if _, err := q.RevokePendingPartnerInvite(ctx, queries.RevokePendingPartnerInviteParams{PartnerID: partnerID, ID: userID}); err != nil {
+		return err
+	}
+	recent, err := q.RecentPartnerInvites(ctx, queries.RecentPartnerInvitesParams{PartnerUserID: userID, AsOf: timestamp(now)})
+	if err != nil {
+		return err
+	}
+	if recent.LastMinute >= 1 || recent.LastHour >= partnerReinvitesPerHour {
+		return ErrPartnerInviteRate
+	}
+	if err = q.CancelPartnerLoginEmails(ctx, queries.CancelPartnerLoginEmailsParams{PartnerUserID: userID, CompletedAt: timestamp(now)}); err != nil {
+		return err
+	}
+	return queuePartnerLogin(ctx, q, userID, partnerLinkInvited, now)
 }

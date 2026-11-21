@@ -246,7 +246,7 @@ var grants = map[string]map[Role]string{
 		LoginEmailWorker: "SELECT, UPDATE (invite_token_hash, invite_expires_at)",
 	},
 	"donor_partner_sessions": {API: "SELECT, INSERT, UPDATE", PushWorker: "SELECT, UPDATE", ProjectionWorker: "SELECT, DELETE"},
-	"donor_partner_login_emails": {API: "SELECT, INSERT", LoginEmailWorker: "SELECT, UPDATE",
+	"donor_partner_login_emails": {API: "SELECT, INSERT, UPDATE (completed_at, encrypted_token)", LoginEmailWorker: "SELECT, UPDATE",
 		ProjectionWorker: "SELECT (id, completed_at), DELETE",
 		Monitor:          "SELECT (attempts, available_at, completed_at)", Rekey: "SELECT (id, encrypted_token), UPDATE (encrypted_token)"},
 	"donor_partner_push_notifications": {

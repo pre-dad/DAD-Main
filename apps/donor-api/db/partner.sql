@@ -324,10 +324,13 @@ WHERE sqlc.arg(kind)::text <> 'SIGN_IN' OR (
 );
 
 -- name: PartnerUsersForSignIn :many
--- The enabled users of approved partners who sign in with this email.
+-- The enabled users of approved partners who sign in with this email. Only a
+-- user who has accepted their invitation qualifies: a public request must not
+-- replace the live invite link of someone who has not, who is re-invited by an
+-- admin instead.
 SELECT u.id FROM donor_partner_users u
 JOIN donor_partner_signups p ON p.id = u.partner_id
-WHERE u.email=$1 AND NOT u.disabled AND p.approved_at IS NOT NULL
+WHERE u.email=$1 AND NOT u.disabled AND u.accepted_at IS NOT NULL AND p.approved_at IS NOT NULL
 ORDER BY u.id FOR UPDATE OF u;
 
 -- name: NextPartnerLoginEmail :one
@@ -335,11 +338,31 @@ SELECT * FROM donor_partner_login_emails WHERE completed_at IS NULL AND attempts
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
 
 -- name: LockPartnerLoginRecipient :one
-SELECT u.id, u.email, u.name, u.role, u.disabled, u.invite_token_hash, p.organization, p.approved_at
+SELECT u.id, u.email, u.name, u.role, u.disabled, u.invite_token_hash, u.accepted_at, p.organization, p.approved_at
 FROM donor_partner_users u
 JOIN donor_partner_signups p ON p.id = u.partner_id
 WHERE u.id=$1
 FOR UPDATE OF u;
+
+-- name: RevokePendingPartnerInvite :one
+-- Ends the live invite link of a user who has not accepted yet, so a resend
+-- leaves exactly one working link.
+UPDATE donor_partner_users SET invite_token_hash=NULL, invite_expires_at=NULL
+WHERE partner_id=$1 AND id=$2 AND NOT disabled AND accepted_at IS NULL
+RETURNING id;
+
+-- name: CancelPartnerLoginEmails :exec
+-- Drops the user's queued emails that have not been delivered.
+UPDATE donor_partner_login_emails SET completed_at=$2, encrypted_token=NULL
+WHERE partner_user_id=$1 AND completed_at IS NULL;
+
+-- name: RecentPartnerInvites :one
+-- How many invitations were queued for the user in the last minute and hour.
+SELECT
+  count(*) FILTER (WHERE created_at > sqlc.arg(as_of)::timestamptz - interval '1 minute')::int AS last_minute,
+  count(*) FILTER (WHERE created_at > sqlc.arg(as_of)::timestamptz - interval '1 hour')::int AS last_hour
+FROM donor_partner_login_emails
+WHERE partner_user_id=sqlc.arg(partner_user_id)::uuid AND kind IN ('APPROVED','INVITED');
 
 -- name: SetPartnerUserLink :exec
 UPDATE donor_partner_users SET invite_token_hash=$2, invite_expires_at=$3 WHERE id=$1;
