@@ -316,6 +316,24 @@ export default function PartnerDetail({ partner }: { partner: string }) {
                 <li key={user.id}>
                   {user.name || user.email} · {user.email} · {user.role === "ADMIN" ? "Admin" : "Viewer"}
                   {!user.accepted && " · Invitation not yet used"}{" "}
+                  {!user.accepted && (
+                    <>
+                      <button
+                        type="button"
+                        className="link"
+                        disabled={busy}
+                        onClick={() =>
+                          run(null, `Resent the invitation to ${user.email}.`, () =>
+                            api(`/donor/staff/partners/${id}/users/${encodeURIComponent(user.id)}/reinvite`, {
+                              method: "POST",
+                            }),
+                          )
+                        }
+                      >
+                        Resend invitation to {user.email}
+                      </button>{" "}
+                    </>
+                  )}
                   <button
                     type="button"
                     className="link"

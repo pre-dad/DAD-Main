@@ -133,7 +133,7 @@ function stub(overrides: Record<string, unknown> = {}, calls: { url: string; ini
       if (url.endsWith("/users") && init?.method === "POST") return Promise.resolve(Response.json({ invited: true }));
       if (url.endsWith("/users"))
         return Promise.resolve(
-          Response.json({ users: [{ id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN" }] }),
+          Response.json({ users: [{ id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN", accepted: true }] }),
         );
       if (url.endsWith("/exports")) return Promise.resolve(Response.json({ exports: [] }));
       if (url.endsWith("/our-people"))
@@ -213,8 +213,8 @@ it("lets a partner admin remove a colleague but not themselves", async () => {
       return Promise.resolve(
         Response.json({
           users: [
-            { id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN" },
-            { id: "u2", email: "v@delta.test", name: "Val", role: "VIEWER" },
+            { id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN", accepted: true },
+            { id: "u2", email: "v@delta.test", name: "Val", role: "VIEWER", accepted: true },
           ],
         }),
       );
@@ -231,6 +231,41 @@ it("lets a partner admin remove a colleague but not themselves", async () => {
     "/api/donor/partner/users/u2/remove",
     expect.objectContaining({ method: "POST" }),
   );
+});
+
+it("lets a partner admin resend an unused invitation and shows the throttle", async () => {
+  stub({ user_id: "u1" });
+  const base = vi.mocked(fetch).getMockImplementation();
+  let resends = 0;
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/users") && init?.method !== "POST")
+      return Promise.resolve(
+        Response.json({
+          users: [
+            { id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN", accepted: true },
+            { id: "u2", email: "v@delta.test", name: "Val", role: "VIEWER", accepted: false },
+            { id: "u3", email: "w@delta.test", name: "Wes", role: "VIEWER", accepted: true },
+          ],
+        }),
+      );
+    if (String(input).endsWith("/u2/reinvite"))
+      return Promise.resolve(
+        resends++ === 0 ? Response.json({ invited: true }) : Response.json({ detail: "slow down" }, { status: 429 }),
+      );
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  expect(await screen.findByText(/v@delta.test · Viewer · Invitation not yet used/)).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: /Resend invitation/ })).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Resend invitation to v@delta.test" }));
+  expect(await screen.findByText(/emailed v@delta.test a new invitation/)).toBeInTheDocument();
+  expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+    "/api/donor/partner/users/u2/reinvite",
+    expect.objectContaining({ method: "POST" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Resend invitation to v@delta.test" }));
+  expect(await screen.findByText(/Too many requests/)).toBeInTheDocument();
 });
 
 it("keeps a partner viewer read-only", async () => {
