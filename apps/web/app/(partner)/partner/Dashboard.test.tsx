@@ -226,6 +226,12 @@ it("lets a partner admin remove a colleague but not themselves", async () => {
   expect(await screen.findByRole("button", { name: "Remove v@delta.test" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Remove a@delta.test" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Remove v@delta.test" }));
+  expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith("/remove"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Keep v@delta.test" }));
+  expect(screen.getByRole("button", { name: "Remove v@delta.test" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Remove v@delta.test" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm removal of v@delta.test" }));
+  expect(screen.getByRole("button", { name: "Confirm removal of v@delta.test" })).toBeDisabled();
   expect(await screen.findByText("Removed v@delta.test.")).toBeInTheDocument();
   expect(vi.mocked(fetch)).toHaveBeenCalledWith(
     "/api/donor/partner/users/u2/remove",
@@ -326,7 +332,8 @@ it("downloads the verified report through a temporary object URL and refreshes t
   expect(await screen.findByText("Your verified impact report was downloaded.")).toBeVisible();
   expect(createObjectURL).toHaveBeenCalledTimes(1);
   expect(click).toHaveBeenCalledTimes(1);
-  expect(revokeObjectURL).toHaveBeenCalledWith("blob:report");
+  expect(revokeObjectURL).not.toHaveBeenCalled();
+  await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:report"), { timeout: 2500 });
   const historyReads = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith("/exports"));
   expect(historyReads).toHaveLength(2);
   click.mockRestore();
@@ -377,4 +384,47 @@ it("shows employee figures once enough employees have linked their giving", asyn
   expect(people.getByText("Average streak 9 days")).toBeVisible();
   expect(people.queryByText(/appear once at least 5 employees/)).not.toBeInTheDocument();
   expect(people.queryByRole("button", { name: "Refresh employee figures" })).not.toBeInTheDocument();
+});
+
+it("keeps the saved profile and says so when only the workforce size fails to save", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  stub({}, calls);
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/workforce"))
+      return Promise.resolve(Response.json({ detail: "Down" }, { status: 503 }));
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  const organization = within(await screen.findByRole("region", { name: "Organization" }));
+  fireEvent.change(organization.getByLabelText("Organization name"), { target: { value: "Delta Group" } });
+  fireEvent.change(organization.getByLabelText("Workforce size"), { target: { value: "450" } });
+  fireEvent.click(organization.getByRole("button", { name: "Save profile" }));
+  expect(await organization.findByText(/Profile saved; workforce size was not/)).toBeInTheDocument();
+  expect(organization.queryByText(/could not be saved right now/)).not.toBeInTheDocument();
+  expect(calls.filter((c) => c.url.endsWith("/overview")).length).toBeGreaterThanOrEqual(2);
+});
+
+it("does not report a profile save when the profile request itself fails", async () => {
+  stub();
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/profile")) return Promise.resolve(Response.json({ detail: "Down" }, { status: 503 }));
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  const organization = within(await screen.findByRole("region", { name: "Organization" }));
+  fireEvent.click(organization.getByRole("button", { name: "Save profile" }));
+  expect(await organization.findByText(/The profile could not be saved right now/)).toBeInTheDocument();
+  expect(organization.queryByText("Organization profile saved.")).not.toBeInTheDocument();
+  expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith("/workforce"))).toBe(false);
+});
+
+it("lets keyboard users scroll the spend table", async () => {
+  stub();
+  render(<Dashboard />);
+  const table = await screen.findByRole("region", { name: "Spend by category across all initiatives" });
+  expect(table).toHaveAttribute("tabindex", "0");
 });
