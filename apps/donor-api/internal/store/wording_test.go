@@ -16,10 +16,10 @@ func TestStaffRewordsBadgesAndMilestones(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	staff := &StaffService{DB: as(t, dbroles.API)}
-	_, content := staffFixture(t, pool, "SUPER_ADMIN")
+	contentID, content := staffFixture(t, pool, "SUPER_ADMIN")
 	_, growth := staffFixture(t, pool, "OP_GROWTH")
 	wording := WordingService{Staff: staff}
-	t.Cleanup(func() { mustExec(t, pool, "DELETE FROM donor_recognition_wording") })
+	cleanup(t, "DELETE FROM donor_recognition_wording WHERE (kind,key) IN (('BADGE','WT'),('MILESTONE','30'))")
 
 	badge := WordingChange{Kind: WordingBadge, Key: "WT", Title: "Top Team", Text: "Your team wins the month"}
 	if err := wording.SetWording(ctx, growth, badge); !errors.Is(err, ErrStaffForbidden) {
@@ -74,9 +74,9 @@ func TestStaffRewordsBadgesAndMilestones(t *testing.T) {
 		t.Fatalf("after reset: badge %+v, milestone %+v", wt, month)
 	}
 	var audited int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE action='content.wording_changed' AND target IN ('BADGE:WT','MILESTONE:30')").
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE actor_id=$1 AND action='content.wording_changed' AND target IN ('BADGE:WT','MILESTONE:30')", contentID).
 		Scan(&audited); err != nil ||
-		audited < 3 {
+		audited != 3 {
 		t.Fatalf("%d wording changes audited, err %v; want 3", audited, err)
 	}
 }

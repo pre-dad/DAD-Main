@@ -79,7 +79,7 @@ func TestWebCheckoutRestartExpiresTheAbandonedSession(t *testing.T) {
 func TestWebCheckoutRestartReplacesANativeSession(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
 	gateway := f.service.Gateway.(*checkoutGateway)
-	token := claimSession(t, f.db, f.donorID, app).Access
+	token := claimSession(t, f.db, f.donorID, appClient).Access
 	native, err := f.service.BeginNativeCheckout(context.Background(), token, testID(t), 3000, nil)
 	if err != nil {
 		t.Fatal(err)

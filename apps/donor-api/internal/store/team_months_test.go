@@ -7,7 +7,10 @@ import (
 
 	"dad/donor-api/internal/dbroles"
 	"dad/donor-api/internal/store/queries"
+
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // TestWinningTeamByCombinedActiveGiving covers Appendix A's Winning Team: when a
@@ -21,6 +24,11 @@ func TestWinningTeamByCombinedActiveGiving(t *testing.T) {
 		t.Fatal(err)
 	}
 	partner := approvedPartner(t, pool, "Team Org", "TEAMMONTH", 0, 0)
+	cleanup(
+		t,
+		"DELETE FROM donor_badges WHERE code='WT' AND donor_id IN (SELECT donor_id FROM donor_partner_employees WHERE partner_id=$1)",
+		partner,
+	)
 	team := func(name string, members, active int) (pgtype.UUID, []pgtype.UUID) {
 		id := testID(t)
 		mustExec(t, pool, "INSERT INTO donor_partner_teams(id,partner_id,name) VALUES($1,$2,$3)", id, partner, name)
@@ -125,5 +133,106 @@ func TestTeamMonthWaitsForVerifiedMetrics(t *testing.T) {
 		closed != 1 {
 		t.Fatalf("verified winner: closed=%d err=%v", closed, err)
 	}
+}
 
+// closableTeam gives an approved partner one team of the minimum size whose
+// members' metrics are fresh at now, so the partner's month can close.
+func closableTeam(t *testing.T, pool *pgxpool.Pool, code string, now time.Time) pgtype.UUID {
+	t.Helper()
+	version, err := currentRulesVersion(context.Background(), queries.New(pool))
+	if err != nil {
+		t.Fatal(err)
+	}
+	partner := approvedPartner(t, pool, "Month "+code, code, 0, 0)
+	cleanup(
+		t,
+		"DELETE FROM donor_badges WHERE code='WT' AND donor_id IN (SELECT donor_id FROM donor_partner_employees WHERE partner_id=$1)",
+		partner,
+	)
+	team := testID(t)
+	mustExec(t, pool, "INSERT INTO donor_partner_teams(id,partner_id,name) VALUES($1,$2,'Team')", team, partner)
+	for range minimumGroup {
+		donorID, _ := donor(t, pool)
+		mustExec(t, pool, "INSERT INTO donor_partner_employees(donor_id,partner_id,team_id) VALUES($1,$2,$3)", donorID, partner, team)
+		mustExec(
+			t,
+			pool,
+			`INSERT INTO donor_metric_projections(id,donor_id,current_streak,best_streak,computed_at,next_refresh_at,active,current_monthly_minor,rules_version)
+VALUES($1,$2,1,1,$3,$4,true,3000,$5)`,
+			testID(t),
+			donorID,
+			now.Add(-time.Hour),
+			now.Add(24*time.Hour),
+			version,
+		)
+	}
+	return partner
+}
+
+// drainTeamMonths closes due months until none remain, failing the test
+// instead of hanging if the queue never empties.
+func drainTeamMonths(t *testing.T, months TeamMonthService, now time.Time) {
+	t.Helper()
+	for range 500 {
+		n, err := months.CloseDue(context.Background(), now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			return
+		}
+	}
+	t.Fatal("team months still closing after 500 batches")
+}
+
+func TestTeamMonthClosedIsTheMonthBeforeNewYorkNow(t *testing.T) {
+	pool := database(t)
+	months := TeamMonthService{DB: as(t, dbroles.ProjectionWorker)}
+	for name, tc := range map[string]struct {
+		now  time.Time
+		want string
+	}{
+		"new year in New York closes December": {time.Date(2027, 1, 1, 5, 0, 0, 0, time.UTC), "2026-12-01"},
+		"still October in New York":            {time.Date(2026, 11, 1, 3, 0, 0, 0, time.UTC), "2026-09-01"},
+		"midnight November in New York":        {time.Date(2026, 11, 1, 4, 0, 0, 0, time.UTC), "2026-10-01"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			partner := closableTeam(t, pool, "MONTH-"+testID(t).String()[24:], tc.now)
+			drainTeamMonths(t, months, tc.now)
+			rows, err := pool.Query(context.Background(), "SELECT month::text FROM donor_team_months WHERE partner_id=$1", partner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := pgx.CollectRows(rows, pgx.RowTo[string])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 || got[0] != tc.want {
+				t.Fatalf("closed months %v, want only %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTeamMonthClosingProceedsInBatchesWithoutStarvingPartners(t *testing.T) {
+	pool := database(t)
+	months := TeamMonthService{DB: as(t, dbroles.ProjectionWorker)}
+	now := time.Date(2027, 3, 1, 6, 0, 0, 0, time.UTC)
+	var partners []pgtype.UUID
+	for range teamMonthBatch + 5 {
+		partners = append(partners, closableTeam(t, pool, "BATCH-"+testID(t).String()[24:], now))
+	}
+	first, err := months.CloseDue(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != teamMonthBatch {
+		t.Fatalf("first pass closed %d partners, want the batch of %d", first, teamMonthBatch)
+	}
+	drainTeamMonths(t, months, now)
+	var closed int
+	if err := pool.QueryRow(context.Background(), "SELECT count(*) FROM donor_team_months WHERE partner_id=ANY($1) AND month='2027-02-01'", partners).Scan(&closed); err != nil ||
+		closed != len(partners) {
+		t.Fatalf("closed %d of %d partners after draining: %v", closed, len(partners), err)
+	}
 }

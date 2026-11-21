@@ -118,7 +118,10 @@ func TestStaffPasskeyActivationSignsInOnceAndSignInIsSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	creation := invitation.Options.(protocol.PublicKeyCredentialCreationOptions)
+	creation, ok := invitation.Options.(protocol.PublicKeyCredentialCreationOptions)
+	if !ok {
+		t.Fatalf("invitation options are %T, want creation options", invitation.Options)
+	}
 	selection := creation.AuthenticatorSelection
 	if invitation.Email != id.String()+"@example.org" || invitation.Name != "Test staff" || creation.RelyingParty.ID != staffTestRPID ||
 		selection.ResidentKey != protocol.ResidentKeyRequirementRequired || selection.UserVerification != protocol.VerificationRequired ||
@@ -145,7 +148,10 @@ func TestStaffPasskeyActivationSignsInOnceAndSignInIsSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := ceremony.Options.(protocol.PublicKeyCredentialRequestOptions)
+	request, ok := ceremony.Options.(protocol.PublicKeyCredentialRequestOptions)
+	if !ok {
+		t.Fatalf("sign-in options are %T, want request options", ceremony.Options)
+	}
 	if request.RelyingPartyID != staffTestRPID || request.UserVerification != protocol.VerificationRequired ||
 		len(request.AllowedCredentials) != 0 {
 		t.Fatalf("sign-in is not a usernameless, verified request: %+v", request)

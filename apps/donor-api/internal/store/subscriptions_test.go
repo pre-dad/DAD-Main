@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -56,7 +57,35 @@ func subscription(checkout string, start time.Time) map[string]any {
 }
 
 func subscriptionItem(remote map[string]any) map[string]any {
-	return remote["items"].(map[string]any)["data"].([]any)[0].(map[string]any)
+	return fixtureObject(fixtureList(fixtureObject(remote["items"])["data"])[0])
+}
+
+func subscriptionPrice(remote map[string]any) map[string]any {
+	return fixtureObject(subscriptionItem(remote)["price"])
+}
+
+// invoiceLine returns the first entry of an invoice's "lines" or "payments" list.
+func invoiceLine(inv map[string]any, list string) map[string]any {
+	return fixtureObject(fixtureList(fixtureObject(inv[list])["data"])[0])
+}
+
+// fixtureObject and fixtureList narrow decoded JSON fixtures, naming the
+// offending value when a fixture changes shape instead of an anonymous
+// interface-conversion panic.
+func fixtureObject(v any) map[string]any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		panic(fmt.Sprintf("fixture value is %T, want a JSON object", v))
+	}
+	return m
+}
+
+func fixtureList(v any) []any {
+	l, ok := v.([]any)
+	if !ok {
+		panic(fmt.Sprintf("fixture value is %T, want a JSON array", v))
+	}
+	return l
 }
 
 func assertEventProcessed(t *testing.T, f *workerFixture, id string, want bool) {
@@ -164,10 +193,10 @@ func TestInvalidSubscriptionRollsBackBindingAndProjection(t *testing.T) {
 	cases := map[string]func(map[string]any){
 		"live":        func(r map[string]any) { r["livemode"] = true },
 		"owner":       func(r map[string]any) { r["metadata"] = map[string]any{"dad_checkout_id": "another"} },
-		"extra items": func(r map[string]any) { r["items"].(map[string]any)["has_more"] = true },
+		"extra items": func(r map[string]any) { fixtureObject(r["items"])["has_more"] = true },
 		"quantity":    func(r map[string]any) { subscriptionItem(r)["quantity"] = 2 },
 		"amount": func(r map[string]any) {
-			subscriptionItem(r)["price"].(map[string]any)["unit_amount"] = 9000
+			subscriptionPrice(r)["unit_amount"] = 9000
 		},
 		"cancel midmonth": func(r map[string]any) { r["cancel_at"] = time.Now().Unix() },
 	}
@@ -225,18 +254,18 @@ func TestMonthlyItemRejectsOtherBillingShapes(t *testing.T) {
 		}
 		return paymentObject(t, remote)
 	}
-	price := func(r map[string]any) map[string]any { return subscriptionItem(r)["price"].(map[string]any) }
+	price := subscriptionPrice
 	if _, _, err := monthlyItem(draft, attempt, build(nil)); err != nil {
 		t.Fatal("a monthly USD subscription was refused:", err)
 	}
 	for name, edit := range map[string]func(map[string]any){
-		"interval count": func(r map[string]any) { price(r)["recurring"].(map[string]any)["interval_count"] = 2 },
-		"yearly":         func(r map[string]any) { price(r)["recurring"].(map[string]any)["interval"] = "year" },
+		"interval count": func(r map[string]any) { fixtureObject(price(r)["recurring"])["interval_count"] = 2 },
+		"yearly":         func(r map[string]any) { fixtureObject(price(r)["recurring"])["interval"] = "year" },
 		"currency":       func(r map[string]any) { price(r)["currency"] = "eur" },
 		"quantity":       func(r map[string]any) { subscriptionItem(r)["quantity"] = 2 },
 		"second item": func(r map[string]any) {
-			items := r["items"].(map[string]any)
-			items["data"] = append(items["data"].([]any), subscriptionItem(r))
+			items := fixtureObject(r["items"])
+			items["data"] = append(fixtureList(items["data"]), subscriptionItem(r))
 		},
 		"wrong subscription": func(r map[string]any) { r["id"] = "sub_other" },
 		"other checkout":     func(r map[string]any) { r["metadata"] = map[string]any{"dad_checkout_id": "another"} },
@@ -282,7 +311,7 @@ VALUES($1,$2,$3,3000,9000,$4,$5,$6,$7)`,
 				t.Fatal(err)
 			}
 			remote := subscription(result.CheckoutID, start)
-			subscriptionItem(remote)["price"].(map[string]any)["unit_amount"] = tc.unitAmount
+			subscriptionPrice(remote)["unit_amount"] = tc.unitAmount
 			f.gateway.subscriptions["sub_"+result.CheckoutID] = paymentObject(t, remote)
 			event := f.receive(t, "customer.subscription.updated", remote)
 			f.process(t)
@@ -302,7 +331,7 @@ func TestReconcileAuthorizedAmount(t *testing.T) {
 		t.Fatal(err)
 	}
 	remote := subscription(result.CheckoutID, start)
-	subscriptionItem(remote)["price"].(map[string]any)["unit_amount"] = 9000
+	subscriptionPrice(remote)["unit_amount"] = 9000
 	f.gateway.subscriptions["sub_"+result.CheckoutID] = paymentObject(t, remote)
 	event := f.receive(t, "customer.subscription.updated", remote)
 	f.process(t)
@@ -324,7 +353,7 @@ func TestInvoiceConfirmsPendingAmountWithoutRepricingPriorPeriod(t *testing.T) {
 		t.Fatal(err)
 	}
 	remote := subscription(result.CheckoutID, start)
-	subscriptionItem(remote)["price"].(map[string]any)["unit_amount"] = 9000
+	subscriptionPrice(remote)["unit_amount"] = 9000
 	f.gateway.subscriptions["sub_"+result.CheckoutID] = paymentObject(t, remote)
 	original := invoice(result.CheckoutID, "in_old_"+result.CheckoutID, start, true)
 	event := f.receive(t, "invoice.payment_succeeded", original)
@@ -334,8 +363,8 @@ func TestInvoiceConfirmsPendingAmountWithoutRepricingPriorPeriod(t *testing.T) {
 	renewal["amount_paid"] = 9000
 	renewal["amount_due"] = 9000
 	renewal["total"] = 9000
-	renewal["lines"].(map[string]any)["data"].([]any)[0].(map[string]any)["amount"] = 9000
-	renewal["payments"].(map[string]any)["data"].([]any)[0].(map[string]any)["amount_paid"] = 9000
+	invoiceLine(renewal, "lines")["amount"] = 9000
+	invoiceLine(renewal, "payments")["amount_paid"] = 9000
 	event = f.receive(t, "invoice.payment_succeeded", renewal)
 	f.process(t)
 	assertEventProcessed(t, f, event, true)

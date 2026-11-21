@@ -160,7 +160,21 @@ func TestReceiptsScopeNewYorkYearAndLaterRefunds(t *testing.T) {
 	if _, err = readReceipt(ctx, q, owner, early, now); !errors.Is(err, ErrReceipt) {
 		t.Fatal("over-refunded gift accepted", err)
 	}
-	if money(123456789) != "$1,234,567.89" {
-		t.Fatal("money formatting changed")
+}
+
+func TestMoneyFormatsMinorUnits(t *testing.T) {
+	for want, minor := range map[string]int64{
+		"$0.00":         0,
+		"$0.05":         5,
+		"$0.99":         99,
+		"$1.00":         100,
+		"$999.99":       99999,
+		"$1,000.00":     100000,
+		"$12,345.67":    1234567,
+		"$1,234,567.89": 123456789,
+	} {
+		if got := money(minor); got != want {
+			t.Errorf("money(%d) = %q, want %q", minor, got, want)
+		}
 	}
 }

@@ -109,7 +109,7 @@ func TestDonorPasskeySignsTheAppInWithARefreshToken(t *testing.T) {
 	if err := registerPasskey(t, s, session, key, ""); err != nil {
 		t.Fatal(err)
 	}
-	tokens, err := donorSignIn(t, s, key, app)
+	tokens, err := donorSignIn(t, s, key, appClient)
 	if err != nil || tokens.Refresh == "" || !signedInAs(t, pool, tokens.Access) {
 		t.Fatal("passkey did not sign the app in", tokens, err)
 	}
