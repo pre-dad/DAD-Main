@@ -117,7 +117,7 @@ it("restores an uncertain match payment after navigation and retries the identic
   const page = render(<PartnerDetail partner="p-1" />);
   fireEvent.change(await screen.findByLabelText(/Match payment received/), { target: { value: "250" } });
   fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("The recording is not confirmed");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("The recording is not confirmed"));
   page.unmount();
   render(<PartnerDetail partner="p-1" />);
   expect(await screen.findByLabelText(/Match payment received/)).toHaveValue("250.00");
@@ -201,7 +201,9 @@ it("blocks recording a payment when the saved retry details are unreadable", asy
   const fetch = stubApi();
   sessionStorage.setItem("dad:match-payment:p-1", "{not json");
   render(<PartnerDetail partner="p-1" />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Saved payment retry details could not be read");
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent("Saved payment retry details could not be read"),
+  );
   expect(screen.getByRole("button", { name: "Record payment" })).toBeDisabled();
   expect(posted(fetch, "/p-1/match-payment")).toBeUndefined();
 });
@@ -210,7 +212,9 @@ it("blocks recording a payment when the saved retry key is not a valid request k
   stubApi();
   sessionStorage.setItem("dad:match-payment:p-1", JSON.stringify({ key: "nope", year: 2026, amount_minor: 100 }));
   render(<PartnerDetail partner="p-1" />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Saved payment retry details could not be read");
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent("Saved payment retry details could not be read"),
+  );
   expect(screen.getByRole("button", { name: "Record payment" })).toBeDisabled();
 });
 
@@ -249,7 +253,7 @@ it.each([
   render(<PartnerDetail partner="p-1" />);
   fireEvent.change(await screen.findByLabelText(field), { target: { value } });
   fireEvent.submit(screen.getByRole("button", { name: button }).closest("form") as HTMLFormElement);
-  expect(await screen.findByRole("alert")).toHaveTextContent(message);
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(message));
   expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
 });
 
@@ -258,6 +262,6 @@ it("asks for a payment amount before recording", async () => {
   render(<PartnerDetail partner="p-1" />);
   await screen.findByLabelText(/Match payment received/);
   fireEvent.submit(screen.getByRole("button", { name: "Record payment" }).closest("form") as HTMLFormElement);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Enter the payment received in dollars.");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Enter the payment received in dollars."));
   expect(posted(fetch, "/p-1/match-payment")).toBeUndefined();
 });

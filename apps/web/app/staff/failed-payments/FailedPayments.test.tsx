@@ -96,7 +96,9 @@ it("explains a load failure and retries", async () => {
     .mockResolvedValue(Response.json({ payments: [payment("a")], next_cursor: null }));
   vi.stubGlobal("fetch", fetch);
   render(<FailedPayments />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Failed payments could not be loaded right now");
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent("Failed payments could not be loaded right now"),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Retry loading" }));
   expect(await screen.findByRole("link", { name: "a@example.org" })).toBeVisible();
 });

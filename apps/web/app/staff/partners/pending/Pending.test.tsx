@@ -91,7 +91,7 @@ it("shows the server's reason when a decision conflicts and reloads the queue", 
   const fetch = queue(() => Response.json({ detail: "That work email already has a login." }, { status: 409 }));
   render(<Pending />);
   fireEvent.click(await screen.findByRole("button", { name: "Confirm approval of Delta Inc" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("That work email already has a login.");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("That work email already has a login."));
   await waitFor(() => expect(fetch.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(2));
 });
 
@@ -104,7 +104,7 @@ it("falls back to a plain message when the decision cannot reach the server", as
   vi.stubGlobal("fetch", fetch);
   render(<Pending />);
   fireEvent.click(await screen.findByRole("button", { name: "Confirm approval of Delta Inc" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent(/offline/i);
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/offline/i));
 });
 
 it("announces a load failure and retries", async () => {
@@ -116,7 +116,9 @@ it("announces a load failure and retries", async () => {
       .mockResolvedValue(Response.json({ applications: [application], next_cursor: null })),
   );
   render(<Pending />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Pending applications could not be loaded right now");
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent("Pending applications could not be loaded right now"),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Retry loading" }));
   expect(await screen.findByRole("heading", { name: "Delta Inc" })).toBeVisible();
 });

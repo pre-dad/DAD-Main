@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import Signup from "./Signup";
 
@@ -17,7 +17,9 @@ it("asks for a verification link without confirming whether the address exists",
   render(<Signup />);
   fill();
   fireEvent.click(screen.getByRole("button", { name: "Verify my email" }));
-  expect(await screen.findByRole("status")).toHaveTextContent("If this address can be used for a donor account");
+  await waitFor(() =>
+    expect(screen.getByRole("status")).toHaveTextContent("If this address can be used for a donor account"),
+  );
   expect(fetch.mock.calls[0][0]).toBe("/api/donor/signup");
   expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
     name: "Ben Donor",
@@ -33,7 +35,7 @@ it("says so when the account could not be started, and lets the donor retry", as
   render(<Signup />);
   fill();
   fireEvent.click(screen.getByRole("button", { name: "Verify my email" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent(/offline/);
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/offline/));
   expect(screen.getByRole("button", { name: "Verify my email" })).toBeEnabled();
 });
 

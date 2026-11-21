@@ -14,7 +14,9 @@ it("records the reason and refreshes the donor after a successful repair", async
     target: { value: "Repair after system error DAD-123" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Recompute recognition" }));
-  expect(await screen.findByRole("status")).toHaveTextContent("Recognition recomputed from recorded facts");
+  await waitFor(() =>
+    expect(screen.getByRole("status")).toHaveTextContent("Recognition recomputed from recorded facts"),
+  );
   expect(fetch).toHaveBeenCalledWith(
     "/api/donor/staff/donors/donor-1/recognition/recompute",
     expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "Repair after system error DAD-123" }) }),
@@ -34,7 +36,7 @@ it("retains the repair reason when authorization is refused", async () => {
     target: { value: "Repair after system error DAD-123" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Recompute recognition" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Permission denied");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Permission denied"));
   await waitFor(() => expect(screen.getByRole("button", { name: "Recompute recognition" })).toBeEnabled());
   expect(screen.getByLabelText("Reason for repair")).toHaveValue("Repair after system error DAD-123");
   expect(onComplete).not.toHaveBeenCalled();
@@ -49,7 +51,7 @@ it("resets the streak through its own endpoint and button", async () => {
   fireEvent.click(screen.getByLabelText(/Reset the current streak to zero/));
   fireEvent.change(screen.getByLabelText("Reason for repair"), { target: { value: "  Streak corrupted by DAD-9  " } });
   fireEvent.click(screen.getByRole("button", { name: "Reset streak" }));
-  expect(await screen.findByRole("status")).toHaveTextContent("Streak reset to zero.");
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Streak reset to zero."));
   expect(fetch).toHaveBeenCalledWith(
     "/api/donor/staff/donors/donor-1/recognition/reset",
     expect.objectContaining({ body: JSON.stringify({ reason: "Streak corrupted by DAD-9" }) }),
@@ -81,9 +83,9 @@ it("clears the previous success message when the next repair starts", async () =
   const reason = screen.getByLabelText("Reason for repair");
   fireEvent.change(reason, { target: { value: "Repair after system error one" } });
   fireEvent.click(screen.getByRole("button", { name: "Recompute recognition" }));
-  expect(await screen.findByRole("status")).toHaveTextContent("Recognition recomputed");
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Recognition recomputed"));
   fireEvent.change(reason, { target: { value: "Repair after system error two" } });
   fireEvent.click(screen.getByRole("button", { name: "Recompute recognition" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Permission denied");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Permission denied"));
   expect(screen.getByRole("status")).toBeEmptyDOMElement();
 });

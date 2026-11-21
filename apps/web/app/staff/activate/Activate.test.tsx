@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import StaffActivate from "./Activate";
@@ -94,7 +94,9 @@ it("lets the person retry after cancelling, and replaces a ceremony the server r
   vi.stubGlobal("fetch", fetch);
   render(<StaffActivate />);
   fireEvent.click(await screen.findByRole("button", { name: "Create a passkey" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Passkey creation was cancelled or timed out.");
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent("Passkey creation was cancelled or timed out."),
+  );
   expect(issued).toBe(1);
   cancel = false;
   fireEvent.click(screen.getByRole("button", { name: "Create a passkey" }));
@@ -114,8 +116,10 @@ it("points a used or expired invitation to sign-in, then forgets it", async () =
     ),
   );
   const first = render(<StaffActivate />);
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "This invitation has already been used or has expired. If you already created a passkey, sign in with it. Otherwise, ask a DAD administrator for a new invitation.",
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This invitation has already been used or has expired. If you already created a passkey, sign in with it. Otherwise, ask a DAD administrator for a new invitation.",
+    ),
   );
   expect(screen.getByRole("link", { name: "Staff sign-in" })).toHaveAttribute("href", "/staff/sign-in");
   expect(screen.queryByRole("button", { name: "Create a passkey" })).not.toBeInTheDocument();
@@ -140,8 +144,10 @@ it("keeps focus on the button after a cancelled prompt and blames the device whe
   const button = await screen.findByRole("button", { name: "Create a passkey" });
   button.focus();
   fireEvent.click(button);
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "This device can’t use a passkey here. Try another browser, your phone, or a security key.",
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This device can’t use a passkey here. Try another browser, your phone, or a security key.",
+    ),
   );
   expect(button).toHaveFocus();
   expect(button).not.toHaveAttribute("aria-disabled");
@@ -194,7 +200,9 @@ it("reports a refused invitation, not a bad passkey, when the stale refresh retu
     const button = await screen.findByRole("button", { name: "Create a passkey" });
     vi.setSystemTime(Date.now() + 4 * 60_000);
     fireEvent.click(button);
-    expect(await screen.findByRole("alert")).toHaveTextContent("This invitation has already been used or has expired.");
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("This invitation has already been used or has expired."),
+    );
     expect(screen.getByRole("alert")).not.toHaveTextContent("The passkey wasn’t accepted");
     expect(create).not.toHaveBeenCalled();
     expect(screen.getByRole("link", { name: "Staff sign-in" })).toBeVisible();
@@ -223,6 +231,6 @@ it("explains rate limiting when the invitation cannot be checked", async () => {
     vi.fn(async () => new Response(JSON.stringify({ detail: "Too many requests" }), { status: 429 })),
   );
   render(<StaffActivate />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Wait a minute, then retry.");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Wait a minute, then retry."));
   expect(screen.queryByRole("link", { name: "Staff sign-in" })).not.toBeInTheDocument();
 });
