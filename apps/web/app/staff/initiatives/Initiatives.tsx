@@ -3,8 +3,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import type { Schema } from "@/lib/api";
-import { formatDate } from "@/lib/dates";
+import { PAGE_SIZE, type Schema } from "@/lib/api";
+import { formatDay } from "@/lib/dates";
 import { formatDollars } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
@@ -44,8 +44,7 @@ export default function Initiatives() {
                   {initiative.publish_state === "PUBLISHED" ? "Published" : "Draft"} ·{" "}
                   {initiative.status === "ACTIVE" ? "Active" : "Complete"}
                   {!initiative.in_rotation && " · Excluded from rotation"} · {initiative.location} · Started{" "}
-                  {formatDate(`${initiative.started_on}T12:00:00Z`)} · Committed{" "}
-                  {formatDollars(initiative.committed_minor)}
+                  {formatDay(initiative.started_on)} · Committed {formatDollars(initiative.committed_minor)}
                 </p>
               </article>
             ))
@@ -53,7 +52,7 @@ export default function Initiatives() {
             <p>No initiatives yet.</p>
           )}
           {offset > 0 && (
-            <button type="button" className="secondary" onClick={() => setOffset(Math.max(0, offset - 50))}>
+            <button type="button" className="secondary" onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
               Newer initiatives
             </button>
           )}

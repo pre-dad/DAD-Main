@@ -121,3 +121,47 @@ it("edits metrics, spend, rotation, and publishing", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Publish initiative" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Initiative published."));
 });
+
+it("pages forward by the server's offset and back by one page", async () => {
+  const fetch = vi.fn(async (url: string) =>
+    Response.json(
+      String(url).endsWith("offset=50")
+        ? { initiatives: [{ ...initiative, id: "i-2", title: "Later" }], next_offset: null }
+        : { initiatives: [initiative], next_offset: 50 },
+    ),
+  );
+  vi.stubGlobal("fetch", fetch);
+  render(<Initiatives />);
+  fireEvent.click(await screen.findByRole("button", { name: "Older initiatives" }));
+  expect(await screen.findByRole("link", { name: "Later" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Newer initiatives" }));
+  expect(await screen.findByRole("link", { name: "Reno meals" })).toBeVisible();
+  expect(fetch).toHaveBeenLastCalledWith("/api/donor/staff/initiatives?offset=0", expect.anything());
+});
+
+it("says when there are no initiatives, when access is missing, and retries a failure", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ initiatives: [], next_offset: null })));
+  const empty = render(<Initiatives />);
+  expect(await screen.findByText("No initiatives yet.")).toBeVisible();
+  empty.unmount();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ detail: "no" }, { status: 403 })));
+  const denied = render(<Initiatives />);
+  expect(await screen.findByText("Initiatives require Impact Ops access.")).toBeVisible();
+  denied.unmount();
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ detail: "boom" }, { status: 500 }))
+      .mockResolvedValue(Response.json({ initiatives: [initiative], next_offset: null })),
+  );
+  render(<Initiatives />);
+  fireEvent.click(await screen.findByRole("button", { name: "Retry loading" }));
+  expect(await screen.findByRole("link", { name: "Reno meals" })).toBeVisible();
+});
+
+it("shows the start date as a calendar day regardless of zone", async () => {
+  stubApi();
+  render(<Initiatives />);
+  expect(await screen.findByText(/Started Mar 1, 2026/)).toBeInTheDocument();
+});
