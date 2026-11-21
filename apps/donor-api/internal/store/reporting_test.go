@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -216,7 +218,7 @@ func TestReportNumbersMatchSeededFacts(t *testing.T) {
 
 	// Involuntary churn: one failed period past deadline NOT recovered (lost),
 	// one failed period recovered (recovered), both due inside the window and
-	// past due_at+14d by repWinEnd.
+	// past due_at+7d by repWinEnd.
 	churnDonor, _ := donor(t, pool)
 	seedFailedPeriod(t, pool, churnDonor, 3000, repWinStart.Add(24*time.Hour), false)
 	seedFailedPeriod(t, pool, churnDonor, 2500, repWinStart.Add(48*time.Hour), true)
@@ -262,7 +264,7 @@ func TestReportNumbersMatchSeededFacts(t *testing.T) {
 		t.Errorf("ONE_TIME must not appear in R1 gift mix, got %+v", mix["ONE_TIME"])
 	}
 
-	// Viral: cohort = 1 referrer; gross = 2 (A + B have first_gift_id);
+	// Viral: cohort = the 6 donors whose first gift falls in the window; gross = 2 (A + B have first_gift_id);
 	// qualified = 1 (only A has net>0); withheld C is not a conversion.
 	v := report.ViralCoefficient
 	if v.Cohort != 6 || v.GrossConversions != 2 || v.QualifiedConversions != 1 {
@@ -301,27 +303,24 @@ func TestReportNumbersMatchSeededFacts(t *testing.T) {
 	}
 }
 
-func TestReportRequiresPermissionAndValidWindow(t *testing.T) {
+func TestReportRejectsInvalidWindowAndBadToken(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	svc := &ReportingService{Staff: &StaffService{DB: api}}
 	ctx := context.Background()
 
-	// A role without report.read is forbidden. OP_PARTNERSHIPS has it; use a
-	// fabricated unknown by signing in as a role then checking a role lacking it
-	// is impossible here, so assert the happy roles pass and an empty window fails.
-	_, token := staffFixture(t, pool, "OP_IMPACT") // has report.read
-	if _, err := svc.Report(ctx, token, repWinEnd, repWinStart); err != ErrStaffInput {
+	_, token := staffFixture(t, pool, "OP_IMPACT")
+	if _, err := svc.Report(ctx, token, repWinEnd, repWinStart); !errors.Is(err, ErrStaffInput) {
 		t.Errorf("reversed window: got %v, want ErrStaffInput", err)
 	}
-	if _, err := svc.Report(ctx, token, repWinStart, repWinStart); err != ErrStaffInput {
+	if _, err := svc.Report(ctx, token, repWinStart, repWinStart); !errors.Is(err, ErrStaffInput) {
 		t.Errorf("empty window: got %v, want ErrStaffInput", err)
 	}
 	// A valid window with a permitted role succeeds.
 	if _, err := svc.Report(ctx, token, repWinStart, repWinEnd); err != nil {
 		t.Errorf("valid report: %v", err)
 	}
-	if _, err := svc.Report(ctx, "not-a-real-token", repWinStart, repWinEnd); err != ErrStaffDenied {
+	if _, err := svc.Report(ctx, "not-a-real-token", repWinStart, repWinEnd); !errors.Is(err, ErrStaffDenied) {
 		t.Errorf("bad token: got %v, want ErrStaffDenied", err)
 	}
 }
@@ -341,9 +340,11 @@ func TestReportWindowIsHalfOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mix := range report.GiftMix {
-		if mix.Frequency == "MONTHLY" && (mix.Gifts != 2 || mix.CollectedMinor != 3000) {
-			t.Fatalf("window [start,end) counted %d gifts / %d, want the two inside / 3000", mix.Gifts, mix.CollectedMinor)
-		}
+	i := slices.IndexFunc(report.GiftMix, func(m GiftMix) bool { return m.Frequency == "MONTHLY" })
+	if i < 0 {
+		t.Fatalf("no MONTHLY gift mix in the window: %+v", report.GiftMix)
+	}
+	if mix := report.GiftMix[i]; mix.Gifts != 2 || mix.CollectedMinor != 3000 {
+		t.Fatalf("window [start,end) counted %d gifts / %d, want the two inside / 3000", mix.Gifts, mix.CollectedMinor)
 	}
 }
