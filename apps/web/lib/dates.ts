@@ -7,7 +7,8 @@ const calendarDay = new Intl.DateTimeFormat("en-US", {
 
 /** A calendar date with no time of day ("2026-09-30"); it must not shift with the reader's zone. */
 export function formatDay(isoDate: string): string {
-  return calendarDay.format(new Date(`${isoDate.slice(0, 10)}T00:00:00Z`));
+  const date = new Date(`${isoDate.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? "" : calendarDay.format(date);
 }
 
 const longCalendarDay = new Intl.DateTimeFormat("en-US", {
@@ -18,7 +19,8 @@ const longCalendarDay = new Intl.DateTimeFormat("en-US", {
 });
 /** Same as formatDay with the month spelled out ("September 30, 2026"), matching the launch dates. */
 export function formatLongDay(isoDate: string): string {
-  return longCalendarDay.format(new Date(`${isoDate.slice(0, 10)}T00:00:00Z`));
+  const date = new Date(`${isoDate.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? "" : longCalendarDay.format(date);
 }
 /** The reader's local date of an instant, e.g. "Oct 1, 2026". */
 export function formatDate(instant: string): string {

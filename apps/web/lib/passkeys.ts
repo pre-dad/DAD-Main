@@ -33,7 +33,7 @@ function decode(value: string): ArrayBuffer {
 
 function encode(value: ArrayBuffer | null): string | undefined {
   if (!value) return undefined;
-  return btoa(String.fromCharCode(...new Uint8Array(value)))
+  return btoa(Array.from(new Uint8Array(value), (byte) => String.fromCharCode(byte)).join(""))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");

@@ -123,6 +123,23 @@ describe("hosts", () => {
     expect(answer(visit(url))).toBe(expected);
   });
 
+  it.each([
+    ["STAFF.DAD.EXAMPLE.ORG", "served"],
+    ["staff.dad.example.org:443", "served"],
+    ["staff.dad.example.org.", "public not found"],
+    ["staff.dad.example.org%2f@dad.example.org", "public not found"],
+    ["dad.example.org", "public not found"],
+  ])("decides the host from a Host header of %s, not from the URL", (host, expected) => {
+    vi.stubEnv("DONOR_STAFF_ORIGIN", staff);
+    expect(answer(visit(`${staff}/staff/sign-in`, { host }))).toBe(expected);
+  });
+
+  it("keeps a staff Host header on the staff surface even when the URL names the public host", () => {
+    vi.stubEnv("DONOR_STAFF_ORIGIN", staff);
+    expect(answer(visit(`${site}/staff/sign-in`, { host: "staff.dad.example.org" }))).toBe("served");
+    expect(answer(visit(`${site}/api/donor/me`, { host: "staff.dad.example.org" }))).toBe("404");
+  });
+
   it("serves no back office anywhere until a staff origin is set", () => {
     vi.stubEnv("DONOR_STAFF_ORIGIN", "");
     expect(answer(visit(`${site}/staff/sign-in`))).toBe("public not found");

@@ -109,3 +109,15 @@ it("gives each non-ready state its own copy", () => {
     "No such record.",
   );
 });
+
+it("reports a throwing onLoad as an error, not as being offline", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply(200, { n: 1 })));
+  const { result } = renderHook(() =>
+    useApiResource<{ n: number }>("/x", {
+      onLoad: () => {
+        throw new Error("caller bug");
+      },
+    }),
+  );
+  await waitFor(() => expect(result.current.resource).toEqual({ state: "error", rateLimited: false }));
+});

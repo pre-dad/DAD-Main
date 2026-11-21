@@ -41,14 +41,20 @@ export function useApiResource<T>(path: string | null, options: Options<T> = {})
     const controller = new AbortController();
     if (loaded.current !== path) setResource({ state: "loading" });
     const { load = (signal: AbortSignal) => api<T>(path, { signal }) } = latest.current;
-    load(controller.signal)
-      .then((data) => {
+    load(controller.signal).then(
+      (data) => {
         if (controller.signal.aborted) return;
-        latest.current.onLoad?.(data);
+        try {
+          latest.current.onLoad?.(data);
+        } catch {
+          loaded.current = null;
+          setResource({ state: "error", rateLimited: false });
+          return;
+        }
         loaded.current = path;
         setResource({ state: "ready", data });
-      })
-      .catch((cause) => {
+      },
+      (cause) => {
         if (controller.signal.aborted) return;
         loaded.current = null;
         const failure =
@@ -62,7 +68,8 @@ export function useApiResource<T>(path: string | null, options: Options<T> = {})
         )
           setResource({ state: failure });
         else setResource({ state: "error", rateLimited: failure === "rateLimited" });
-      });
+      },
+    );
     return () => controller.abort();
   }, [path, generation]);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
