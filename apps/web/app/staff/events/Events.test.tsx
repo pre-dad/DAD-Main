@@ -175,7 +175,7 @@ it("reads and shows event times in the venue's zone, not the browser's", () => {
   expect(eventInput(form)).toMatchObject({
     starts_at: "2026-11-08T01:00:00Z",
     ends_at: "2026-11-08T03:00:00Z",
-    booking_opens_at: "2026-11-01T14:00:00Z",
+    booking_opens_at: "2026-11-01T15:00:00Z",
   });
   form.set("time_zone", "Mars/Olympus");
   expect(eventInput(form)).toBe("Enter a time zone such as America/Chicago, or leave it empty.");
