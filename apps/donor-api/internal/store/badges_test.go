@@ -9,6 +9,7 @@ import (
 
 	"dad/donor-api/internal/badges"
 	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/recognition"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -117,7 +118,7 @@ func seedBadgeProjection(t *testing.T, pool *pgxpool.Pool, donorID pgtype.UUID, 
 		   best_streak=EXCLUDED.best_streak, current_streak=EXCLUDED.current_streak,
 		   streak_since=EXCLUDED.streak_since, referred_link_count=EXCLUDED.referred_link_count,
 		   referred_irl_count=EXCLUDED.referred_irl_count, next_refresh_at=EXCLUDED.next_refresh_at`,
-		id, donorID, now, now.AddDate(0, 0, -102), now.Add(time.Hour))
+		id, donorID, now, now.In(recognition.NewYork).AddDate(0, 0, -100), now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
