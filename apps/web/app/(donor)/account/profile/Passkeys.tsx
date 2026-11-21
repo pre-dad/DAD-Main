@@ -11,6 +11,7 @@ import {
   NO_SUITABLE_PASSKEY_MESSAGE,
   passkeyFailure,
   UNSUPPORTED_MESSAGE,
+  useOriginOffersPasskeys,
   usePasskeysSupported,
   WAITING_MESSAGE,
 } from "@/lib/passkeys";
@@ -40,7 +41,10 @@ function explainAdd(cause: unknown): string {
 /** Passkeys that sign the donor in without an email link, with a way to add or remove them. */
 export function Passkeys({ onSignedOut }: { onSignedOut: () => void }) {
   const supported = usePasskeysSupported(true);
-  const { resource, data, failed, reload, setData } = useApiResource<PasskeyList>("/donor/me/passkeys");
+  const offered = useOriginOffersPasskeys();
+  const { resource, data, failed, reload, setData } = useApiResource<PasskeyList>(
+    offered ? "/donor/me/passkeys" : null,
+  );
   const [busy, setBusy] = useState(false);
   const [prompting, setPrompting] = useState(false);
   const [name, setName] = useState("");
@@ -137,7 +141,7 @@ export function Passkeys({ onSignedOut }: { onSignedOut: () => void }) {
   };
 
   // A deployment without passkeys offers none to add or manage.
-  if (resource.state === "unconfigured") return null;
+  if (!offered || resource.state === "unconfigured") return null;
   return (
     <section aria-labelledby="passkeys-heading">
       <h2 id="passkeys-heading" ref={heading} tabIndex={-1}>

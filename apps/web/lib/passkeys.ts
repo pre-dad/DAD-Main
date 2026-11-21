@@ -23,6 +23,18 @@ export function usePasskeysSupported(serverAnswer: boolean): boolean {
   return useSyncExternalStore(unchanging, passkeysSupported, () => serverAnswer);
 }
 
+/** A WebAuthn relying party cannot be an IP address, so the API offers no donor passkeys on such an origin. */
+export function isIpHostname(hostname: string): boolean {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname) || hostname.startsWith("[") || hostname.includes(":");
+}
+
+const originOffersPasskeys = () => !isIpHostname(window.location.hostname);
+
+/** Whether the page's origin can hold donor passkeys; assumed until the browser says otherwise. */
+export function useOriginOffersPasskeys(): boolean {
+  return useSyncExternalStore(unchanging, originOffersPasskeys, () => true);
+}
+
 function decode(value: string): ArrayBuffer {
   const base64 = value
     .replace(/-/g, "+")

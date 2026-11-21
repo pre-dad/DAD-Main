@@ -223,3 +223,12 @@ it("leaves the passkey alone when removal is kept, and returns focus to Remove",
   expect(fetch.mock.calls.some(([url]) => String(url).endsWith("/delete"))).toBe(false);
   expect(screen.getByText("Work laptop")).toBeVisible();
 });
+
+it("neither requests nor shows passkeys on an origin the API cannot serve them for", async () => {
+  browser();
+  const fetch = serve({ "GET /api/donor/me/passkeys": () => json({ passkeys: [laptop] }) });
+  vi.stubGlobal("location", { ...window.location, hostname: "127.0.0.1" });
+  const { container } = render(<Passkeys onSignedOut={vi.fn()} />);
+  await waitFor(() => expect(container).toBeEmptyDOMElement());
+  expect(fetch).not.toHaveBeenCalled();
+});

@@ -15,7 +15,7 @@ type Props = {
   className?: string;
   /** Class for the confirm and keep buttons; defaults to the trigger's. */
   confirmClassName?: string;
-  buttonRef?: (button: HTMLButtonElement | null) => void | (() => void);
+  buttonRef?: (button: HTMLButtonElement | null) => undefined | (() => void);
 };
 
 /**
