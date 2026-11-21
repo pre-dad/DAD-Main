@@ -229,7 +229,7 @@ it("refuses an oversized chunked callback body that declares no length", async (
     method: "POST",
     body,
     duplex: "half",
-  } as RequestInit);
+  } as ConstructorParameters<typeof NextRequest>[1]);
   expect(request.headers.get("content-length")).toBeNull();
   expect((await POST(request, context)).status).toBe(413);
   expect(fetch).not.toHaveBeenCalled();

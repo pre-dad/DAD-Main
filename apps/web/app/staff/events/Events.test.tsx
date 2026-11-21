@@ -155,3 +155,112 @@ it("pages the RSVP roster while retaining full event totals", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Previous RSVPs" }));
   expect(await screen.findByRole("link", { name: "first@example.org" })).toBeInTheDocument();
 });
+
+it("reads and shows event times in the venue's zone, not the browser's", () => {
+  expect(instant("2026-11-07T19:00", "America/Chicago")).toBe("2026-11-08T01:00:00Z");
+  expect(localInput("2026-11-08T01:00:00Z", "America/Chicago")).toBe("2026-11-07T19:00");
+  const form = new FormData();
+  for (const [name, value] of Object.entries({
+    slug: "s",
+    title: "t",
+    type: "COMMUNITY",
+    perk: "",
+    time_zone: "America/Chicago",
+    starts_at: "2026-11-07T19:00",
+    ends_at: "2026-11-07T21:00",
+    booking_opens_at: "2026-11-01T09:00",
+    capacity: "0",
+  }))
+    form.set(name, value);
+  expect(eventInput(form)).toMatchObject({
+    starts_at: "2026-11-08T01:00:00Z",
+    ends_at: "2026-11-08T03:00:00Z",
+    booking_opens_at: "2026-11-01T14:00:00Z",
+  });
+  form.set("time_zone", "Mars/Olympus");
+  expect(eventInput(form)).toBe("Enter a time zone such as America/Chicago, or leave it empty.");
+});
+
+it("bounds the capacity", () => {
+  const form = new FormData();
+  for (const [name, value] of Object.entries({
+    slug: "s",
+    title: "t",
+    type: "COMMUNITY",
+    perk: "",
+    starts_at: "2026-11-07T10:00",
+    ends_at: "2026-11-07T12:00",
+    capacity: "1000000",
+  }))
+    form.set(name, value);
+  expect(eventInput(form)).toMatchObject({ capacity: 1_000_000 });
+  form.set("capacity", "1000001");
+  expect(eventInput(form)).toMatch(/up to 1,000,000/);
+});
+
+it("shows the stored event time in the venue's zone in the editor", async () => {
+  stubApi();
+  render(<EventEditor event="e-1" />);
+  expect(await screen.findByLabelText("Starts")).toHaveValue("2026-11-07T09:00");
+});
+
+it("keeps unsaved edits while paging the RSVP roster and moves focus to the roster heading", async () => {
+  const fetch = vi.fn((input: RequestInfo | URL) => {
+    const second = String(input).endsWith("?offset=50");
+    return Promise.resolve(
+      Response.json({
+        ...event,
+        next_offset: second ? null : 50,
+        attendees: [
+          {
+            donor_id: second ? "later" : "first",
+            email: second ? "later@example.org" : "first@example.org",
+            public_name: "",
+            status: "RESERVED",
+            reserved_at: "2026-10-20T12:00:00Z",
+            checked_in_at: null,
+          },
+        ],
+      }),
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<EventEditor event="e-1" />);
+  const title = await screen.findByLabelText("Title");
+  fireEvent.change(title, { target: { value: "Edited title" } });
+  fireEvent.click(screen.getByRole("button", { name: "Next RSVPs" }));
+  expect(await screen.findByRole("link", { name: "later@example.org" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Title")).toBe(title);
+  expect(screen.getByLabelText("Title")).toHaveValue("Edited title");
+  await waitFor(() => expect(screen.getByRole("heading", { name: "RSVPs" })).toHaveFocus());
+});
+
+it("offers sign-in when creating an event without a session", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => Promise.resolve(Response.json({ detail: "Sign in" }, { status: 401 }))),
+  );
+  render(<EventEditor event={null} />);
+  fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "s" } });
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "t" } });
+  fireEvent.change(screen.getByLabelText("Venue"), { target: { value: "v" } });
+  fireEvent.change(screen.getByLabelText("City"), { target: { value: "c" } });
+  fireEvent.change(screen.getByLabelText("Starts"), { target: { value: "2026-11-07T10:00" } });
+  fireEvent.change(screen.getByLabelText("Ends"), { target: { value: "2026-11-07T12:00" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+  expect(await screen.findByRole("link", { name: "Staff sign-in" })).toHaveAttribute("href", "/staff/sign-in");
+});
+
+it("moves focus to the event list heading after paging", async () => {
+  const fetch = vi.fn((input: RequestInfo | URL) => {
+    const second = String(input).endsWith("?offset=50");
+    return Promise.resolve(
+      Response.json({ events: [{ ...event, id: second ? "e-2" : "e-1" }], next_offset: second ? null : 50 }),
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<Events />);
+  fireEvent.click(await screen.findByRole("button", { name: "Earlier events" }));
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Event list" })).toHaveFocus());
+  expect(fetch).toHaveBeenCalledWith("/api/donor/staff/events?offset=50", expect.anything());
+});
