@@ -111,8 +111,8 @@ func (g *subscriptionGateway) ChangeMonthlyAmount(_ context.Context, id, item, p
 	return g.mutate(id, key, func(r map[string]any) {
 		line := subscriptionItem(r)
 		line["id"] = item
-		line["price"].(map[string]any)["product"] = product
-		line["price"].(map[string]any)["unit_amount"] = amount
+		fixtureObject(line["price"])["product"] = product
+		fixtureObject(line["price"])["unit_amount"] = amount
 	})
 }
 
@@ -693,8 +693,8 @@ func TestAmountChangeAppliesAtNextRenewal(t *testing.T) {
 	for _, key := range []string{"amount_paid", "amount_due", "total"} {
 		repriced[key] = 9000
 	}
-	repriced["lines"].(map[string]any)["data"].([]any)[0].(map[string]any)["amount"] = 9000
-	repriced["payments"].(map[string]any)["data"].([]any)[0].(map[string]any)["amount_paid"] = 9000
+	invoiceLine(repriced, "lines")["amount"] = 9000
+	invoiceLine(repriced, "payments")["amount_paid"] = 9000
 	rejected := r.receive(t, "invoice.payment_succeeded", repriced)
 	r.process(t)
 	assertEventProcessed(t, r.workerFixture, rejected, false)
