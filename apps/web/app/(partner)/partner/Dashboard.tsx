@@ -59,7 +59,8 @@ function Progress({ deployed, committed }: { deployed: number; committed: number
 
 function SpendTable({ rows, caption }: { rows: Spend["categories"]; caption: string }) {
   return (
-    <div className="tableScroll">
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: a focusable scroll region lets keyboard users pan a wide table.
+    <section className="tableScroll" tabIndex={0} aria-label={caption}>
       <table className="dataTable">
         <caption className="visuallyHidden">{caption}</caption>
         <thead>
@@ -79,7 +80,7 @@ function SpendTable({ rows, caption }: { rows: Spend["categories"]; caption: str
           ))}
         </tbody>
       </table>
-    </div>
+    </section>
   );
 }
 
@@ -293,7 +294,7 @@ function ReportsSection({ admin }: { admin: boolean }) {
       link.href = url;
       link.download = "dad-impact-report.pdf";
       link.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       setStatus("Your verified impact report was downloaded.");
       exports.reload();
     } catch (cause) {
@@ -366,6 +367,8 @@ function UsersSection({ self }: { self: string }) {
     failure: "Your users could not be loaded right now.",
   });
   const [invite, setInvite] = useState({ email: "", name: "", role: "VIEWER" });
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -388,14 +391,19 @@ function UsersSection({ self }: { self: string }) {
   }
 
   async function removeUser(id: string, email: string) {
+    if (removing) return;
+    setRemoving(id);
     setError("");
     setStatus("");
     try {
-      await api(`/donor/partner/users/${id}/remove`, { method: "POST", body: "{}" });
+      await api(`/donor/partner/users/${encodeURIComponent(id)}/remove`, { method: "POST", body: "{}" });
       setStatus(`Removed ${email}.`);
+      setConfirming(null);
       users.reload();
     } catch (cause) {
       setError(failureMessage(cause, "That user could not be removed right now."));
+    } finally {
+      setRemoving(null);
     }
   }
 
@@ -416,9 +424,32 @@ function UsersSection({ self }: { self: string }) {
               {u.id === self ? (
                 <span className="note">You</span>
               ) : (
-                <button type="button" className="secondary" onClick={() => removeUser(u.id, u.email)}>
-                  Remove <span className="visuallyHidden">{u.email}</span>
-                </button>
+                <span className="actions">
+                  {confirming === u.id ? (
+                    <>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={removing !== null}
+                        onClick={() => removeUser(u.id, u.email)}
+                      >
+                        Confirm removal <span className="visuallyHidden">of {u.email}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={removing !== null}
+                        onClick={() => setConfirming(null)}
+                      >
+                        Keep <span className="visuallyHidden">{u.email}</span>
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="secondary" onClick={() => setConfirming(u.id)}>
+                      Remove <span className="visuallyHidden">{u.email}</span>
+                    </button>
+                  )}
+                </span>
               )}
             </li>
           ))}
@@ -492,6 +523,12 @@ function OrganizationSection({ overview, onSaved }: { overview: Overview; onSave
           description: String(form.get("description") ?? ""),
         } satisfies RequestBody<"/donor/partner/profile", "post">),
       });
+    } catch (cause) {
+      setError(failureMessage(cause, "The profile could not be saved right now. Please retry in a moment."));
+      setBusy(false);
+      return;
+    }
+    try {
       if (workforce !== overview.workforce_size) {
         await api("/donor/partner/workforce", {
           method: "POST",
@@ -499,10 +536,10 @@ function OrganizationSection({ overview, onSaved }: { overview: Overview; onSave
         });
       }
       setStatus("Organization profile saved.");
-      onSaved();
     } catch (cause) {
-      setError(failureMessage(cause, "The profile could not be saved right now. Please retry in a moment."));
+      setError(failureMessage(cause, "Profile saved; workforce size was not. Please retry in a moment."));
     } finally {
+      onSaved();
       setBusy(false);
     }
   }

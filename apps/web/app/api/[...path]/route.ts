@@ -42,23 +42,31 @@ const HOP_BY_HOP = new Set([
   "set-cookie",
 ]);
 
-// The API's largest accepted body (a private source document). Bodies are buffered rather
-// than streamed: undici cannot hand back a response that arrives before a streamed request
-// body is consumed, so an early 401 or 422 would surface as an unreachable API.
-const MAX_BODY_BYTES = 10 << 20;
+// Bodies are buffered rather than streamed: undici cannot hand back a response that arrives
+// before a streamed request body is consumed, so an early 401 or 422 would surface as an
+// unreachable API. Each route is held to the most the API accepts there, so a sign-in or
+// analytics POST cannot pin megabytes of memory per connection.
+const DEFAULT_BODY_BYTES = 1 << 20;
+const LARGE_BODIES: Record<string, number> = {
+  "donor/staff/content/sources": 10 << 20,
+  "donor/staff/content/rules": 10 << 20,
+  "donor/staff/founding-claims": 5 << 20,
+};
+
+const bodyLimit = (path: string[]) => LARGE_BODIES[path.join("/")] ?? DEFAULT_BODY_BYTES;
 
 const publicRecord = "[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}";
 const publicRead = new RegExp(`^(?:events/${publicRecord}(?:/calendar\\.ics)?|initiatives/${publicRecord}/spend)$`);
 
 // Counted as it arrives, since a chunked body declares no length.
-async function readBody(request: NextRequest): Promise<Uint8Array<ArrayBuffer> | null> {
-  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) return null;
+async function readBody(request: NextRequest, limit: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (Number(request.headers.get("content-length") ?? 0) > limit) return null;
   const chunks: Uint8Array[] = [];
   let size = 0;
   const reader = request.body?.getReader();
   for (let read = await reader?.read(); read && !read.done; read = await reader?.read()) {
     size += read.value.byteLength;
-    if (size > MAX_BODY_BYTES) {
+    if (size > limit) {
       await reader?.cancel().catch(() => {});
       return null;
     }
@@ -85,7 +93,8 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   const target = new URL(`${donorApiBase()}/${path.map(encodeURIComponent).join("/")}`);
   target.search = request.nextUrl.search;
 
-  const body = request.method === "GET" || request.method === "HEAD" ? undefined : await readBody(request);
+  const body =
+    request.method === "GET" || request.method === "HEAD" ? undefined : await readBody(request, bodyLimit(path));
   if (body === null) return Response.json({ detail: "Request body is too large." }, { status: 413 });
   const requestHeaders = new Headers();
   for (const name of REQUEST_HEADERS) {

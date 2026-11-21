@@ -1,8 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { taxYear } from "@/lib/taxYear";
 import PartnerDetail from "./PartnerDetail";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   sessionStorage.clear();
 });
@@ -27,7 +29,7 @@ const detail = {
 };
 
 const match = {
-  year: new Date().getFullYear(),
+  year: taxYear(new Date()),
   match_rate_bp: 5000,
   match_cap_minor: 0,
   gifts_minor: 100_000,
@@ -91,7 +93,11 @@ it("records a match payment and removes a user", async () => {
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Recorded a $250.00 match payment"));
   expect(posted(fetch, "/p-1/match-payment")).toEqual({ year: match.year, amount_minor: 25_000 });
   await reloaded(fetch, 2);
+  const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true);
   fireEvent.click(await screen.findByRole("button", { name: "Remove dana@delta.example" }));
+  expect(fetch.mock.calls.some(([u]) => String(u).endsWith("/remove"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Remove dana@delta.example" }));
+  expect(confirm).toHaveBeenCalledWith("Remove dana@delta.example from Delta Inc's portal?");
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Removed dana@delta.example."));
   expect(fetch.mock.calls.some(([u, i]) => String(u).endsWith("/p-1/users/u-1/remove") && i?.method === "POST")).toBe(
     true,
@@ -137,6 +143,58 @@ it("uploads the partner's logo while enrolling it", async () => {
   fireEvent.submit(input.closest("form") as HTMLFormElement);
   expect(await screen.findByText("Organization logo saved.")).toBeInTheDocument();
   expect(posted(fetch, "/donor/staff/partners/p-1/logo").data_url).toMatch(/^data:image\/png;base64,/);
+});
+
+function refusePayments(fetch: ReturnType<typeof stubApi>, response: () => Response) {
+  const base = fetch.getMockImplementation();
+  fetch.mockImplementation((input, init) => {
+    if (String(input).endsWith("/match-payment") && init?.method === "POST") return Promise.resolve(response());
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+}
+
+it("frees a refused payment so a different amount can be recorded", async () => {
+  const fetch = stubApi();
+  refusePayments(fetch, () => Response.json({ detail: "Amount exceeds the yearly cap" }, { status: 422 }));
+  render(<PartnerDetail partner="p-1" />);
+  fireEvent.change(await screen.findByLabelText(/Match payment received/), { target: { value: "250" } });
+  fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Amount exceeds the yearly cap");
+  expect(sessionStorage.getItem("dad:match-payment:p-1")).toBeNull();
+  expect(screen.getByLabelText(/Match payment received/)).not.toHaveAttribute("readonly");
+  fireEvent.change(screen.getByLabelText(/Match payment received/), { target: { value: "100" } });
+  fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
+  await waitFor(() => {
+    const bodies = fetch.mock.calls
+      .filter(([u, i]) => String(u).endsWith("/match-payment") && i?.method === "POST")
+      .map(([, i]) => JSON.parse(String(i?.body)).amount_minor);
+    expect(bodies).toEqual([25_000, 10_000]);
+  });
+});
+
+it("keeps an unconfirmed payment locked after a server error", async () => {
+  const fetch = stubApi();
+  refusePayments(fetch, () => Response.json({ detail: "Down" }, { status: 500 }));
+  render(<PartnerDetail partner="p-1" />);
+  fireEvent.change(await screen.findByLabelText(/Match payment received/), { target: { value: "250" } });
+  fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
+  expect(await screen.findByRole("alert")).toBeVisible();
+  expect(sessionStorage.getItem("dad:match-payment:p-1")).not.toBeNull();
+  expect(screen.getByLabelText(/Match payment received/)).toHaveAttribute("readonly");
+});
+
+it("buckets the match year in America/New_York, not the browser clock", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2028-01-01T03:30:00Z"));
+  try {
+    const fetch = stubApi();
+    render(<PartnerDetail partner="p-1" />);
+    await screen.findByLabelText(/Match payment received/);
+    expect(fetch.mock.calls.some(([u]) => String(u).endsWith("/p-1/match-status?year=2027"))).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("blocks recording a payment when the saved retry details are unreadable", async () => {

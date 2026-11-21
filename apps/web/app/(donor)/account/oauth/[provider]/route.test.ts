@@ -213,3 +213,40 @@ it("returns the donor to sign-in when the provider reports an error", async () =
   expect(r.headers.get("location")).toBe(social);
   expect(fetch).not.toHaveBeenCalled();
 });
+
+it("refuses an oversized chunked callback body that declares no length", async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  const chunk = new TextEncoder().encode("x".repeat(9000));
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(chunk);
+      controller.enqueue(chunk);
+      controller.close();
+    },
+  });
+  const request = new NextRequest("https://dad.test/account/oauth/google", {
+    method: "POST",
+    body,
+    duplex: "half",
+  } as ConstructorParameters<typeof NextRequest>[1]);
+  expect(request.headers.get("content-length")).toBeNull();
+  expect((await POST(request, context)).status).toBe(413);
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it("refuses to start Apple sign-in on an origin that cannot keep its cross-site cookie", async () => {
+  vi.stubEnv("DONOR_PUBLIC_ORIGIN", "http://dad.test");
+  vi.stubEnv("DONOR_OAUTH_APPLE_CLIENT_ID", "apple-client");
+  vi.stubEnv("DONOR_OAUTH_APPLE_CLIENT_SECRET", "apple-secret");
+  const r = await GET(new NextRequest("http://dad.test/account/oauth/apple"), apple);
+  expect(r.status).toBe(503);
+  expect(jar.set).not.toHaveBeenCalled();
+});
+
+it("still starts Google sign-in on a plain http origin for local development", async () => {
+  vi.stubEnv("DONOR_PUBLIC_ORIGIN", "http://dad.test");
+  const r = await GET(new NextRequest("http://dad.test/account/oauth/google"), context);
+  expect(r.status).toBe(307);
+  expect(jar.set.mock.calls[0][2]).toMatchObject({ secure: false, sameSite: "lax" });
+});

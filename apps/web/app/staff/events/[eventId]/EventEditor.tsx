@@ -4,10 +4,12 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { api, failureMessage, type Schema } from "@/lib/api";
+import { api, classifyFailure, failureMessage, type Schema } from "@/lib/api";
 import { formatDateTime } from "@/lib/dates";
+import { EVENT_PAGE_SIZE, eventState } from "@/lib/events";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
-import { eventState } from "../Events";
+import { usePageTurnFocus } from "@/lib/usePageTurnFocus";
+import { validZone, zonedInstant, zonedLocal } from "@/lib/zonedTime";
 
 type Detail = Schema<"StaffEventDetail">;
 type Input = Schema<"EventInput">;
@@ -20,15 +22,17 @@ const perks: Record<Perk, string> = {
   TEAM_CAPTAIN: "Team Captain badge",
 };
 
-/** An instant as a datetime-local value in the browser's zone. */
-export function localInput(instant: string): string {
+/** An instant as a datetime-local value in the venue's zone, or the browser's when none is given. */
+export function localInput(instant: string, zone = ""): string {
+  if (zone && validZone(zone)) return zonedLocal(instant, zone);
   const date = new Date(instant);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-/** A datetime-local value, read in the browser's zone, as an RFC 3339 instant. */
-export function instant(local: string): string | null {
+/** A datetime-local value, read in the venue's zone or the browser's when none is given, as an RFC 3339 instant. */
+export function instant(local: string, zone = ""): string | null {
+  if (zone) return zonedInstant(local, zone);
   const date = new Date(local);
   return Number.isNaN(date.getTime()) ? null : date.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
@@ -44,18 +48,23 @@ const zones = [
   "Pacific/Honolulu",
 ];
 
+const maxCapacity = 1_000_000;
+
 const field = (form: FormData, name: string) => String(form.get(name) ?? "").trim();
 
 /** The event fields from the editor form, or an error to show. */
 export function eventInput(form: FormData): Input | string {
-  const starts = instant(field(form, "starts_at"));
-  const ends = instant(field(form, "ends_at"));
+  const zone = field(form, "time_zone");
+  if (zone && !validZone(zone)) return "Enter a time zone such as America/Chicago, or leave it empty.";
+  const starts = instant(field(form, "starts_at"), zone);
+  const ends = instant(field(form, "ends_at"), zone);
   if (!starts || !ends) return "Enter when the event starts and ends.";
   if (ends <= starts) return "The event must end after it starts.";
   const capacity = field(form, "capacity");
-  if (!/^\d+$/.test(capacity)) return "Enter the capacity as a whole number, or 0 for no limit.";
+  if (!/^\d+$/.test(capacity) || Number(capacity) > maxCapacity)
+    return `Enter the capacity as a whole number up to ${maxCapacity.toLocaleString("en-US")}, or 0 for no limit.`;
   const opensField = field(form, "booking_opens_at");
-  const opens = opensField ? instant(opensField) : "";
+  const opens = opensField ? instant(opensField, zone) : "";
   if (opens === null) return "Enter when booking opens, or leave it empty.";
   if (opens && opens >= starts) return "Booking must open before the event starts.";
   const type = field(form, "type") as Input["type"];
@@ -68,7 +77,7 @@ export function eventInput(form: FormData): Input | string {
     address: field(form, "address"),
     city: field(form, "city"),
     zip: field(form, "zip"),
-    time_zone: field(form, "time_zone"),
+    time_zone: zone,
     starts_at: starts,
     ends_at: ends,
     capacity: Number(capacity),
@@ -77,11 +86,39 @@ export function eventInput(form: FormData): Input | string {
   };
 }
 
+/** Changes whenever a saved field differs, so a form showing stale values remounts on fresh ones. */
+const formKey = (detail: Detail) =>
+  JSON.stringify([
+    detail.id,
+    detail.slug,
+    detail.title,
+    detail.type,
+    detail.description,
+    detail.venue,
+    detail.address,
+    detail.city,
+    detail.zip,
+    detail.time_zone,
+    detail.starts_at,
+    detail.ends_at,
+    detail.capacity,
+    detail.qualifying_perk,
+    detail.booking_opens_at,
+  ]);
+
 export default function EventEditor({ event }: { event: string | null }) {
   const router = useRouter();
   const id = event && encodeURIComponent(event);
   const [offset, setOffset] = useState(0);
-  const { resource, data, reload } = useApiResource<Detail>(id && `/donor/staff/events/${id}?offset=${offset}`);
+  const { resource, data, reload } = useApiResource<Detail>(id && `/donor/staff/events/${id}?offset=${offset}`, {
+    keepPrevious: true,
+  });
+  const { heading: rsvpHeading, turned } = usePageTurnFocus(data);
+  const turn = (next: number) => {
+    turned();
+    setOffset(next);
+  };
+  const [signedOut, setSignedOut] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -105,6 +142,7 @@ export default function EventEditor({ event }: { event: string | null }) {
       setStatus(done);
       if (id) reload();
     } catch (cause) {
+      setSignedOut(classifyFailure(cause) === "signedOut");
       setError(failureMessage(cause, "That change could not be saved. Nothing was changed."));
     } finally {
       setBusy(false);
@@ -150,7 +188,7 @@ export default function EventEditor({ event }: { event: string | null }) {
       back={{ href: "/staff/events", label: "Events" }}
       title={detail?.title ?? (id ? "Event" : "New event")}
     >
-      {resource.state === "signedOut" && id && (
+      {((resource.state === "signedOut" && id) || signedOut) && (
         <p>
           <Link className="button" href="/staff/sign-in">
             Staff sign-in
@@ -165,14 +203,7 @@ export default function EventEditor({ event }: { event: string | null }) {
               {detail.cancelled_at && ` ${formatDateTime(detail.cancelled_at)}`}
             </p>
           )}
-          <form
-            onSubmit={save}
-            key={
-              detail
-                ? `${detail.id}-${detail.starts_at}-${detail.capacity}-${detail.booking_opens_at}-${detail.time_zone}`
-                : "new"
-            }
-          >
+          <form onSubmit={save} key={detail ? formKey(detail) : "new"}>
             <fieldset disabled={cancelled}>
               <label>
                 Slug
@@ -239,12 +270,16 @@ export default function EventEditor({ event }: { event: string | null }) {
                 The venue's IANA zone, such as America/Chicago. Donors see the event time in it. Leave empty to use the
                 zone of the ZIP.
               </p>
+              <p className="note" id="event-times-help">
+                Start, end and booking times are the wall clock in the venue's time zone above. With no zone entered
+                they are read in this browser's zone.
+              </p>
               <label>
                 Starts
                 <input
                   name="starts_at"
                   type="datetime-local"
-                  defaultValue={detail ? localInput(detail.starts_at) : undefined}
+                  defaultValue={detail ? localInput(detail.starts_at, detail.time_zone) : undefined}
                   required
                 />
               </label>
@@ -253,7 +288,7 @@ export default function EventEditor({ event }: { event: string | null }) {
                 <input
                   name="ends_at"
                   type="datetime-local"
-                  defaultValue={detail ? localInput(detail.ends_at) : undefined}
+                  defaultValue={detail ? localInput(detail.ends_at, detail.time_zone) : undefined}
                   required
                 />
               </label>
@@ -262,7 +297,9 @@ export default function EventEditor({ event }: { event: string | null }) {
                 <input
                   name="booking_opens_at"
                   type="datetime-local"
-                  defaultValue={detail?.booking_opens_at ? localInput(detail.booking_opens_at) : undefined}
+                  defaultValue={
+                    detail?.booking_opens_at ? localInput(detail.booking_opens_at, detail.time_zone) : undefined
+                  }
                   aria-describedby="booking-opens-help"
                 />
               </label>
@@ -316,7 +353,9 @@ export default function EventEditor({ event }: { event: string | null }) {
           )}
           {detail && (
             <>
-              <h2>RSVPs</h2>
+              <h2 ref={rsvpHeading} tabIndex={-1}>
+                RSVPs
+              </h2>
               <p>
                 {detail.reserved}
                 {detail.capacity > 0 ? ` of ${detail.capacity}` : ""} reserved · {detail.waitlisted} waitlisted ·{" "}
@@ -357,12 +396,16 @@ export default function EventEditor({ event }: { event: string | null }) {
               )}
               <nav aria-label="RSVP pages">
                 {offset > 0 && (
-                  <button type="button" className="secondary" onClick={() => setOffset(Math.max(0, offset - 50))}>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => turn(Math.max(0, offset - EVENT_PAGE_SIZE))}
+                  >
                     Previous RSVPs
                   </button>
                 )}
                 {detail.next_offset != null && (
-                  <button type="button" className="secondary" onClick={() => setOffset(detail.next_offset ?? 0)}>
+                  <button type="button" className="secondary" onClick={() => turn(detail.next_offset ?? 0)}>
                     Next RSVPs
                   </button>
                 )}
