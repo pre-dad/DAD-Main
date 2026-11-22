@@ -83,7 +83,7 @@ export default function DonorHome() {
           <h2>Building toward {launchMonthLabel()}</h2>
           <p>
             DAD assembles aid initiatives with partner organizations and board approval. Programs begin at launch. No
-            recipient receives money through this donor release.
+            one receives money through DAD itself.
           </p>
           <nav aria-label="Explore" className="links">
             <Link href="/initiatives">Explore planned initiatives</Link>
