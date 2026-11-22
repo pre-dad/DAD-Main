@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "catalog_version": 1,
+  "bind": {
+    "path": "/donor/me/dashboard",
+    "operation_id": "dashboard",
+    "schema": "DonorDashboard"
+  },
+  "limits": {
+    "max_depth": 2,
+    "max_nodes": 40,
+    "max_metrics_per_grid": 12,
+    "max_list_items": 8,
+    "max_title_chars": 60,
+    "max_body_chars": 160
+  },
+  "text_policy": {
+    "reject_characters": ["<", ">"],
+    "reject_control_and_format_characters": true,
+    "reject_url_schemes": true,
+    "reject_markdown_links": true
+  },
+  "formats": {
+    "integer": { "bind_type": "integer", "description": "A whole count, grouped by the platform locale." },
+    "usd_minor": { "bind_type": "integer", "description": "US dollars held as minor units (cents)." },
+    "days": { "bind_type": "integer", "description": "A whole number of days." },
+    "percent": { "bind_type": "integer", "description": "A whole percentage from 0 to 100." }
+  },
+  "metric_captions": {
+    "given": "Total given",
+    "initiatives_funded": "Initiatives funded",
+    "events_volunteered": "Events volunteered",
+    "referral_total": "Given through your referrals",
+    "referral_link": "Referred by link",
+    "referral_irl": "Referred in person",
+    "active_network": "Active in your network",
+    "annualized_network": "Network giving per year",
+    "streak": "Current streak",
+    "days_to_next": "Days to next milestone",
+    "last_milestone": "Last milestone",
+    "national_percentile": "National percentile",
+    "city_rank": "City rank"
+  },
+  "navigate": {
+    "path_lists": ["account_paths", "notification_paths"],
+    "labels": {
+      "/account/dashboard": "Your dashboard",
+      "/account/profile": "Your profile",
+      "/account/payment-method": "Payment method",
+      "/account/gifts": "Your gifts",
+      "/partner": "Partner portal"
+    }
+  },
+  "components": {
+    "Heading": {
+      "props": {
+        "title": { "kind": "label", "max": "max_title_chars" },
+        "bind": { "kind": "bind", "target": "scalar" }
+      },
+      "exactly_one_of": ["title", "bind"]
+    },
+    "Text": {
+      "props": {
+        "bind": { "kind": "bind", "target": "scalar" }
+      },
+      "required": ["bind"]
+    },
+    "Metric": {
+      "props": {
+        "bind": { "kind": "bind", "target": "integer" },
+        "format": { "kind": "format" },
+        "caption": { "kind": "caption" }
+      },
+      "required": ["bind", "format"]
+    },
+    "MetricGrid": {
+      "props": {
+        "children": { "kind": "children", "allowed": ["Metric"], "max": "max_metrics_per_grid" }
+      },
+      "required": ["children"]
+    },
+    "Callout": {
+      "props": {
+        "tone": { "kind": "enum", "values": ["info", "success", "warning"] },
+        "title": { "kind": "label", "max": "max_title_chars" },
+        "body": { "kind": "label", "max": "max_body_chars" },
+        "bind": { "kind": "bind", "target": "scalar" }
+      },
+      "required": ["title"],
+      "exactly_one_of": ["body", "bind"]
+    },
+    "List": {
+      "props": {
+        "bind": { "kind": "bind", "target": "array" },
+        "children": { "kind": "children", "allowed": ["Text", "LinkButton"], "max": "max_list_items" }
+      },
+      "required": ["bind", "children"]
+    },
+    "LinkButton": {
+      "props": {
+        "navigate": { "kind": "navigate" }
+      },
+      "required": ["navigate"]
+    }
+  }
+}
