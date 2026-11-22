@@ -400,6 +400,46 @@ Cross-repo CI needs authenticated access to all three pinned revisions before th
 be a required hosted check. This local acceptance does not establish provider delivery,
 OS app-link association, or physical-device acceptance.
 
+## UI catalog
+
+`contracts/mobile/ui-catalog.json` is the closed set of components a generated donor
+dashboard layout may use, and `contracts/mobile/ui-catalog-vectors.json` holds valid and
+invalid specs with the expected error codes. Both ship in the bundle, versioned by
+`catalog_version` under the bundle's semver: adding a component or an optional prop is a
+minor change; removing or changing one is major. The catalog defines the contract only.
+Renderers, the staff approval step that precedes display, and spec authoring are separate
+work.
+
+A spec is an ordered array of nodes. Seven components exist, each with a closed prop set:
+`Heading`, `Text`, `Metric`, `MetricGrid`, `Callout`, `List` and `LinkButton`. `MetricGrid`
+holds only `Metric`; `List` holds `Text` or `LinkButton`. Specs nest two levels deep, hold
+at most 40 nodes, and a grid holds at most 12 metrics. A node with an unknown `type` is
+valid and renders nothing, so a newer spec degrades on an older app. An unknown prop on a
+known type is an error.
+
+- **Text.** Literal text appears only as a `Heading` title and as a `Callout` title and
+  body: plain text, at most 60 characters (160 for a body), with no angle brackets, URL
+  schemes, markdown links, or control and format characters. Everything else shown comes
+  from a `bind`. A `Metric` caption is an id from the catalog's `metric_captions`, and a
+  `LinkButton` is labelled from `navigate.labels`, so no free text reaches those.
+- **Data.** A `bind` is an RFC 6901 pointer into the `DonorDashboard` response (`GET
+  /donor/me/dashboard`) and nothing else. The validator resolves it against that schema in
+  `openapi.json` through `$ref`, `allOf`, `oneOf` and nullable unions. A pointer resolves
+  when any `oneOf` branch carries the field, so ready-state fields are bindable and the
+  `preparing` state renders them empty. `Heading`, `Text`, `Callout` and `Metric` need a
+  scalar, `Metric` an integer with a `format` of `integer`, `usd_minor`, `days` or
+  `percent`, and `List` an array.
+- **Actions.** `LinkButton` navigates to a path in `account_paths` or `notification_paths`
+  of `links.json`. There are no other actions and no external URLs.
+
+`node scripts/ui-catalog.mjs check` validates the catalog against `openapi.json` and
+`links.json` and runs every vector; `make check-mobile` runs it. Renaming a bound field in
+`DonorDashboard` or dropping a linked path fails the check. `apps/web/lib/ui-catalog.d.ts`
+holds the generated TypeScript spec types and is rebuilt by `make generate`. An app that
+re-vendors a bundle containing the catalog adds `ui-catalog.json` and
+`ui-catalog-vectors.json` to its `check-foundation.mjs` file list, and its renderer must
+pass the shared vectors.
+
 ## Design source
 
 Edit `design/tokens.json`, then run `make generate-mobile`. The web adapter consumes its
