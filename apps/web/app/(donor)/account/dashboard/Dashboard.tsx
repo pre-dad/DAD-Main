@@ -6,6 +6,8 @@ import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { TodayInitiative } from "@/components/donor/TodayInitiative";
+import { Insights } from "@/components/insights/Insights";
+import { canRender } from "@/components/insights/panel";
 import type { Schema } from "@/lib/api";
 import { formatDateTime } from "@/lib/dates";
 import { foundingDaysLeft, foundingDeadlineLabel, launchDateLabel } from "@/lib/launch";
@@ -323,6 +325,12 @@ export default function Dashboard() {
                   </article>
                 )}
               </div>
+              {canRender(data.insights) && (
+                <section className="insights" aria-labelledby="insights-heading">
+                  <h2 id="insights-heading">Your insights</h2>
+                  <Insights spec={data.insights.spec} dashboard={data} />
+                </section>
+              )}
               {!data.founding_donor && (
                 <p className="note">
                   Founding Donor badge: not yet earned.{" "}

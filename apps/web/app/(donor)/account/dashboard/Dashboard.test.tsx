@@ -315,3 +315,40 @@ it("says '1 day' rather than '1 days' on the streak card and the next step", asy
   expect(await screen.findAllByText("1 day to your 30-day milestone.")).toHaveLength(2);
   expect(screen.queryByText(/1 days/)).not.toBeInTheDocument();
 });
+
+const layout = {
+  catalog_version: 1,
+  spec_id: "5b0c7a8e-1111-4222-8333-444455556666",
+  spec: [
+    { type: "Heading", title: "Your impact" },
+    { type: "Metric", bind: "/impact/given_minor", format: "usd_minor", caption: "given" },
+    { type: "LinkButton", navigate: "/account/gifts" },
+    { type: "Carousel", bind: "/mode" },
+  ],
+};
+
+it("draws the approved insights layout in its own section, from the dashboard's figures", async () => {
+  respond({ ...data, insights: layout });
+  const { container } = render(<DashboardPage />);
+  const panel = (await screen.findByRole("heading", { level: 2, name: "Your insights" })).closest("section");
+  if (!panel) throw new Error("Missing insights section");
+  expect(within(panel).getByRole("heading", { level: 3, name: "Your impact" })).toBeVisible();
+  expect(within(panel).getByText("$45.00")).toBeVisible();
+  expect(within(panel).getByText("Total given")).toBeVisible();
+  expect(within(panel).getByRole("link", { name: "Your gifts" })).toHaveAttribute("href", "/account/gifts");
+  expect(panel.closest(".metrics")).toBeNull();
+  expect(container.querySelectorAll(".metrics.pair .metric")).toHaveLength(2);
+});
+
+it.each([
+  ["missing", {}],
+  ["null", { insights: null }],
+  ["for a newer catalog", { insights: { ...layout, catalog_version: 2 } }],
+  ["empty", { insights: { ...layout, spec: [] } }],
+])("draws no insights section when the field is %s", async (_name, extra) => {
+  respond({ ...data, ...extra });
+  render(<DashboardPage />);
+  expect(await screen.findByRole("heading", { name: "Link Referrals" })).toBeVisible();
+  expect(screen.queryByRole("heading", { name: "Your insights" })).not.toBeInTheDocument();
+  expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(9);
+});
