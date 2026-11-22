@@ -3033,6 +3033,134 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/staff/insights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dashboard layouts and their review state
+         * @description Newest first. Needs the `content.publish` permission. Works whether or not DONOR_INSIGHTS_ENABLED is set.
+         */
+        get: operations["staffInsights"];
+        put?: never;
+        /**
+         * Save a new draft layout
+         * @description The caller becomes the author. Needs the `content.publish` permission.
+         */
+        post: operations["createInsight"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/insights/{spec_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A dashboard layout with its content
+         * @description Needs the `content.publish` permission.
+         */
+        get: operations["staffInsight"];
+        put?: never;
+        /**
+         * Replace a draft layout's content
+         * @description Only the draft's author. 403 for anyone else, 409 unless the spec is a draft. Needs the `content.publish` permission.
+         */
+        post: operations["updateInsight"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/insights/{spec_id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a draft for approval
+         * @description Only the draft's author; validated again. 409 unless the spec is a draft. Needs the `content.publish` permission.
+         */
+        post: operations["submitInsight"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/insights/{spec_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a pending layout
+         * @description Makes it live and retires the live one in the same step. 403 when the caller authored the spec (two-person rule), 409 unless the spec is pending. Needs the `content.publish` permission.
+         */
+        post: operations["approveInsight"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/insights/{spec_id}/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retire the live layout
+         * @description 409 unless the spec is live. Any publisher may, so a bad layout is never held up. Needs the `content.publish` permission.
+         */
+        post: operations["retireInsight"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/insights/{spec_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject a pending layout
+         * @description 403 when the caller authored the spec (two-person rule), 409 unless the spec is pending. Needs the `content.publish` permission.
+         */
+        post: operations["rejectInsight"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3146,6 +3274,8 @@ export interface components {
             /** @description The donor's active-network headline (I-2), or null when they have no active referrals. */
             network: components["schemas"]["NetworkCard"] | null;
             impact: components["schemas"]["ImpactSummary"];
+            /** @description The approved dashboard layout, or null when the feature is off, no layout is live, or the live one no longer passes validation. Absent from older servers. */
+            insights?: components["schemas"]["InsightsPanel"] | null;
         };
         Profile: {
             /** Format: email */
@@ -4607,6 +4737,105 @@ export interface components {
             /** @constant */
             signed_in: true;
         } | components["schemas"]["NativeSession"];
+        /** @description One block of a dashboard layout. `type` names a catalog component; the other fields are that component's props. The schema is open because a node of a type this catalog version does not know is valid and renders nothing. Validate with contracts/mobile/ui-catalog.json. */
+        UiSpecNode: {
+            type: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description An ordered dashboard layout. Its binds are JSON Pointers into the DonorDashboard response that carries it. */
+        UiSpec: components["schemas"]["UiSpecNode"][];
+        /** @description The approved dashboard layout. Render it against the DonorDashboard response it arrived in. */
+        InsightsPanel: {
+            /** @description The UI catalog version the layout was written for. */
+            catalog_version: number;
+            /** Format: uuid */
+            spec_id: string;
+            spec: components["schemas"]["UiSpec"];
+        };
+        /** @description A dashboard layout and where it stands in review, without its content. */
+        InsightSpecSummary: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            state: "draft" | "pending" | "live" | "retired" | "rejected";
+            /** @description The UI catalog version the spec was checked against when it was saved. */
+            catalog_version: number;
+            /** Format: uuid */
+            author_id: string;
+            author_name: string;
+            /**
+             * Format: uuid
+             * @description Who approved or rejected the spec. Never the author.
+             */
+            approver_id: string | null;
+            approver_name: string | null;
+            /** @description Set only for a rejected spec. */
+            reject_reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            submitted_at: string | null;
+            /** Format: date-time */
+            decided_at: string | null;
+            /** Format: date-time */
+            retired_at: string | null;
+        };
+        /** @description A dashboard layout with its content. */
+        InsightSpec: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            state: "draft" | "pending" | "live" | "retired" | "rejected";
+            /** @description The UI catalog version the spec was checked against when it was saved. */
+            catalog_version: number;
+            /** Format: uuid */
+            author_id: string;
+            author_name: string;
+            /**
+             * Format: uuid
+             * @description Who approved or rejected the spec. Never the author.
+             */
+            approver_id: string | null;
+            approver_name: string | null;
+            /** @description Set only for a rejected spec. */
+            reject_reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            submitted_at: string | null;
+            /** Format: date-time */
+            decided_at: string | null;
+            /** Format: date-time */
+            retired_at: string | null;
+            spec: components["schemas"]["UiSpec"];
+        };
+        InsightSpecPage: {
+            specs: components["schemas"]["InsightSpecSummary"][];
+            /** @description Cursor of the next page, or null on the last page. */
+            next_cursor: string | null;
+        };
+        InsightSpecInput: {
+            spec: components["schemas"]["UiSpec"];
+        };
+        InsightSpecRejection: {
+            reason: string;
+        };
+        InsightSpecError: {
+            /** @description JSON Pointer into the spec; empty for the spec as a whole. */
+            path: string;
+            /** @description A stable reason, as in contracts/mobile/ui-catalog-vectors.json. */
+            code: string;
+            message: string;
+        };
+        InsightSpecProblem: {
+            detail: string;
+            errors: components["schemas"]["InsightSpecError"][];
+        };
     };
     responses: {
         /** @description Signed in. */
@@ -4721,6 +4950,15 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["Problem"];
+            };
+        };
+        /** @description The spec is not one JSON array that passes the UI catalog rules; `errors` lists every reason, with its path and code. Other invalid fields answer the plain 422. */
+        InvalidInsightSpec: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["InsightSpecProblem"];
             };
         };
     };
@@ -10495,6 +10733,266 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["Unprocessable"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffInsights: {
+        parameters: {
+            query?: {
+                /** @description Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description List only specs in this state. */
+                state?: "draft" | "pending" | "live" | "retired" | "rejected";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightSpecPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    createInsight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InsightSpecInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightSpec"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["InvalidInsightSpec"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffInsight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                spec_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightSpec"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    updateInsight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                spec_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InsightSpecInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightSpec"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["InvalidInsightSpec"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    submitInsight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                spec_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, unknown>;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightSpec"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["InvalidInsightSpec"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    approveInsight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                spec_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, unknown>;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightSpec"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["InvalidInsightSpec"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    retireInsight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                spec_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, unknown>;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightSpec"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    rejectInsight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                spec_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InsightSpecRejection"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightSpec"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
         };
     };
