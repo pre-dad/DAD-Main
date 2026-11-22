@@ -27,9 +27,10 @@ type DonorDashboard struct {
 	RankingsOptedOut bool          `json:"rankings_opted_out"`
 	Network          *NetworkCard  `json:"network"`
 	Impact           ImpactSummary `json:"impact"`
-	// Insights is the approved dashboard layout, null when the feature is off,
-	// no layout is live, or the live one no longer passes validation.
-	Insights *InsightsPanel `json:"insights"`
+	// Insights is the approved dashboard layout. It is omitted when the feature
+	// is off, no layout is live, or the live one no longer passes validation, so
+	// a deployment without a layout answers byte-for-byte as it did before.
+	Insights *InsightsPanel `json:"insights,omitempty"`
 }
 
 // ImpactSummary is the donor's own impact totals (PRD I-1, I-3): what they have

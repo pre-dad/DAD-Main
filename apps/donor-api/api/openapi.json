@@ -13421,7 +13421,7 @@
           "type": "null"
          }
         ],
-        "description": "The approved dashboard layout, or null when the feature is off, no layout is live, or the live one no longer passes validation. Absent from older servers."
+        "description": "The approved dashboard layout. Absent, or null, when DONOR_INSIGHTS_ENABLED is off, no layout is live, or the live one no longer passes validation; clients treat both as no panel."
        }
       },
       "required": [

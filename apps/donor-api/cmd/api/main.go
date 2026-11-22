@@ -26,6 +26,7 @@ import (
 	"dad/donor-api/internal/push"
 	"dad/donor-api/internal/sms"
 	"dad/donor-api/internal/store"
+	"dad/donor-api/internal/uicatalog"
 	"dad/donor-api/internal/wallet"
 )
 
@@ -108,6 +109,9 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	var services httpapi.Services
 	release := func() {}
 	var err error
+	if err = uicatalog.Preload(); err != nil {
+		return services, release, err
+	}
 	if services.TrustedProxies, err = trustedProxies(getenv("DONOR_TRUSTED_PROXY_CIDRS")); err != nil {
 		return services, release, err
 	}

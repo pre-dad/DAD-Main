@@ -58,17 +58,17 @@ func TestDashboardAuthenticationAndPrivateErrors(t *testing.T) {
 	}
 }
 
-func TestDashboardInsightsFieldIsNullOrCarriesTheLayout(t *testing.T) {
+func TestDashboardInsightsFieldIsOmittedOrCarriesTheLayout(t *testing.T) {
 	panel := &store.InsightsPanel{CatalogVersion: 1, Spec: []byte(`[{"type":"Heading","title":"Hi"}]`)}
 	for name, tc := range map[string]struct {
 		insights *store.InsightsPanel
 		want     string
 	}{
-		"none": {nil, `"insights":null`},
+		"none": {nil, `"impact":{"given_minor":null,"currency":"","initiatives_funded":0,"events_volunteered":0}}`},
 		"live": {panel, `"insights":{"catalog_version":1,"spec_id":null,"spec":[{"type":"Heading","title":"Hi"}]}`},
 	} {
 		body, err := json.Marshal(store.DonorDashboard{Mode: "test", State: "ready", Insights: tc.insights})
-		if err != nil || !strings.Contains(string(body), tc.want) {
+		if err != nil || !strings.Contains(string(body), tc.want) || (tc.insights == nil && strings.Contains(string(body), "insights")) {
 			t.Errorf("%s: %s, %v", name, body, err)
 		}
 	}

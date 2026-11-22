@@ -3274,7 +3274,7 @@ export interface components {
             /** @description The donor's active-network headline (I-2), or null when they have no active referrals. */
             network: components["schemas"]["NetworkCard"] | null;
             impact: components["schemas"]["ImpactSummary"];
-            /** @description The approved dashboard layout, or null when the feature is off, no layout is live, or the live one no longer passes validation. Absent from older servers. */
+            /** @description The approved dashboard layout. Absent, or null, when DONOR_INSIGHTS_ENABLED is off, no layout is live, or the live one no longer passes validation; clients treat both as no panel. */
             insights?: components["schemas"]["InsightsPanel"] | null;
         };
         Profile: {
