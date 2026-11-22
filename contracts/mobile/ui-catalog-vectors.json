@@ -256,7 +256,10 @@
     },
     {
       "name": "link button to a notification-only path",
-      "valid": true,
+      "valid": false,
+      "codes": [
+        "NAV_FORBIDDEN"
+      ],
       "spec": [
         {
           "type": "LinkButton",
@@ -858,6 +861,32 @@
         {
           "type": "Text",
           "bind": "/streak/ladder/bar/0"
+        }
+      ]
+    },
+    {
+      "name": "bind to the spec's own insights field",
+      "valid": false,
+      "codes": [
+        "BIND_UNRESOLVED"
+      ],
+      "spec": [
+        {
+          "type": "Text",
+          "bind": "/insights/spec/0/title"
+        }
+      ]
+    },
+    {
+      "name": "bind to the insights field itself",
+      "valid": false,
+      "codes": [
+        "BIND_UNRESOLVED"
+      ],
+      "spec": [
+        {
+          "type": "Heading",
+          "bind": "/insights/catalog_version"
         }
       ]
     },

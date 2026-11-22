@@ -191,6 +191,16 @@ func (a *api) routes() []route {
 		a.staffWrite("POST /donor/staff/content/sources", a.uploadSource),
 		a.staffRead("GET /donor/staff/content/sources/{source_id}", a.downloadSource),
 		a.staffWrite("POST /donor/staff/content/wording", a.setRecognitionWording),
+
+		a.staffRead("GET /donor/staff/insights", a.staffInsights),
+		a.staffWrite("POST /donor/staff/insights", a.createInsight),
+		a.staffRead("GET /donor/staff/insights/{spec_id}", a.staffInsight),
+		a.staffWrite("POST /donor/staff/insights/{spec_id}", a.updateInsight),
+		a.staffWrite("POST /donor/staff/insights/{spec_id}/submit", a.submitInsight),
+		a.staffWrite("POST /donor/staff/insights/{spec_id}/approve", a.approveInsight),
+		a.staffWrite("POST /donor/staff/insights/{spec_id}/reject", a.rejectInsight),
+		a.staffWrite("POST /donor/staff/insights/{spec_id}/retire", a.retireInsight),
+
 		a.staffWrite("POST /donor/staff/founding-claims", a.importFoundingClaims),
 
 		a.staffRead("GET /donor/staff/initiatives", a.staffInitiatives),

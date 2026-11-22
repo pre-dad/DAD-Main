@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  catalogData,
   catalogTypes,
   checkCatalog,
   checkVectors,
@@ -105,7 +106,7 @@ test("dropping a navigate path from links.json breaks the check and the vectors"
 
 test("a new links.json path without a catalog label breaks the check", () => {
   const links = structuredClone(sources.links);
-  links.notification_paths.push("/account/new");
+  links.account_paths.push("/account/new");
   assert.ok(checkCatalog({ ...sources, links }).some((problem) => problem.includes("/account/new has no label")));
 });
 
@@ -173,4 +174,22 @@ test("generated TypeScript types describe every component and the unknown-node e
   assert.ok(types.includes("uiCatalogVersion = 1"));
   assert.ok(types.includes("UiUnknownNode"));
   assert.ok(types.includes('"/account/gifts"'));
+});
+
+test("generated web data carries the id tables and the supported catalog version", () => {
+  const data = catalogData(sources.catalog);
+  assert.ok(data.includes(`supportedCatalogVersion = ${sources.catalog.catalog_version}`));
+  for (const [id, caption] of Object.entries(sources.catalog.metric_captions))
+    assert.ok(data.includes(`${JSON.stringify(id)}: ${JSON.stringify(caption)}`), id);
+  for (const [path, label] of Object.entries(sources.catalog.navigate.labels))
+    assert.ok(data.includes(`${JSON.stringify(path)}: ${JSON.stringify(label)}`), path);
+  assert.ok(!data.includes("/partner"));
+});
+
+test("a bind under /insights never resolves", () => {
+  for (const bind of ["/insights", "/insights/catalog_version", "/insights/spec/0/title"])
+    assert.deepEqual(
+      validateSpec([{ type: "Text", bind }], sources).errors.map((e) => e.code),
+      ["BIND_UNRESOLVED"],
+    );
 });

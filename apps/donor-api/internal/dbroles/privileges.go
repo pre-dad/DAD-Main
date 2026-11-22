@@ -271,6 +271,7 @@ var grants = map[string]map[Role]string{
 	"donor_team_months":            {API: "SELECT", ProjectionWorker: "SELECT, INSERT, UPDATE"},
 	"donor_team_month_standings":   {API: "SELECT", ProjectionWorker: "SELECT, INSERT"},
 	"donor_partner_match_payments": {API: "SELECT, INSERT"},
+	"donor_insight_specs":          {API: "SELECT, INSERT, UPDATE"},
 	"donor_content_sources": {
 		API:              "SELECT, INSERT",
 		ProjectionWorker: "SELECT (id, actor_id, name, sha256, created_at)",

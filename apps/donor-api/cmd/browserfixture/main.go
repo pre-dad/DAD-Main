@@ -3,7 +3,7 @@
 // Browser tests run without email, so this stands in for the inbox; the
 // journey itself signs in through the real claim or invitation page.
 //
-//	browserfixture -kind donor|partner -origin http://127.0.0.1:3000
+//	browserfixture -kind donor|partner -origin http://127.0.0.1:3000 [-ready]
 //
 // It writes only to the dedicated donor_go test database.
 package main
@@ -37,6 +37,7 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 	flags := flag.NewFlagSet("browserfixture", flag.ContinueOnError)
 	kind := flags.String("kind", "", "account to prepare: donor or partner")
 	origin := flags.String("origin", "", "public origin the link opens")
+	ready := flags.Bool("ready", false, "give a donor a computed dashboard instead of one still being prepared")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -58,10 +59,10 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 		return err
 	}
 	defer pool.Close()
-	return prepare(ctx, pool, *kind, *origin, out)
+	return prepare(ctx, pool, *kind, *origin, *ready, out)
 }
 
-func prepare(ctx context.Context, pool *pgxpool.Pool, kind, origin string, out io.Writer) error {
+func prepare(ctx context.Context, pool *pgxpool.Pool, kind, origin string, ready bool, out io.Writer) error {
 	id, err := store.NewID()
 	if err != nil {
 		return err
@@ -80,6 +81,16 @@ func prepare(ctx context.Context, pool *pgxpool.Pool, kind, origin string, out i
 		if _, err = pool.Exec(ctx, "INSERT INTO donor_login_links (id,donor_id,token_hash,expires_at) VALUES ($1,$1,$2,$3)",
 			id, store.HashToken(secret), expires); err != nil {
 			return err
+		}
+		if ready {
+			_, err = pool.Exec(
+				ctx,
+				"INSERT INTO donor_metric_projections (id,donor_id,net_minor,computed_at,next_refresh_at) VALUES ($1,$1,0,now(),now()+interval '1 hour')",
+				id,
+			)
+			if err != nil {
+				return err
+			}
 		}
 		_, err = fmt.Fprintf(out, "%s/account/claim#token=%s\n", origin, secret)
 		return err

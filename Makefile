@@ -4,7 +4,7 @@ SQLC_GO := github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
 # SQLC_MODE=docker or go forces one way to run sqlc; by default Docker is used when its daemon answers.
 SQLC_MODE ?=
 GOLINES := go tool -modfile=tools/go.mod golines -m 140
-GENERATED := apps/donor-api/internal/store/queries apps/web/lib/openapi.d.ts apps/web/design/tokens.ts apps/web/lib/ui-catalog.d.ts deploy/nginx/conf/native-routes.conf
+GENERATED := apps/donor-api/internal/store/queries apps/web/lib/openapi.d.ts apps/web/design/tokens.ts apps/web/lib/ui-catalog.d.ts apps/web/lib/ui-catalog-data.ts deploy/nginx/conf/native-routes.conf
 
 # Load testing against a disposable, seeded deployment; see docs/operations.md.
 SEED_DONORS ?= 50000

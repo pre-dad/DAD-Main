@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const selfField = "insights";
 const scalarTypes = new Set(["string", "integer", "number", "boolean"]);
 const own = (object, key) => Object.hasOwn(object, key);
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -66,6 +67,8 @@ export function parsePointer(pointer) {
 export function resolveBind(openapi, schemaName, pointer) {
   const segments = parsePointer(pointer);
   if (!segments) return { error: "BIND_SYNTAX" };
+  // The layout never binds to itself: that would put its own literal text into a bind-only prop.
+  if (segments[0] === selfField) return { error: "BIND_UNRESOLVED" };
   let current = alternatives(openapi, refTarget(openapi, `#/components/schemas/${schemaName}`)).alts;
   for (const segment of segments) {
     const next = [];
@@ -375,6 +378,25 @@ export function catalogTypes(catalog, links) {
     "",
   );
   return lines.join("\n");
+}
+
+// Values the web renderer needs at run time: the id tables that stand in for free text.
+export function catalogData(catalog) {
+  const table = (name, entries) =>
+    `export const ${name}: Record<${name === "uiMetricCaptions" ? "UiMetricCaption" : "UiNavigatePath"}, string> = {\n${Object.entries(
+      entries,
+    )
+      .map(([key, value]) => `  ${JSON.stringify(key)}: ${JSON.stringify(value)},`)
+      .join("\n")}\n};\n`;
+  return [
+    "// Generated from contracts/mobile/ui-catalog.json; run `make generate` after changing it.",
+    'import type { UiMetricCaption, UiNavigatePath } from "./ui-catalog";',
+    "",
+    `export const supportedCatalogVersion = ${catalog.catalog_version};`,
+    "",
+    table("uiMetricCaptions", catalog.metric_captions),
+    table("uiNavigateLabels", catalog.navigate.labels),
+  ].join("\n");
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {

@@ -13,12 +13,19 @@ import (
 	"strings"
 
 	"dad/donor-api/internal/store"
+	"dad/donor-api/internal/uicatalog"
 )
 
 type problem struct {
 	Detail string                     `json:"detail"`
 	Code   string                     `json:"code,omitempty"`   // stable reason for a refusal
 	Errors []store.PublicationProblem `json:"errors,omitempty"` // set for a refused publication
+}
+
+// insightProblem is the 422 for a layout the UI catalog refuses, naming every reason.
+type insightProblem struct {
+	Detail string            `json:"detail"`
+	Errors []uicatalog.Error `json:"errors"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

@@ -68,6 +68,7 @@ type Services struct {
 	Exports         ExportSource
 	ContentAdmin    ContentAdminSource
 	Wording         WordingSource
+	Insights        InsightSource
 	Initiatives     InitiativeSource
 	InitiativeRead  InitiativeReadSource
 	TodayInitiative TodayInitiativeSource

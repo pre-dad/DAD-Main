@@ -54,7 +54,7 @@ func TestPreparedAccountsMatchTheLinkTheyPrint(t *testing.T) {
 		{"partner", "/partner/accept#token=", "donor_partner_users", "partner_id", "invite_token_hash"},
 	} {
 		var out bytes.Buffer
-		if err := prepare(ctx, pool, tc.kind, origin, &out); err != nil {
+		if err := prepare(ctx, pool, tc.kind, origin, false, &out); err != nil {
 			t.Fatalf("%s: %v", tc.kind, err)
 		}
 		link := strings.TrimSpace(out.String())
@@ -80,5 +80,44 @@ func TestPreparedAccountsMatchTheLinkTheyPrint(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestReadyDonorsHaveAComputedDashboard(t *testing.T) {
+	dbrolestest.URL(t, dbroles.API)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	for _, ready := range []bool{false, true} {
+		var out bytes.Buffer
+		if err := prepare(ctx, pool, "donor", "http://127.0.0.1:3000", ready, &out); err != nil {
+			t.Fatal(err)
+		}
+		_, secret, _ := strings.Cut(strings.TrimSpace(out.String()), "#token=")
+		var id string
+		if err := pool.QueryRow(ctx, "SELECT donor_id::text FROM donor_login_links WHERE token_hash=$1", store.HashToken(secret)).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			for _, statement := range []string{
+				"DELETE FROM donor_metric_projections WHERE donor_id=$1",
+				"DELETE FROM donor_login_links WHERE donor_id=$1",
+				"DELETE FROM donors WHERE id=$1",
+			} {
+				if _, err := pool.Exec(ctx, statement, id); err != nil {
+					t.Error(err)
+				}
+			}
+		})
+		var projections int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_metric_projections WHERE donor_id=$1", id).Scan(&projections); err != nil {
+			t.Fatal(err)
+		}
+		if (projections == 1) != ready {
+			t.Errorf("ready=%v left %d projections", ready, projections)
+		}
 	}
 }

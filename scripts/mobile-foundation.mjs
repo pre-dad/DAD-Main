@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { catalogTypes } from "./ui-catalog.mjs";
+import { catalogData, catalogTypes } from "./ui-catalog.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
@@ -186,6 +186,12 @@ export async function generateWeb(check = false) {
     if ((await readFile(typesTarget, "utf8")) !== types)
       throw new Error("UI catalog types differ; run make generate-mobile");
   } else await writeFile(typesTarget, types);
+  const data = catalogData(catalog);
+  const dataTarget = resolve(root, "apps/web/lib/ui-catalog-data.ts");
+  if (check) {
+    if ((await readFile(dataTarget, "utf8")) !== data)
+      throw new Error("UI catalog data differs; run make generate-mobile");
+  } else await writeFile(dataTarget, data);
 }
 
 export async function bundle(output) {

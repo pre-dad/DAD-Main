@@ -53,6 +53,12 @@ func staffStatus(err error) (int, string) {
 	switch {
 	case errors.Is(err, store.ErrStaffDenied):
 		return http.StatusUnauthorized, "Passkey, invitation, or session invalid or expired"
+	case errors.Is(err, store.ErrInsightTwoPerson):
+		return http.StatusForbidden, "A different staff member must approve or reject this layout"
+	case errors.Is(err, store.ErrInsightNotAuthor):
+		return http.StatusForbidden, "Only the author can change or submit a draft"
+	case errors.Is(err, store.ErrInsightState):
+		return http.StatusConflict, "This layout is not in a state that allows that change"
 	case errors.Is(err, store.ErrStaffForbidden):
 		return http.StatusForbidden, "Permission denied"
 	case errors.Is(err, store.ErrStaffInput):
