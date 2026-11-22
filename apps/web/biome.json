@@ -7,7 +7,15 @@
     "root": "../.."
   },
   "files": {
-    "includes": ["**", "!!.next", "!!node_modules", "!!next-env.d.ts", "!!lib/openapi.d.ts", "!!design/tokens.ts"]
+    "includes": [
+      "**",
+      "!!.next",
+      "!!node_modules",
+      "!!next-env.d.ts",
+      "!!lib/openapi.d.ts",
+      "!!design/tokens.ts",
+      "!!lib/ui-catalog.d.ts"
+    ]
   },
   "linter": {
     "enabled": true,
