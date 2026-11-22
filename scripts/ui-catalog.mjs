@@ -380,6 +380,25 @@ export function catalogTypes(catalog, links) {
   return lines.join("\n");
 }
 
+// Values the web renderer needs at run time: the id tables that stand in for free text.
+export function catalogData(catalog) {
+  const table = (name, entries) =>
+    `export const ${name}: Record<${name === "uiMetricCaptions" ? "UiMetricCaption" : "UiNavigatePath"}, string> = {\n${Object.entries(
+      entries,
+    )
+      .map(([key, value]) => `  ${JSON.stringify(key)}: ${JSON.stringify(value)},`)
+      .join("\n")}\n};\n`;
+  return [
+    "// Generated from contracts/mobile/ui-catalog.json; run `make generate` after changing it.",
+    'import type { UiMetricCaption, UiNavigatePath } from "./ui-catalog";',
+    "",
+    `export const supportedCatalogVersion = ${catalog.catalog_version};`,
+    "",
+    table("uiMetricCaptions", catalog.metric_captions),
+    table("uiNavigateLabels", catalog.navigate.labels),
+  ].join("\n");
+}
+
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   try {
     if (process.argv[2] !== "check") throw new Error("Usage: node scripts/ui-catalog.mjs check");

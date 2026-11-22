@@ -14,7 +14,8 @@
       "!!next-env.d.ts",
       "!!lib/openapi.d.ts",
       "!!design/tokens.ts",
-      "!!lib/ui-catalog.d.ts"
+      "!!lib/ui-catalog.d.ts",
+      "!!lib/ui-catalog-data.ts"
     ]
   },
   "linter": {
