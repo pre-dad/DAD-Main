@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strings"
 	"time"
-	_ "time/tzdata" // America/New_York resolves inside the stripped container.
 
 	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/recognition"
 )
 
 // ErrWindow reports an unusable reconciliation window.
@@ -17,15 +17,7 @@ var ErrWindow = errors.New("invalid reconciliation window")
 // NewYork is the system's civil-time zone: finance reasons about a day as a
 // full New York calendar day, as the Founding cutoff and projection
 // boundaries do.
-var NewYork = mustLoad("America/New_York")
-
-func mustLoad(name string) *time.Location {
-	zone, err := time.LoadLocation(name)
-	if err != nil {
-		panic(err)
-	}
-	return zone
-}
+var NewYork = recognition.NewYork
 
 // Window is the UTC half-open interval [Start, End) a run reconciles, the New
 // York calendar day it represents, and the processing delay required after End.
