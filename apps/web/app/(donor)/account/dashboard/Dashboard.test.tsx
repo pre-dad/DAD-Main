@@ -309,6 +309,16 @@ it("counts the Founding days left in New York time, on the last day and after", 
   );
 });
 
+it("groups thousands in the streak length and milestone, as the PRD writes them", async () => {
+  respond({
+    ...data,
+    streak: { ...data.streak, ladder: { ...data.streak.ladder, days: 1730, next_milestone: 1825, days_to_next: 95 } },
+  });
+  render(<DashboardPage />);
+  expect(await screen.findByText("1,730 days")).toBeVisible();
+  expect(screen.getByText("95 days to your 1,825-day milestone.")).toBeVisible();
+});
+
 it("says '1 day' rather than '1 days' on the streak card and the next step", async () => {
   respond({ ...data, streak: { ...data.streak, ladder: { ...data.streak.ladder, days_to_next: 1 } } });
   render(<DashboardPage />);
