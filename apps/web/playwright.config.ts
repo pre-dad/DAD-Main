@@ -31,6 +31,7 @@ export default defineConfig({
         DONOR_STAFF_ORIGIN: staffOrigin,
         DONOR_PUBLIC_ORIGIN: "http://127.0.0.1:3000",
         DONOR_GO_LISTEN: "127.0.0.1:8002",
+        DONOR_INSIGHTS_ENABLED: "true",
         ...databaseAs("dad_api"),
       },
       url: "http://127.0.0.1:8002/health/live",

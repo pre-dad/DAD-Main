@@ -1410,6 +1410,15 @@ either way, so layouts can be prepared and approved before launch. To switch it 
 incident, set it to `false` and restart the API; retiring the live spec has the same effect
 for donors without a restart.
 
+In the back office, `/staff/insights` (linked for `content.publish`) lists layouts, edits a draft
+as JSON with a live preview drawn from invented sample figures (never a real donor's), and shows
+each refusal with its path and code. Approve, reject (with a reason) and retire ask for
+confirmation in the page; the author of a pending layout sees no approve or reject controls.
+The donor dashboard draws the live layout in a "Your insights" section, from the same response,
+and draws nothing for a node it does not know, a bind that does not resolve, a value of the
+wrong type or a link outside the catalog's paths. A pointer under `/insights` never resolves, in
+either validator or the web renderer, so a layout cannot repeat its own text through a bind.
+
 The embedded copies of the catalog and `links.json` in `apps/donor-api/internal/uicatalog` must
 match `contracts/mobile`; a test fails when they differ.
 
