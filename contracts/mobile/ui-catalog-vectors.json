@@ -1,0 +1,1451 @@
+{
+  "schema_version": 1,
+  "catalog_version": 1,
+  "vectors": [
+    {
+      "name": "heading with literal title",
+      "valid": true,
+      "spec": [
+        {
+          "type": "Heading",
+          "title": "Your impact"
+        }
+      ]
+    },
+    {
+      "name": "heading bound to a scalar",
+      "valid": true,
+      "spec": [
+        {
+          "type": "Heading",
+          "bind": "/impact/currency"
+        }
+      ]
+    },
+    {
+      "name": "text bound to a boolean",
+      "valid": true,
+      "spec": [
+        {
+          "type": "Text",
+          "bind": "/founding_donor"
+        }
+      ]
+    },
+    {
+      "name": "text bound to a timestamp",
+      "valid": true,
+      "spec": [
+        {
+          "type": "Text",
+          "bind": "/computed_at"
+        }
+      ]
+    },
+    {
+      "name": "text bound through a nullable string",
+      "valid": true,
+      "spec": [
+        {
+          "type": "Text",
+          "bind": "/streak/grace_ends_at"
+        }
+      ]
+    },
+    {
+      "name": "text bound through a nullable object",
+      "valid": true,
+      "spec": [
+        {
+          "type": "Text",
+          "bind": "/rank/city"
+        }
+      ]
+    },
+    {
+      "name": "metric usd_minor",
+      "valid": true,
+      "spec": [
+        {
+          "type": "Metric",
+          "bind": "/impact/given_minor",
+          "format": "usd_minor",
+          "caption": "given"
+        }
+      ]
+    },
+    {
+      "name": "metric days",
+      "valid": true,
+      "spec": [
+        {
+          "type": "Metric",
+          "bind": "/streak/ladder/days_to_next",
+          "format": "days",
+          "caption": "days_to_next"
+        }
+      ]
+    },
+    {
+      "name": "metric percent",
+      "valid": true,
+      "spec": [
+        {
+          "type": "Metric",
+          "bind": "/rank/national_percentile",
+          "format": "percent",
+          "caption": "national_percentile"
+        }
+      ]
+    },
+    {
+      "name": "metric without caption",
+      "valid": true,
+      "spec": [
+        {
+          "type": "Metric",
+          "bind": "/network/active_count",
+          "format": "integer"
+        }
+      ]
+    },
+    {
+      "name": "metric grid of two",
+      "valid": true,
+      "spec": [
+        {
+          "type": "MetricGrid",
+          "children": [
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/events_volunteered",
+              "format": "integer"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "metric grid at the cap",
+      "valid": true,
+      "spec": [
+        {
+          "type": "MetricGrid",
+          "children": [
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "callout with literal body",
+      "valid": true,
+      "spec": [
+        {
+          "type": "Callout",
+          "tone": "info",
+          "title": "Thank you",
+          "body": "Your gifts keep the programs running."
+        }
+      ]
+    },
+    {
+      "name": "callout with bound body",
+      "valid": true,
+      "spec": [
+        {
+          "type": "Callout",
+          "title": "Founding donor",
+          "bind": "/founding_donor"
+        }
+      ]
+    },
+    {
+      "name": "list bound to an array with a link",
+      "valid": true,
+      "spec": [
+        {
+          "type": "List",
+          "bind": "/streak/ladder/bar",
+          "children": [
+            {
+              "type": "Text",
+              "bind": "/streak/current"
+            },
+            {
+              "type": "LinkButton",
+              "navigate": "/account/gifts"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "link button to an account path",
+      "valid": true,
+      "spec": [
+        {
+          "type": "LinkButton",
+          "navigate": "/account/profile"
+        }
+      ]
+    },
+    {
+      "name": "link button to a notification-only path",
+      "valid": true,
+      "spec": [
+        {
+          "type": "LinkButton",
+          "navigate": "/partner"
+        }
+      ]
+    },
+    {
+      "name": "unknown component type renders nothing",
+      "valid": true,
+      "spec": [
+        {
+          "type": "Carousel",
+          "slides": [
+            1,
+            2
+          ],
+          "anything": {
+            "goes": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "unknown type inside a grid",
+      "valid": true,
+      "spec": [
+        {
+          "type": "MetricGrid",
+          "children": [
+            {
+              "type": "Metric",
+              "bind": "/impact/given_minor",
+              "format": "usd_minor"
+            },
+            {
+              "type": "Sparkline",
+              "bind": "/nope"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "title at exactly 60 characters",
+      "valid": true,
+      "spec": [
+        {
+          "type": "Heading",
+          "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      ]
+    },
+    {
+      "name": "callout body at exactly 160 characters",
+      "valid": true,
+      "spec": [
+        {
+          "type": "Callout",
+          "title": "Note",
+          "body": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        }
+      ]
+    },
+    {
+      "name": "forty nodes",
+      "valid": true,
+      "spec": [
+        {
+          "type": "MetricGrid",
+          "children": [
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            }
+          ]
+        },
+        {
+          "type": "MetricGrid",
+          "children": [
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            }
+          ]
+        },
+        {
+          "type": "MetricGrid",
+          "children": [
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            }
+          ]
+        },
+        {
+          "type": "Heading",
+          "title": "a"
+        }
+      ]
+    },
+    {
+      "name": "spec is not an array",
+      "valid": false,
+      "codes": [
+        "SPEC_NOT_ARRAY"
+      ],
+      "spec": {
+        "type": "Heading",
+        "title": "Hi"
+      }
+    },
+    {
+      "name": "spec is empty",
+      "valid": false,
+      "codes": [
+        "SPEC_EMPTY"
+      ],
+      "spec": []
+    },
+    {
+      "name": "block is not an object",
+      "valid": false,
+      "codes": [
+        "NODE_INVALID"
+      ],
+      "spec": [
+        "Heading"
+      ]
+    },
+    {
+      "name": "block has no type",
+      "valid": false,
+      "codes": [
+        "MISSING_TYPE"
+      ],
+      "spec": [
+        {
+          "title": "Hi"
+        }
+      ]
+    },
+    {
+      "name": "unknown prop on a known type",
+      "valid": false,
+      "codes": [
+        "UNKNOWN_PROP"
+      ],
+      "spec": [
+        {
+          "type": "Heading",
+          "title": "Hi",
+          "color": "red"
+        }
+      ]
+    },
+    {
+      "name": "unknown prop on text",
+      "valid": false,
+      "codes": [
+        "UNKNOWN_PROP"
+      ],
+      "spec": [
+        {
+          "type": "Text",
+          "bind": "/streak/current",
+          "style": "bold"
+        }
+      ]
+    },
+    {
+      "name": "literal label on text",
+      "valid": false,
+      "codes": [
+        "UNKNOWN_PROP",
+        "MISSING_PROP"
+      ],
+      "spec": [
+        {
+          "type": "Text",
+          "label": "Hello"
+        }
+      ]
+    },
+    {
+      "name": "literal title and bind on heading",
+      "valid": false,
+      "codes": [
+        "ONE_OF"
+      ],
+      "spec": [
+        {
+          "type": "Heading",
+          "title": "Hi",
+          "bind": "/impact/currency"
+        }
+      ]
+    },
+    {
+      "name": "callout without body or bind",
+      "valid": false,
+      "codes": [
+        "ONE_OF"
+      ],
+      "spec": [
+        {
+          "type": "Callout",
+          "title": "Hi"
+        }
+      ]
+    },
+    {
+      "name": "callout bad tone",
+      "valid": false,
+      "codes": [
+        "BAD_ENUM"
+      ],
+      "spec": [
+        {
+          "type": "Callout",
+          "tone": "danger",
+          "title": "Hi",
+          "body": "Body"
+        }
+      ]
+    },
+    {
+      "name": "title over cap",
+      "valid": false,
+      "codes": [
+        "LABEL_TOO_LONG"
+      ],
+      "spec": [
+        {
+          "type": "Heading",
+          "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      ]
+    },
+    {
+      "name": "callout body over cap",
+      "valid": false,
+      "codes": [
+        "LABEL_TOO_LONG"
+      ],
+      "spec": [
+        {
+          "type": "Callout",
+          "title": "Note",
+          "body": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        }
+      ]
+    },
+    {
+      "name": "title with markup",
+      "valid": false,
+      "codes": [
+        "LABEL_CONTENT"
+      ],
+      "spec": [
+        {
+          "type": "Heading",
+          "title": "<b>Hi</b>"
+        }
+      ]
+    },
+    {
+      "name": "title with a url scheme",
+      "valid": false,
+      "codes": [
+        "LABEL_CONTENT"
+      ],
+      "spec": [
+        {
+          "type": "Heading",
+          "title": "Visit https://example.com"
+        }
+      ]
+    },
+    {
+      "name": "title with a javascript scheme",
+      "valid": false,
+      "codes": [
+        "LABEL_CONTENT"
+      ],
+      "spec": [
+        {
+          "type": "Heading",
+          "title": "javascript:alert(1)"
+        }
+      ]
+    },
+    {
+      "name": "body with markdown link syntax",
+      "valid": false,
+      "codes": [
+        "LABEL_CONTENT"
+      ],
+      "spec": [
+        {
+          "type": "Callout",
+          "title": "Note",
+          "body": "See [here](/account/gifts)"
+        }
+      ]
+    },
+    {
+      "name": "title with a control character",
+      "valid": false,
+      "codes": [
+        "LABEL_CONTENT"
+      ],
+      "spec": [
+        {
+          "type": "Heading",
+          "title": "Line\nbreak"
+        }
+      ]
+    },
+    {
+      "name": "title with a zero-width character",
+      "valid": false,
+      "codes": [
+        "LABEL_CONTENT"
+      ],
+      "spec": [
+        {
+          "type": "Heading",
+          "title": "Hi​there"
+        }
+      ]
+    },
+    {
+      "name": "empty title",
+      "valid": false,
+      "codes": [
+        "LABEL_EMPTY"
+      ],
+      "spec": [
+        {
+          "type": "Heading",
+          "title": "   "
+        }
+      ]
+    },
+    {
+      "name": "title is not a string",
+      "valid": false,
+      "codes": [
+        "BAD_TYPE"
+      ],
+      "spec": [
+        {
+          "type": "Heading",
+          "title": 42
+        }
+      ]
+    },
+    {
+      "name": "bind to a missing field",
+      "valid": false,
+      "codes": [
+        "BIND_UNRESOLVED"
+      ],
+      "spec": [
+        {
+          "type": "Text",
+          "bind": "/impact/lifetime_total"
+        }
+      ]
+    },
+    {
+      "name": "bind to an object field",
+      "valid": false,
+      "codes": [
+        "BIND_NOT_SCALAR"
+      ],
+      "spec": [
+        {
+          "type": "Text",
+          "bind": "/impact"
+        }
+      ]
+    },
+    {
+      "name": "bind to the whole document",
+      "valid": false,
+      "codes": [
+        "BIND_SYNTAX"
+      ],
+      "spec": [
+        {
+          "type": "Text",
+          "bind": ""
+        }
+      ]
+    },
+    {
+      "name": "bind without a leading slash",
+      "valid": false,
+      "codes": [
+        "BIND_SYNTAX"
+      ],
+      "spec": [
+        {
+          "type": "Text",
+          "bind": "impact/given_minor"
+        }
+      ]
+    },
+    {
+      "name": "bind with an invalid escape",
+      "valid": false,
+      "codes": [
+        "BIND_SYNTAX"
+      ],
+      "spec": [
+        {
+          "type": "Text",
+          "bind": "/impact~2given"
+        }
+      ]
+    },
+    {
+      "name": "bind with an array index",
+      "valid": false,
+      "codes": [
+        "BIND_UNRESOLVED"
+      ],
+      "spec": [
+        {
+          "type": "Text",
+          "bind": "/streak/ladder/bar/0"
+        }
+      ]
+    },
+    {
+      "name": "bind outside DonorDashboard",
+      "valid": false,
+      "codes": [
+        "BIND_UNRESOLVED"
+      ],
+      "spec": [
+        {
+          "type": "Text",
+          "bind": "/profile/email"
+        }
+      ]
+    },
+    {
+      "name": "bind to an array from text",
+      "valid": false,
+      "codes": [
+        "BIND_NOT_SCALAR"
+      ],
+      "spec": [
+        {
+          "type": "Text",
+          "bind": "/streak/ladder/bar"
+        }
+      ]
+    },
+    {
+      "name": "list bound to a scalar",
+      "valid": false,
+      "codes": [
+        "BIND_NOT_ARRAY"
+      ],
+      "spec": [
+        {
+          "type": "List",
+          "bind": "/streak/current",
+          "children": [
+            {
+              "type": "Text",
+              "bind": "/streak/current"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "metric bound to a string",
+      "valid": false,
+      "codes": [
+        "BIND_NOT_INTEGER"
+      ],
+      "spec": [
+        {
+          "type": "Metric",
+          "bind": "/impact/currency",
+          "format": "integer"
+        }
+      ]
+    },
+    {
+      "name": "metric bound to a boolean",
+      "valid": false,
+      "codes": [
+        "BIND_NOT_INTEGER"
+      ],
+      "spec": [
+        {
+          "type": "Metric",
+          "bind": "/founding_donor",
+          "format": "integer"
+        }
+      ]
+    },
+    {
+      "name": "metric with an unknown format",
+      "valid": false,
+      "codes": [
+        "BAD_FORMAT"
+      ],
+      "spec": [
+        {
+          "type": "Metric",
+          "bind": "/impact/given_minor",
+          "format": "currency"
+        }
+      ]
+    },
+    {
+      "name": "metric without a format",
+      "valid": false,
+      "codes": [
+        "MISSING_PROP"
+      ],
+      "spec": [
+        {
+          "type": "Metric",
+          "bind": "/impact/given_minor"
+        }
+      ]
+    },
+    {
+      "name": "metric with an unknown caption",
+      "valid": false,
+      "codes": [
+        "BAD_CAPTION"
+      ],
+      "spec": [
+        {
+          "type": "Metric",
+          "bind": "/impact/given_minor",
+          "format": "usd_minor",
+          "caption": "Total"
+        }
+      ]
+    },
+    {
+      "name": "link to a path outside the allow-list",
+      "valid": false,
+      "codes": [
+        "NAV_FORBIDDEN"
+      ],
+      "spec": [
+        {
+          "type": "LinkButton",
+          "navigate": "/account/delete"
+        }
+      ]
+    },
+    {
+      "name": "link to an external url",
+      "valid": false,
+      "codes": [
+        "NAV_FORBIDDEN"
+      ],
+      "spec": [
+        {
+          "type": "LinkButton",
+          "navigate": "https://example.com/"
+        }
+      ]
+    },
+    {
+      "name": "link to a staff path",
+      "valid": false,
+      "codes": [
+        "NAV_FORBIDDEN"
+      ],
+      "spec": [
+        {
+          "type": "LinkButton",
+          "navigate": "/staff"
+        }
+      ]
+    },
+    {
+      "name": "link with a non-string target",
+      "valid": false,
+      "codes": [
+        "BAD_TYPE"
+      ],
+      "spec": [
+        {
+          "type": "LinkButton",
+          "navigate": {
+            "path": "/account/gifts"
+          }
+        }
+      ]
+    },
+    {
+      "name": "link button with a label",
+      "valid": false,
+      "codes": [
+        "UNKNOWN_PROP"
+      ],
+      "spec": [
+        {
+          "type": "LinkButton",
+          "navigate": "/account/gifts",
+          "label": "Go"
+        }
+      ]
+    },
+    {
+      "name": "grid over the metric cap",
+      "valid": false,
+      "codes": [
+        "GRID_TOO_LARGE"
+      ],
+      "spec": [
+        {
+          "type": "MetricGrid",
+          "children": [
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "empty grid",
+      "valid": false,
+      "codes": [
+        "CHILDREN_EMPTY"
+      ],
+      "spec": [
+        {
+          "type": "MetricGrid",
+          "children": []
+        }
+      ]
+    },
+    {
+      "name": "grid child that is not a metric",
+      "valid": false,
+      "codes": [
+        "CHILD_NOT_ALLOWED"
+      ],
+      "spec": [
+        {
+          "type": "MetricGrid",
+          "children": [
+            {
+              "type": "Text",
+              "bind": "/streak/current"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "list child that is a heading",
+      "valid": false,
+      "codes": [
+        "CHILD_NOT_ALLOWED"
+      ],
+      "spec": [
+        {
+          "type": "List",
+          "bind": "/streak/ladder/bar",
+          "children": [
+            {
+              "type": "Heading",
+              "title": "Hi"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "grid nested inside a grid",
+      "valid": false,
+      "codes": [
+        "CHILD_NOT_ALLOWED",
+        "TOO_DEEP"
+      ],
+      "spec": [
+        {
+          "type": "MetricGrid",
+          "children": [
+            {
+              "type": "MetricGrid",
+              "children": [
+                {
+                  "type": "Metric",
+                  "bind": "/impact/given_minor",
+                  "format": "usd_minor"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "forty-one nodes",
+      "valid": false,
+      "codes": [
+        "TOO_MANY_NODES"
+      ],
+      "spec": [
+        {
+          "type": "MetricGrid",
+          "children": [
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            }
+          ]
+        },
+        {
+          "type": "MetricGrid",
+          "children": [
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            }
+          ]
+        },
+        {
+          "type": "MetricGrid",
+          "children": [
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            },
+            {
+              "type": "Metric",
+              "bind": "/impact/initiatives_funded",
+              "format": "integer"
+            }
+          ]
+        },
+        {
+          "type": "Heading",
+          "title": "a"
+        },
+        {
+          "type": "Heading",
+          "title": "b"
+        }
+      ]
+    },
+    {
+      "name": "invalid child inside a valid grid",
+      "valid": false,
+      "codes": [
+        "BIND_UNRESOLVED"
+      ],
+      "spec": [
+        {
+          "type": "MetricGrid",
+          "children": [
+            {
+              "type": "Metric",
+              "bind": "/impact/nope",
+              "format": "integer"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "two independent failures are both reported",
+      "valid": false,
+      "codes": [
+        "LABEL_TOO_LONG",
+        "NAV_FORBIDDEN"
+      ],
+      "spec": [
+        {
+          "type": "Heading",
+          "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "type": "LinkButton",
+          "navigate": "/x"
+        }
+      ]
+    }
+  ]
+}
