@@ -188,5 +188,8 @@ test("generated web data carries the id tables and the supported catalog version
 
 test("a bind under /insights never resolves", () => {
   for (const bind of ["/insights", "/insights/catalog_version", "/insights/spec/0/title"])
-    assert.deepEqual(validateSpec([{ type: "Text", bind }], sources).errors.map((e) => e.code), ["BIND_UNRESOLVED"]);
+    assert.deepEqual(
+      validateSpec([{ type: "Text", bind }], sources).errors.map((e) => e.code),
+      ["BIND_UNRESOLVED"],
+    );
 });
