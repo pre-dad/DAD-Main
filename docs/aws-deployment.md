@@ -252,7 +252,7 @@ secrets". Login names mirror `.env.database.example`
   as an unset variable in Compose: Stripe stays unconfigured and features that need an
   encryption key answer 503. The optional API settings in `docker-compose.prod.yml`
   (`DONOR_EVENT_CHECKIN_SECRET`, `DONOR_FOUNDING_CLAIM_KEY`, `DONOR_SMS_*`, `DONOR_OIDC_*`,
-  `DONOR_WALLET_*`, `DONOR_PUSH_*`, `DONOR_SUPPORT_EMAIL`, `DONOR_SMTP_CA`,
+  `DONOR_WALLET_*`, `DONOR_PUSH_*`, `DONOR_SUPPORT_EMAIL`, `DONOR_INSIGHTS_ENABLED`, `DONOR_SMTP_CA`,
   `DONOR_NATIVE_RETURN_ORIGIN`) are **not yet wired** into the task definitions, so those
   features stay off until DAD-infra adds them.
 - **EFS:** not implemented. Wallet signing keys (api) and APNs/FCM key files (push-worker)
