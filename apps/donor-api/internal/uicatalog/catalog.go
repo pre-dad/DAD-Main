@@ -148,7 +148,10 @@ func load(c *catalog) error {
 		if err != nil {
 			return err
 		}
-		parsed := component{Required: stringList(definition.values["required"]), ExactlyOne: stringList(definition.values["exactly_one_of"])}
+		parsed := component{
+			Required:   stringList(definition.values["required"]),
+			ExactlyOne: stringList(definition.values["exactly_one_of"]),
+		}
 		props, err := asObject(definition.values["props"], name+" props")
 		if err != nil {
 			return err

@@ -191,7 +191,9 @@ func (c *catalog) resolveBind(pointer string) resolved {
 }
 
 var (
-	schemeLike   = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:[a-z][a-z0-9+.-]{1,30}://|(?:https?|javascript|data|mailto|tel|sms|file|ftp|blob|vbscript):|www\.)`)
+	schemeLike = regexp.MustCompile(
+		`(?i)(?:^|[^a-z0-9])(?:[a-z][a-z0-9+.-]{1,30}://|(?:https?|javascript|data|mailto|tel|sms|file|ftp|blob|vbscript):|www\.)`,
+	)
 	markdownLink = regexp.MustCompile(`(?m)\][\s\p{Z}\x{feff}]*\(|\][\s\p{Z}\x{feff}]*\[|^[\s\p{Z}\x{feff}]*\[[^\]]*\]:[\s\p{Z}\x{feff}]`)
 )
 
