@@ -865,6 +865,32 @@
       ]
     },
     {
+      "name": "bind to the spec's own insights field",
+      "valid": false,
+      "codes": [
+        "BIND_UNRESOLVED"
+      ],
+      "spec": [
+        {
+          "type": "Text",
+          "bind": "/insights/spec/0/title"
+        }
+      ]
+    },
+    {
+      "name": "bind to the insights field itself",
+      "valid": false,
+      "codes": [
+        "BIND_UNRESOLVED"
+      ],
+      "spec": [
+        {
+          "type": "Heading",
+          "bind": "/insights/catalog_version"
+        }
+      ]
+    },
+    {
       "name": "bind outside DonorDashboard",
       "valid": false,
       "codes": [

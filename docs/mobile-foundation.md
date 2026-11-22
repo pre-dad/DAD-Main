@@ -429,6 +429,8 @@ known type is an error.
   `preparing` state renders them empty. `Heading`, `Text`, `Callout` and `Metric` need a
   scalar, `Metric` an integer with a `format` of `integer`, `usd_minor`, `days` or
   `percent`, and `List` an array.
+  A pointer under `/insights` (the field that carries the layout) never resolves, so a layout
+  cannot display its own literal text through a bind.
 - **Actions.** `LinkButton` navigates to a path in `account_paths` of
   `links.json`; notification-only paths such as `/partner` are not reachable. There are no other actions and no external URLs.
 

@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const selfField = "insights";
 const scalarTypes = new Set(["string", "integer", "number", "boolean"]);
 const own = (object, key) => Object.hasOwn(object, key);
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -66,6 +67,8 @@ export function parsePointer(pointer) {
 export function resolveBind(openapi, schemaName, pointer) {
   const segments = parsePointer(pointer);
   if (!segments) return { error: "BIND_SYNTAX" };
+  // The layout never binds to itself: that would put its own literal text into a bind-only prop.
+  if (segments[0] === selfField) return { error: "BIND_UNRESOLVED" };
   let current = alternatives(openapi, refTarget(openapi, `#/components/schemas/${schemaName}`)).alts;
   for (const segment of segments) {
     const next = [];

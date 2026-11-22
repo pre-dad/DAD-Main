@@ -8,6 +8,10 @@ import (
 	"unicode/utf8"
 )
 
+// selfField is the dashboard field that carries the layout; binding to it would
+// put the layout's own literal text into a bind-only prop.
+const selfField = "insights"
+
 const maxSchemaDepth = 32
 
 var refPattern = regexp.MustCompile(`^#/components/schemas/([^/]+)$`)
@@ -145,6 +149,9 @@ func (c *catalog) resolveBind(pointer string) resolved {
 	segments := parsePointer(pointer)
 	if segments == nil {
 		return resolved{code: "BIND_SYNTAX"}
+	}
+	if segments[0] == selfField {
+		return resolved{code: "BIND_UNRESOLVED"}
 	}
 	current, err := c.alternatives(c.schemas[c.BindSchema], 0)
 	if err != nil {
