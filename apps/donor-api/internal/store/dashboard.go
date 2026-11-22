@@ -27,6 +27,9 @@ type DonorDashboard struct {
 	RankingsOptedOut bool          `json:"rankings_opted_out"`
 	Network          *NetworkCard  `json:"network"`
 	Impact           ImpactSummary `json:"impact"`
+	// Insights is the approved dashboard layout, null when the feature is off,
+	// no layout is live, or the live one no longer passes validation.
+	Insights *InsightsPanel `json:"insights"`
 }
 
 // ImpactSummary is the donor's own impact totals (PRD I-1, I-3): what they have
@@ -167,10 +170,19 @@ func dashboard(ctx context.Context, q *queries.Queries, donor queries.Donor, now
 	return result, nil
 }
 
-type DashboardReader struct{ DB *pgxpool.Pool }
+type DashboardReader struct {
+	DB *pgxpool.Pool
+	// Insights serves the live insight spec on the dashboard (DONOR_INSIGHTS_ENABLED).
+	Insights bool
+}
 
 func (reader DashboardReader) DonorDashboard(ctx context.Context, token string) (DonorDashboard, error) {
 	return donorRead(ctx, reader.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (DonorDashboard, error) {
-		return dashboard(ctx, q, d, now)
+		result, err := dashboard(ctx, q, d, now)
+		if err != nil || !reader.Insights || result.State != "ready" {
+			return result, err
+		}
+		result.Insights, err = liveInsights(ctx, q)
+		return result, err
 	})
 }

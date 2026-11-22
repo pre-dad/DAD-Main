@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 )
 
 const maxNesting = 64
@@ -45,6 +46,9 @@ func parseValue(decoder *json.Decoder, depth int) (any, error) {
 	}
 	delim, ok := token.(json.Delim)
 	if !ok {
+		if text, isText := token.(string); isText && strings.ContainsRune(text, 0) {
+			return nil, errors.New("string contains NUL")
+		}
 		return token, nil
 	}
 	if delim == '[' {
@@ -66,6 +70,9 @@ func parseValue(decoder *json.Decoder, depth int) (any, error) {
 			return nil, err
 		}
 		key, _ := keyToken.(string)
+		if strings.ContainsRune(key, 0) {
+			return nil, errors.New("key contains NUL")
+		}
 		value, err := parseValue(decoder, depth+1)
 		if err != nil {
 			return nil, err
