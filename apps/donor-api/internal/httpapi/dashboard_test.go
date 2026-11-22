@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -54,5 +55,25 @@ func TestDashboardAuthenticationAndPrivateErrors(t *testing.T) {
 		if stub.token != tc.token {
 			t.Fatalf("store saw session %q, want %q", stub.token, tc.token)
 		}
+	}
+}
+
+func TestDashboardInsightsFieldIsNullOrCarriesTheLayout(t *testing.T) {
+	panel := &store.InsightsPanel{CatalogVersion: 1, Spec: []byte(`[{"type":"Heading","title":"Hi"}]`)}
+	for name, tc := range map[string]struct {
+		insights *store.InsightsPanel
+		want     string
+	}{
+		"none": {nil, `"insights":null`},
+		"live": {panel, `"insights":{"catalog_version":1,"spec_id":null,"spec":[{"type":"Heading","title":"Hi"}]}`},
+	} {
+		body, err := json.Marshal(store.DonorDashboard{Mode: "test", State: "ready", Insights: tc.insights})
+		if err != nil || !strings.Contains(string(body), tc.want) {
+			t.Errorf("%s: %s, %v", name, body, err)
+		}
+	}
+	body, err := json.Marshal(store.DonorDashboard{Mode: "test", State: "preparing", Insights: panel})
+	if err != nil || strings.Contains(string(body), "insights") {
+		t.Errorf("a dashboard still preparing carries no layout: %s, %v", body, err)
 	}
 }

@@ -12325,6 +12325,563 @@
      }
     }
    }
+  },
+  "/donor/staff/insights": {
+   "get": {
+    "operationId": "staffInsights",
+    "summary": "Dashboard layouts and their review state",
+    "tags": [
+     "Content"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/Cursor"
+     },
+     {
+      "name": "state",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "draft",
+        "pending",
+        "live",
+        "retired",
+        "rejected"
+       ]
+      },
+      "description": "List only specs in this state."
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/InsightSpecPage"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "description": "Newest first. Needs the `content.publish` permission. Works whether or not DONOR_INSIGHTS_ENABLED is set."
+   },
+   "post": {
+    "operationId": "createInsight",
+    "summary": "Save a new draft layout",
+    "tags": [
+     "Content"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/InsightSpecInput"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/InsightSpec"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "415": {
+      "$ref": "#/components/responses/UnsupportedMediaType"
+     },
+     "422": {
+      "$ref": "#/components/responses/InvalidInsightSpec"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "description": "The caller becomes the author. Needs the `content.publish` permission."
+   }
+  },
+  "/donor/staff/insights/{spec_id}": {
+   "get": {
+    "operationId": "staffInsight",
+    "summary": "A dashboard layout with its content",
+    "tags": [
+     "Content"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "spec_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "A malformed ID is 404, like an unknown one."
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/InsightSpec"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "description": "Needs the `content.publish` permission."
+   },
+   "post": {
+    "operationId": "updateInsight",
+    "summary": "Replace a draft layout's content",
+    "tags": [
+     "Content"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/InsightSpecInput"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/InsightSpec"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "415": {
+      "$ref": "#/components/responses/UnsupportedMediaType"
+     },
+     "422": {
+      "$ref": "#/components/responses/InvalidInsightSpec"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "description": "Only the draft's author. 403 for anyone else, 409 unless the spec is a draft. Needs the `content.publish` permission.",
+    "parameters": [
+     {
+      "name": "spec_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "A malformed ID is 404, like an unknown one."
+     }
+    ]
+   }
+  },
+  "/donor/staff/insights/{spec_id}/submit": {
+   "post": {
+    "operationId": "submitInsight",
+    "summary": "Submit a draft for approval",
+    "tags": [
+     "Content"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/InsightSpec"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "415": {
+      "$ref": "#/components/responses/UnsupportedMediaType"
+     },
+     "422": {
+      "$ref": "#/components/responses/InvalidInsightSpec"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "description": "Only the draft's author; validated again. 409 unless the spec is a draft. Needs the `content.publish` permission.",
+    "parameters": [
+     {
+      "name": "spec_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "A malformed ID is 404, like an unknown one."
+     }
+    ]
+   }
+  },
+  "/donor/staff/insights/{spec_id}/approve": {
+   "post": {
+    "operationId": "approveInsight",
+    "summary": "Approve a pending layout",
+    "tags": [
+     "Content"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/InsightSpec"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "415": {
+      "$ref": "#/components/responses/UnsupportedMediaType"
+     },
+     "422": {
+      "$ref": "#/components/responses/InvalidInsightSpec"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "description": "Makes it live and retires the live one in the same step. 403 when the caller authored the spec (two-person rule), 409 unless the spec is pending. Needs the `content.publish` permission.",
+    "parameters": [
+     {
+      "name": "spec_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "A malformed ID is 404, like an unknown one."
+     }
+    ]
+   }
+  },
+  "/donor/staff/insights/{spec_id}/retire": {
+   "post": {
+    "operationId": "retireInsight",
+    "summary": "Retire the live layout",
+    "tags": [
+     "Content"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/InsightSpec"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "415": {
+      "$ref": "#/components/responses/UnsupportedMediaType"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "description": "409 unless the spec is live. Any publisher may, so a bad layout is never held up. Needs the `content.publish` permission.",
+    "parameters": [
+     {
+      "name": "spec_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "A malformed ID is 404, like an unknown one."
+     }
+    ]
+   }
+  },
+  "/donor/staff/insights/{spec_id}/reject": {
+   "post": {
+    "operationId": "rejectInsight",
+    "summary": "Reject a pending layout",
+    "tags": [
+     "Content"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/InsightSpecRejection"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/InsightSpec"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "415": {
+      "$ref": "#/components/responses/UnsupportedMediaType"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "description": "403 when the caller authored the spec (two-person rule), 409 unless the spec is pending. Needs the `content.publish` permission.",
+    "parameters": [
+     {
+      "name": "spec_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "A malformed ID is 404, like an unknown one."
+     }
+    ]
+   }
   }
  },
  "components": {
@@ -12567,6 +13124,16 @@
      "application/json": {
       "schema": {
        "$ref": "#/components/schemas/Problem"
+      }
+     }
+    }
+   },
+   "InvalidInsightSpec": {
+    "description": "The spec is not one JSON array that passes the UI catalog rules; `errors` lists every reason, with its path and code. Other invalid fields answer the plain 422.",
+    "content": {
+     "application/json": {
+      "schema": {
+       "$ref": "#/components/schemas/InsightSpecProblem"
       }
      }
     }
@@ -12844,6 +13411,17 @@
        },
        "impact": {
         "$ref": "#/components/schemas/ImpactSummary"
+       },
+       "insights": {
+        "anyOf": [
+         {
+          "$ref": "#/components/schemas/InsightsPanel"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "The approved dashboard layout, or null when the feature is off, no layout is live, or the live one no longer passes validation. Absent from older servers."
        }
       },
       "required": [
@@ -17298,6 +17876,338 @@
       "description": "Native request."
      }
     ]
+   },
+   "UiSpecNode": {
+    "type": "object",
+    "description": "One block of a dashboard layout. `type` names a catalog component; the other fields are that component's props. The schema is open because a node of a type this catalog version does not know is valid and renders nothing. Validate with contracts/mobile/ui-catalog.json.",
+    "properties": {
+     "type": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "type"
+    ],
+    "additionalProperties": true
+   },
+   "UiSpec": {
+    "type": "array",
+    "description": "An ordered dashboard layout. Its binds are JSON Pointers into the DonorDashboard response that carries it.",
+    "items": {
+     "$ref": "#/components/schemas/UiSpecNode"
+    },
+    "minItems": 1
+   },
+   "InsightsPanel": {
+    "type": "object",
+    "description": "The approved dashboard layout. Render it against the DonorDashboard response it arrived in.",
+    "properties": {
+     "catalog_version": {
+      "type": "integer",
+      "description": "The UI catalog version the layout was written for."
+     },
+     "spec_id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "spec": {
+      "$ref": "#/components/schemas/UiSpec"
+     }
+    },
+    "required": [
+     "catalog_version",
+     "spec_id",
+     "spec"
+    ],
+    "additionalProperties": false
+   },
+   "InsightSpecSummary": {
+    "type": "object",
+    "description": "A dashboard layout and where it stands in review, without its content.",
+    "properties": {
+     "id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "draft",
+       "pending",
+       "live",
+       "retired",
+       "rejected"
+      ]
+     },
+     "catalog_version": {
+      "type": "integer",
+      "description": "The UI catalog version the spec was checked against when it was saved."
+     },
+     "author_id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "author_name": {
+      "type": "string"
+     },
+     "approver_id": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "format": "uuid",
+      "description": "Who approved or rejected the spec. Never the author."
+     },
+     "approver_name": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "reject_reason": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "description": "Set only for a rejected spec."
+     },
+     "created_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "updated_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "submitted_at": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "format": "date-time"
+     },
+     "decided_at": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "format": "date-time"
+     },
+     "retired_at": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "format": "date-time"
+     }
+    },
+    "required": [
+     "id",
+     "state",
+     "catalog_version",
+     "author_id",
+     "author_name",
+     "approver_id",
+     "approver_name",
+     "reject_reason",
+     "created_at",
+     "updated_at",
+     "submitted_at",
+     "decided_at",
+     "retired_at"
+    ],
+    "additionalProperties": false
+   },
+   "InsightSpec": {
+    "type": "object",
+    "description": "A dashboard layout with its content.",
+    "properties": {
+     "id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "draft",
+       "pending",
+       "live",
+       "retired",
+       "rejected"
+      ]
+     },
+     "catalog_version": {
+      "type": "integer",
+      "description": "The UI catalog version the spec was checked against when it was saved."
+     },
+     "author_id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "author_name": {
+      "type": "string"
+     },
+     "approver_id": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "format": "uuid",
+      "description": "Who approved or rejected the spec. Never the author."
+     },
+     "approver_name": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "reject_reason": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "description": "Set only for a rejected spec."
+     },
+     "created_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "updated_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "submitted_at": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "format": "date-time"
+     },
+     "decided_at": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "format": "date-time"
+     },
+     "retired_at": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "format": "date-time"
+     },
+     "spec": {
+      "$ref": "#/components/schemas/UiSpec"
+     }
+    },
+    "required": [
+     "id",
+     "state",
+     "catalog_version",
+     "author_id",
+     "author_name",
+     "approver_id",
+     "approver_name",
+     "reject_reason",
+     "created_at",
+     "updated_at",
+     "submitted_at",
+     "decided_at",
+     "retired_at",
+     "spec"
+    ],
+    "additionalProperties": false
+   },
+   "InsightSpecPage": {
+    "type": "object",
+    "properties": {
+     "specs": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/InsightSpecSummary"
+      }
+     },
+     "next_cursor": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "description": "Cursor of the next page, or null on the last page."
+     }
+    },
+    "required": [
+     "specs",
+     "next_cursor"
+    ],
+    "additionalProperties": false
+   },
+   "InsightSpecInput": {
+    "type": "object",
+    "properties": {
+     "spec": {
+      "$ref": "#/components/schemas/UiSpec"
+     }
+    },
+    "required": [
+     "spec"
+    ],
+    "additionalProperties": false
+   },
+   "InsightSpecRejection": {
+    "type": "object",
+    "properties": {
+     "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+     }
+    },
+    "required": [
+     "reason"
+    ],
+    "additionalProperties": false
+   },
+   "InsightSpecError": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "JSON Pointer into the spec; empty for the spec as a whole."
+     },
+     "code": {
+      "type": "string",
+      "description": "A stable reason, as in contracts/mobile/ui-catalog-vectors.json."
+     },
+     "message": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "path",
+     "code",
+     "message"
+    ],
+    "additionalProperties": false
+   },
+   "InsightSpecProblem": {
+    "type": "object",
+    "properties": {
+     "detail": {
+      "type": "string"
+     },
+     "errors": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/InsightSpecError"
+      }
+     }
+    },
+    "required": [
+     "detail",
+     "errors"
+    ],
+    "additionalProperties": false
    }
   }
  }
