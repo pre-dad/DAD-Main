@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"dad/donor-api/internal/credentials"
@@ -18,6 +19,9 @@ var ErrEmailChangeConflict = errors.New("this address cannot replace the account
 
 // proofLifetime is how long an emailed sign-in or confirmation link works.
 const proofLifetime = 15 * time.Minute
+
+// proofMinutes is proofLifetime as it reads in an email.
+var proofMinutes = fmt.Sprintf("%d minutes", int(proofLifetime/time.Minute))
 
 type EmailChangeService struct {
 	DB             *pgxpool.Pool
@@ -64,7 +68,8 @@ func (s EmailChangeService) Request(ctx context.Context, session, email string) 
 		}
 		q := queries.New(tx)
 		if err = reserveEmailIdentity(ctx, q, email, identityDonor, pgtype.UUID{}); errors.Is(err, EmailRoleError{}) {
-			return struct{}{}, ErrEmailChangeConflict
+			// Answer like any other address, so the response does not reveal that a staff or partner holds it.
+			return struct{}{}, nil
 		} else if err != nil {
 			return struct{}{}, err
 		}

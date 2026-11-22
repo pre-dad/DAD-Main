@@ -87,13 +87,27 @@ func (q *Queries) FailPushNotification(ctx context.Context, arg FailPushNotifica
 	return err
 }
 
+const lockPushInstallation = `-- name: LockPushInstallation :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+func (q *Queries) LockPushInstallation(ctx context.Context, token string) error {
+	_, err := q.db.Exec(ctx, lockPushInstallation, token)
+	return err
+}
+
 const nextPushNotification = `-- name: NextPushNotification :one
-SELECT id, donor_id, category, dedup_key, context, available_at, expires_at, attempts, last_error, completed_at, suppressed_reason, sent_to, created_at FROM donor_push_notifications WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+SELECT id, donor_id, category, dedup_key, context, available_at, expires_at, attempts, last_error, completed_at, suppressed_reason, sent_to, created_at FROM donor_push_notifications WHERE completed_at IS NULL AND attempts<$2::int AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
 `
 
-func (q *Queries) NextPushNotification(ctx context.Context, availableAt pgtype.Timestamptz) (DonorPushNotification, error) {
-	row := q.db.QueryRow(ctx, nextPushNotification, availableAt)
+type NextPushNotificationParams struct {
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	MaxAttempts int32              `json:"max_attempts"`
+}
+
+func (q *Queries) NextPushNotification(ctx context.Context, arg NextPushNotificationParams) (DonorPushNotification, error) {
+	row := q.db.QueryRow(ctx, nextPushNotification, arg.AvailableAt, arg.MaxAttempts)
 	var i DonorPushNotification
 	err := row.Scan(
 		&i.ID,

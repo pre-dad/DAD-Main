@@ -144,7 +144,10 @@ func TestHTTPReferralVerificationCheckoutWebhookAndReceipt(t *testing.T) {
 	if _, err = pool.Exec(ctx, "INSERT INTO donors(id,email) VALUES($1,$2)", owner, ownerEmail); err != nil {
 		t.Fatal(err)
 	}
-	proofID, _ := store.NewID()
+	proofID, err := store.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err = pool.Exec(ctx, "INSERT INTO donor_login_links(id,donor_id,token_hash,expires_at) VALUES($1,$2,$3,$4)", proofID, owner, store.HashToken(proof), time.Now().Add(15*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +225,7 @@ func TestHTTPReferralVerificationCheckoutWebhookAndReceipt(t *testing.T) {
 	body := call(referrer, "POST", "/donor/me/sharing", map[string]string{"public_name": "Friendly donor"}, nil, 200)
 	var sharing store.Sharing
 	if err = json.Unmarshal(body, &sharing); err != nil || sharing.Link == nil {
-		t.Fatal(err)
+		t.Fatalf("sharing response without a link: %s (%v)", body, err)
 	}
 	call(referrer, "GET", "/donor/me/referral-code.svg", nil, nil, 200)
 	path := strings.TrimPrefix(*sharing.Link, origin+"/r/")

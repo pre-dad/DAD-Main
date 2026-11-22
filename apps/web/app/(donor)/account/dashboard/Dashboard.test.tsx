@@ -183,6 +183,7 @@ it("handles a logged-out response", async () => {
   stubFetch(vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) }));
   render(<DashboardPage />);
   expect(await screen.findByRole("link", { name: "Sign in to view your dashboard" })).toBeVisible();
+  expect(screen.getByRole("heading", { level: 1, name: "Your dashboard" })).toBeVisible();
   expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
 });
 
@@ -306,4 +307,11 @@ it("counts the Founding days left in New York time, on the last day and after", 
   expect(await screen.findByText(/Founding Donor badge: not yet earned/)).toHaveTextContent(
     "The Founding window has closed.",
   );
+});
+
+it("says '1 day' rather than '1 days' on the streak card and the next step", async () => {
+  respond({ ...data, streak: { ...data.streak, ladder: { ...data.streak.ladder, days_to_next: 1 } } });
+  render(<DashboardPage />);
+  expect(await screen.findAllByText("1 day to your 30-day milestone.")).toHaveLength(2);
+  expect(screen.queryByText(/1 days/)).not.toBeInTheDocument();
 });

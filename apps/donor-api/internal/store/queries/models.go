@@ -9,20 +9,21 @@ import (
 )
 
 type Donor struct {
-	Email        string             `json:"email"`
-	ClaimedAt    pgtype.Timestamptz `json:"claimed_at"`
-	Disabled     bool               `json:"disabled"`
-	PublicName   pgtype.Text        `json:"public_name"`
-	ReferralCode pgtype.Text        `json:"referral_code"`
-	ID           pgtype.UUID        `json:"id"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	AccountRole  string             `json:"account_role"`
-	Zip          pgtype.Text        `json:"zip"`
-	City         pgtype.Text        `json:"city"`
-	Timezone     pgtype.Text        `json:"timezone"`
-	Phone        pgtype.Text        `json:"phone"`
-	CompanyCode  pgtype.Text        `json:"company_code"`
-	FullName     pgtype.Text        `json:"full_name"`
+	Email            string             `json:"email"`
+	ClaimedAt        pgtype.Timestamptz `json:"claimed_at"`
+	Disabled         bool               `json:"disabled"`
+	PublicName       pgtype.Text        `json:"public_name"`
+	ReferralCode     pgtype.Text        `json:"referral_code"`
+	ID               pgtype.UUID        `json:"id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	AccountRole      string             `json:"account_role"`
+	Zip              pgtype.Text        `json:"zip"`
+	City             pgtype.Text        `json:"city"`
+	Timezone         pgtype.Text        `json:"timezone"`
+	Phone            pgtype.Text        `json:"phone"`
+	CompanyCode      pgtype.Text        `json:"company_code"`
+	FullName         pgtype.Text        `json:"full_name"`
+	TimezoneOverride pgtype.Text        `json:"timezone_override"`
 }
 
 type DonorAmountChange struct {
@@ -363,27 +364,6 @@ type DonorPartnerPushNotification struct {
 	LastError        pgtype.Text        `json:"last_error"`
 	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
 	SuppressedReason pgtype.Text        `json:"suppressed_reason"`
-}
-
-type DonorPartnerSignup struct {
-	Organization   string             `json:"organization"`
-	Name           string             `json:"name"`
-	Email          string             `json:"email"`
-	Website        string             `json:"website"`
-	Message        string             `json:"message"`
-	RequestHash    string             `json:"request_hash"`
-	ConsentVersion string             `json:"consent_version"`
-	ID             pgtype.UUID        `json:"id"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
-	PartnerType    string             `json:"partner_type"`
-	WorkforceSize  int32              `json:"workforce_size"`
-	MatchRateBp    int32              `json:"match_rate_bp"`
-	MatchCapMinor  int64              `json:"match_cap_minor"`
-	CompanyCode    pgtype.Text        `json:"company_code"`
-	LogoUrl        string             `json:"logo_url"`
-	Description    string             `json:"description"`
-	LogoPng        []byte             `json:"logo_png"`
 }
 
 type DonorPartnerUser struct {

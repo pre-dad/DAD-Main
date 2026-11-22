@@ -41,6 +41,10 @@ func TestCheckInSerializesWithEventChanges(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer lock.Rollback(ctx)
+			var lockPID int
+			if err := lock.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&lockPID); err != nil {
+				t.Fatal(err)
+			}
 			mustExec(t, lock, "UPDATE donor_events SET cancelled_at=now() WHERE id=$1", eventID)
 			result := make(chan error, 1)
 			go func() {
@@ -61,7 +65,7 @@ func TestCheckInSerializesWithEventChanges(t *testing.T) {
 				}
 				var waiting bool
 				if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
-					WHERE datname=current_database() AND cardinality(pg_blocking_pids(pid))>0)`).Scan(&waiting); err != nil {
+					WHERE datname=current_database() AND wait_event_type='Lock' AND $1=ANY(pg_blocking_pids(pid)))`, lockPID).Scan(&waiting); err != nil {
 					t.Fatal(err)
 				}
 				if waiting {

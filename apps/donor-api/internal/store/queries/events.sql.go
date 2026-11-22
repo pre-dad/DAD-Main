@@ -51,10 +51,44 @@ func (q *Queries) CancelEvent(ctx context.Context, arg CancelEventParams) (int64
 	return result.RowsAffected(), nil
 }
 
+const cancelEventReservationsAndNotify = `-- name: CancelEventReservationsAndNotify :one
+WITH released AS (
+  UPDATE donor_event_reservations SET status='CANCELLED', updated_at=$1::timestamptz
+  WHERE event_id=$2::uuid AND status IN ('RESERVED', 'WAITLISTED')
+  RETURNING donor_id
+), pushes AS (
+  INSERT INTO donor_push_notifications (id,donor_id,category,dedup_key,context,available_at,expires_at)
+  SELECT gen_random_uuid(),donor_id,'EVENT_CANCELLED',
+    'push:event-cancelled:'||$2::text||':'||donor_id::text,
+    json_build_object('event_id',$2::text),$1::timestamptz,$3::timestamptz
+  FROM released ON CONFLICT (dedup_key) DO NOTHING
+), messages AS (
+  INSERT INTO donor_messages (id,donor_id,kind,dedup_key,context,available_at)
+  SELECT gen_random_uuid(),donor_id,'EVENT_CANCELLED',
+    'message:event-cancelled:'||$2::text||':'||donor_id::text,
+    json_build_object('event_id',$2::text),$1::timestamptz
+  FROM released ON CONFLICT (dedup_key) DO NOTHING
+)
+SELECT count(*)::bigint FROM released
+`
+
+type CancelEventReservationsAndNotifyParams struct {
+	AsOf      pgtype.Timestamptz `json:"as_of"`
+	EventID   pgtype.UUID        `json:"event_id"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
+func (q *Queries) CancelEventReservationsAndNotify(ctx context.Context, arg CancelEventReservationsAndNotifyParams) (int64, error) {
+	row := q.db.QueryRow(ctx, cancelEventReservationsAndNotify, arg.AsOf, arg.EventID, arg.ExpiresAt)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const checkInReservation = `-- name: CheckInReservation :exec
 UPDATE donor_event_reservations
 SET checked_in_at=$3, updated_at=$3
-WHERE event_id=$1 AND donor_id=$2 AND status<>'CANCELLED' AND checked_in_at IS NULL
+WHERE event_id=$1 AND donor_id=$2 AND status='RESERVED' AND checked_in_at IS NULL
 `
 
 type CheckInReservationParams struct {
@@ -64,8 +98,8 @@ type CheckInReservationParams struct {
 }
 
 // Stamps the donor's reservation as checked in (E-8). Only sets it when a
-// reservation exists and is not already checked in; cancelled reservations do
-// not qualify.
+// confirmed reservation exists and is not already checked in; cancelled and
+// waitlisted reservations do not qualify.
 func (q *Queries) CheckInReservation(ctx context.Context, arg CheckInReservationParams) error {
 	_, err := q.db.Exec(ctx, checkInReservation, arg.EventID, arg.DonorID, arg.CheckedInAt)
 	return err
@@ -207,7 +241,7 @@ SELECT
   coalesce(sum(EXTRACT(EPOCH FROM (e.ends_at - e.starts_at)) / 60), 0)::bigint AS minutes
 FROM donor_event_reservations r
 JOIN donor_events e ON e.id = r.event_id
-WHERE r.donor_id=$1 AND r.checked_in_at IS NOT NULL
+WHERE r.donor_id=$1 AND r.status='RESERVED' AND r.checked_in_at IS NOT NULL
 `
 
 type DonorVolunteerStatsRow struct {
@@ -306,7 +340,13 @@ FROM donor_event_reservations r
 JOIN donors d ON d.id = r.donor_id
 WHERE r.event_id = $1 AND r.status IN ('RESERVED', 'WAITLISTED')
 ORDER BY r.status = 'WAITLISTED', r.reserved_at, r.id
+LIMIT 51 OFFSET $2::bigint
 `
+
+type EventRosterParams struct {
+	EventID    pgtype.UUID `json:"event_id"`
+	PageOffset int64       `json:"page_offset"`
+}
 
 type EventRosterRow struct {
 	DonorID     pgtype.UUID        `json:"donor_id"`
@@ -318,8 +358,8 @@ type EventRosterRow struct {
 }
 
 // §8 RSVPs: everyone holding a seat, then the waitlist in promotion order.
-func (q *Queries) EventRoster(ctx context.Context, eventID pgtype.UUID) ([]EventRosterRow, error) {
-	rows, err := q.db.Query(ctx, eventRoster, eventID)
+func (q *Queries) EventRoster(ctx context.Context, arg EventRosterParams) ([]EventRosterRow, error) {
+	rows, err := q.db.Query(ctx, eventRoster, arg.EventID, arg.PageOffset)
 	if err != nil {
 		return nil, err
 	}
@@ -613,6 +653,7 @@ SELECT gen_random_uuid(), r.donor_id, 'EVENT_REMINDER',
 FROM donor_events e
 JOIN donor_event_reservations r ON r.event_id = e.id
 WHERE e.publish_state = 'PUBLISHED'
+  AND e.cancelled_at IS NULL
   AND r.status = 'RESERVED'
   AND e.starts_at > $2::timestamptz
   AND e.starts_at <= $3::timestamptz
@@ -637,38 +678,6 @@ func (q *Queries) QueueEventReminders(ctx context.Context, arg QueueEventReminde
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const releaseEventReservations = `-- name: ReleaseEventReservations :many
-UPDATE donor_event_reservations SET status='CANCELLED', updated_at=$2
-WHERE event_id=$1 AND status IN ('RESERVED', 'WAITLISTED')
-RETURNING donor_id
-`
-
-type ReleaseEventReservationsParams struct {
-	EventID   pgtype.UUID        `json:"event_id"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-}
-
-// Cancels every live reservation of a cancelled event, returning who held one.
-func (q *Queries) ReleaseEventReservations(ctx context.Context, arg ReleaseEventReservationsParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, releaseEventReservations, arg.EventID, arg.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []pgtype.UUID{}
-	for rows.Next() {
-		var donor_id pgtype.UUID
-		if err := rows.Scan(&donor_id); err != nil {
-			return nil, err
-		}
-		items = append(items, donor_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const removeEventGuest = `-- name: RemoveEventGuest :exec

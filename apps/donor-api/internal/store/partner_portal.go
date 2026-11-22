@@ -17,6 +17,9 @@ import (
 const (
 	partnerInviteLifetime  = 7 * 24 * time.Hour
 	partnerSessionLifetime = 12 * time.Hour
+	// partnerReinvitesPerHour caps the invitations queued for one user per hour,
+	// the same as sign-in links; a resend is also held to one a minute.
+	partnerReinvitesPerHour = 5
 )
 
 var (
@@ -26,6 +29,8 @@ var (
 	ErrPartnerForbidden = errors.New("partner permission denied")
 	// ErrPartnerInvite is an invalid or expired invite.
 	ErrPartnerInvite = errors.New("invalid or expired partner invite")
+	// ErrPartnerInviteRate means an invitation was resent to the user too recently.
+	ErrPartnerInviteRate = errors.New("partner invite was resent too recently")
 )
 
 // PartnerActor is the authenticated partner user behind a request.
@@ -117,7 +122,8 @@ func partnerAdminTransaction[T any](ctx context.Context, db *pgxpool.Pool, token
 // Admin-only.
 func (s PartnerPortalService) SaveProfile(ctx context.Context, token, organization, description string) error {
 	organization, description = strings.TrimSpace(organization), strings.TrimSpace(description)
-	if organization == "" || utf8.RuneCountInString(organization) > 200 || utf8.RuneCountInString(description) > 4000 {
+	if organization == "" || utf8.RuneCountInString(organization) > 200 || utf8.RuneCountInString(description) > 4000 ||
+		!plainText(organization, false) || !plainText(description, true) {
 		return ErrPartnerApplication
 	}
 	_, err := partnerAdminWrite(ctx, s.DB, token, func(tx pgx.Tx, actor PartnerActor, _ time.Time) (struct{}, error) {
@@ -132,19 +138,28 @@ func (s PartnerPortalService) SaveProfile(ctx context.Context, token, organizati
 	return err
 }
 
-// Invite adds a partner user by email and emails them a sign-in link (P-4).
-// Admin-only. Re-inviting refreshes the role and re-enables a removed user.
-func (s PartnerPortalService) Invite(ctx context.Context, token, email, name, role string) error {
+// validPartnerUser normalizes and validates the details of a partner user to invite.
+func validPartnerUser(email, name, role string) (string, string, error) {
 	if role != "ADMIN" && role != "VIEWER" {
-		return ErrPartnerApplication
+		return "", "", ErrPartnerApplication
 	}
 	email, err := identity.NormalizeEmail(email)
 	if err != nil {
-		return ErrPartnerApplication
+		return "", "", ErrPartnerApplication
 	}
 	name = identity.TrimSpace(name)
 	if utf8.RuneCountInString(name) > 100 || !plainText(name, false) {
-		return ErrPartnerApplication
+		return "", "", ErrPartnerApplication
+	}
+	return email, name, nil
+}
+
+// Invite adds a partner user by email and emails them a sign-in link (P-4).
+// Admin-only. Re-inviting refreshes the role and re-enables a removed user.
+func (s PartnerPortalService) Invite(ctx context.Context, token, email, name, role string) error {
+	email, name, err := validPartnerUser(email, name, role)
+	if err != nil {
+		return err
 	}
 	_, err = partnerAdminWrite(ctx, s.DB, token, func(tx pgx.Tx, actor PartnerActor, now time.Time) (struct{}, error) {
 		if email == actor.Email && role != "ADMIN" {
@@ -170,9 +185,18 @@ func (s PartnerPortalService) Invite(ctx context.Context, token, email, name, ro
 	return err
 }
 
+// Reinvite resends the invitation of a user who has not accepted it: the old
+// link stops working and a fresh one is emailed. Admin-only.
+func (s PartnerPortalService) Reinvite(ctx context.Context, token string, userID pgtype.UUID) error {
+	_, err := partnerAdminWrite(ctx, s.DB, token, func(tx pgx.Tx, actor PartnerActor, now time.Time) (struct{}, error) {
+		return struct{}{}, partnerReinvite(ctx, queries.New(tx), actor.PartnerID, userID, now)
+	})
+	return err
+}
+
 // AcceptInvite exchanges an emailed sign-in link, whether an invitation or a
 // requested sign-in, for a partner session token. Each link works once.
-func (s PartnerPortalService) AcceptInvite(ctx context.Context, invite string, app ...bool) (string, error) {
+func (s PartnerPortalService) AcceptInvite(ctx context.Context, invite string, app bool) (string, error) {
 	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (string, error) {
 		q := queries.New(tx)
 		user, err := q.PartnerUserByInvite(ctx, pgtype.Text{String: HashToken(invite), Valid: true})
@@ -189,7 +213,7 @@ func (s PartnerPortalService) AcceptInvite(ctx context.Context, invite string, a
 		if err = q.AcceptPartnerInvite(ctx, queries.AcceptPartnerInviteParams{ID: user.ID, AcceptedAt: timestamp(now)}); err != nil {
 			return "", err
 		}
-		return s.issueSession(ctx, q, user.ID, now, len(app) == 1 && app[0])
+		return s.issueSession(ctx, q, user.ID, now, app)
 	})
 }
 
@@ -231,6 +255,8 @@ type PartnerUser struct {
 	Email string `json:"email"`
 	Name  string `json:"name"`
 	Role  string `json:"role"`
+	// Accepted is false until the user has signed in from their invitation.
+	Accepted bool `json:"accepted"`
 }
 
 // Users lists the partner org's active users (any partner role may view).
@@ -242,7 +268,7 @@ func (s PartnerPortalService) Users(ctx context.Context, token string) ([]Partne
 		}
 		out := make([]PartnerUser, 0, len(rows))
 		for _, r := range rows {
-			out = append(out, PartnerUser{ID: r.ID.String(), Email: r.Email, Name: r.Name, Role: r.Role})
+			out = append(out, PartnerUser{ID: r.ID.String(), Email: r.Email, Name: r.Name, Role: r.Role, Accepted: r.AcceptedAt.Valid})
 		}
 		return out, nil
 	})

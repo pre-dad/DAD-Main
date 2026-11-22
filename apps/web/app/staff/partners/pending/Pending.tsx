@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { api, type ResponseBody } from "@/lib/api";
+import { api, failureMessage, type ResponseBody } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
 type Pending = ResponseBody<"/donor/staff/partners/pending", "get">;
@@ -25,29 +25,24 @@ export default function Pending() {
     forbidden: "Partner administration requires partnerships access.",
   });
 
-  async function decide(id: string, action: "approve" | "reject", org: string) {
+  async function decide(id: string, action: "approve" | "reject", org: string, reason = "") {
     if (busy) return;
     setBusy(id);
     setError("");
     setStatus("");
     try {
       if (action === "reject") {
-        const reason = window.prompt(`Reason for rejecting ${org}?`) ?? "";
-        if (!reason.trim()) {
-          setBusy("");
-          return;
-        }
         await api(`/donor/staff/partners/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) });
         setStatus(`Rejected ${org}.`);
       } else {
         await api(`/donor/staff/partners/${id}/approve`, { method: "POST", body: "{}" });
         setStatus(`Approved ${org}. The signer has been emailed a sign-in link.`);
       }
-      reload();
-    } catch {
-      setError(`${org} could not be ${action === "approve" ? "approved" : "rejected"} — it may already be decided.`);
+    } catch (cause) {
+      setError(failureMessage(cause, `${org} could not be ${action === "approve" ? "approved" : "rejected"}.`));
     } finally {
       setBusy("");
+      reload();
     }
   }
 
@@ -63,7 +58,6 @@ export default function Pending() {
           </Link>
         </p>
       )}
-      {messages.alert && <p className="callout">{messages.alert}</p>}
       {data &&
         (data.applications.length ? (
           data.applications.map((item) => (
@@ -75,24 +69,23 @@ export default function Pending() {
               <p>
                 {item.contact_name}, {item.title} · {item.work_email} · {item.phone}
               </p>
-              <p>
+              <details>
+                <summary>Approve {item.organization}</summary>
+                <p>This creates the partner and emails the signer a sign-in link.</p>
                 <button
                   type="button"
                   className="button"
                   disabled={busy === item.id}
                   onClick={() => decide(item.id, "approve", item.organization)}
                 >
-                  Approve
-                </button>{" "}
-                <button
-                  type="button"
-                  className="link"
-                  disabled={busy === item.id}
-                  onClick={() => decide(item.id, "reject", item.organization)}
-                >
-                  Reject
+                  Confirm approval of {item.organization}
                 </button>
-              </p>
+              </details>
+              <RejectForm
+                organization={item.organization}
+                busy={busy === item.id}
+                onReject={(reason) => decide(item.id, "reject", item.organization, reason)}
+              />
             </article>
           ))
         ) : (
@@ -116,7 +109,49 @@ export default function Pending() {
           )}
         </p>
       )}
-      <Announcer status={status} alert={error} />
+      <Announcer status={status || messages.status} alert={error || messages.alert} />
+      {(resource.state === "offline" || resource.state === "error") && (
+        <button type="button" className="secondary" onClick={reload}>
+          Retry loading
+        </button>
+      )}
     </Page>
+  );
+}
+
+function RejectForm({
+  organization,
+  busy,
+  onReject,
+}: {
+  organization: string;
+  busy: boolean;
+  onReject: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  return (
+    <details>
+      <summary>Reject {organization}</summary>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (reason.trim()) onReject(reason.trim());
+        }}
+      >
+        <label>
+          Reason for rejecting {organization}
+          <textarea
+            required
+            maxLength={1000}
+            value={reason}
+            disabled={busy}
+            onChange={(e) => setReason(e.target.value)}
+          />
+        </label>
+        <button type="submit" className="secondary danger" disabled={busy || !reason.trim()}>
+          Confirm rejection of {organization}
+        </button>
+      </form>
+    </details>
   );
 }

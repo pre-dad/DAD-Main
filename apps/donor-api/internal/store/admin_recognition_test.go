@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"dad/donor-api/internal/store/queries"
@@ -45,5 +46,24 @@ func TestStaffRecognitionRepairUsesFactsAndAuditsAtomically(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_gifts WHERE donor_id=$1", fixture.donorID).Scan(&gifts); err != nil ||
 		gifts != 1 {
 		t.Fatalf("repair changed payment history: %d %v", gifts, err)
+	}
+}
+
+func TestRepairReasonIsTrimmedBeforeItsLengthIsChecked(t *testing.T) {
+	for name, c := range map[string]struct {
+		reason string
+		want   string
+		ok     bool
+	}{
+		"padded":          {" \u00a0 Repair after DAD-123 \u3000", "Repair after DAD-123", true},
+		"only spaces":     {"\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0", "", false},
+		"short once trim": {"short\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0", "short", false},
+		"too long":        {strings.Repeat("x", 1001), strings.Repeat("x", 1001), false},
+		"control":         {"a reason with a \x07 bell", "a reason with a \x07 bell", false},
+	} {
+		got, ok := repairReason(c.reason)
+		if got != c.want || ok != c.ok {
+			t.Errorf("%s: repairReason = %q, %v; want %q, %v", name, got, ok, c.want, c.ok)
+		}
 	}
 }

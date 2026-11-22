@@ -29,8 +29,8 @@ type Login struct {
 }
 
 // ConnectionLimit is the login's CONNECTION LIMIT: every replica's pool.
-func (l Login) ConnectionLimit() int32 {
-	return l.Pool * max(l.Replicas, 1)
+func (l Login) ConnectionLimit() int64 {
+	return int64(l.Pool) * int64(max(l.Replicas, 1))
 }
 
 // minPassword keeps logins out of reach of guessing; generated passwords

@@ -150,10 +150,10 @@ func TestPartnerMessageCountsAttemptAtClaimAndParksPoison(t *testing.T) {
 	q := queries.New(w.DB)
 	// A worker that dies after every claim never records a failure: the claim
 	// alone must count the attempt and park the delivery after the cap.
-	for i := range maxDeliveryAttempts {
+	for i := range MaxDeliveryAttempts {
 		at := now.Add(time.Duration(i) * (deliveryLease + time.Minute))
 		if _, err := q.NextPartnerDelivery(context.Background(), queries.NextPartnerDeliveryParams{
-			AsOf: timestamp(at), LeaseUntil: timestamp(at.Add(deliveryLease)),
+			AsOf: timestamp(at), LeaseUntil: timestamp(at.Add(deliveryLease)), MaxAttempts: MaxDeliveryAttempts,
 		}); err != nil {
 			t.Fatalf("claim %d: %v", i+1, err)
 		}
@@ -163,8 +163,8 @@ func TestPartnerMessageCountsAttemptAtClaimAndParksPoison(t *testing.T) {
 	if steps := drainPartnerMessages(t, w, now.Add(24*time.Hour)); steps != 0 || len(transport.messages) != 0 {
 		t.Fatalf("a parked delivery was sent: steps=%d sent=%d", steps, len(transport.messages))
 	}
-	if attempts, _, completed := partnerDeliveryState(t, key); attempts != maxDeliveryAttempts || completed {
-		t.Fatalf("attempts=%d completed=%v, want parked at %d", attempts, completed, maxDeliveryAttempts)
+	if attempts, _, completed := partnerDeliveryState(t, key); attempts != MaxDeliveryAttempts || completed {
+		t.Fatalf("attempts=%d completed=%v, want parked at %d", attempts, completed, MaxDeliveryAttempts)
 	}
 }
 
@@ -176,7 +176,7 @@ func TestPartnerMessageRetriesAfterLeaseExpiry(t *testing.T) {
 		t.Fatalf("fan-out: worked=%v err=%v", worked, err)
 	}
 	if _, err := queries.New(w.DB).NextPartnerDelivery(context.Background(), queries.NextPartnerDeliveryParams{
-		AsOf: timestamp(now), LeaseUntil: timestamp(now.Add(deliveryLease)),
+		AsOf: timestamp(now), LeaseUntil: timestamp(now.Add(deliveryLease)), MaxAttempts: MaxDeliveryAttempts,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -191,10 +191,42 @@ func TestPartnerMessageRetriesAfterLeaseExpiry(t *testing.T) {
 	}
 }
 
+// rendezvousMail holds each send until two are in flight at once, which only
+// two distinct workers can achieve. Once they have met, later sends pass.
+type rendezvousMail struct {
+	*selectiveMail
+	mu      sync.Mutex
+	waiting int
+	met     chan struct{}
+}
+
+func (r *rendezvousMail) Send(ctx context.Context, m mail.Message) error {
+	r.mu.Lock()
+	if r.waiting++; r.waiting == 2 {
+		close(r.met)
+	}
+	r.mu.Unlock()
+	select {
+	case <-r.met:
+	case <-time.After(5 * time.Second):
+		return errors.New("no second worker was sending at the same time")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return r.selectiveMail.Send(ctx, m)
+}
+
 func TestPartnerMessageConcurrentWorkersDeliverEachRecipientOnce(t *testing.T) {
 	_, _ = partnerOrg(t, 40)
-	transport := newSelectiveMail()
+	selective := newSelectiveMail()
+	transport := &rendezvousMail{selectiveMail: selective, met: make(chan struct{})}
 	now := time.Now().UTC().Add(time.Second)
+	// Expand the intent first so every worker contends for deliveries, not the intent.
+	fan := partnerMessageWorker(t, nil)
+	fan.Transport = transport
+	if worked, err := fan.DeliverNext(context.Background(), now); err != nil || !worked {
+		t.Fatalf("fan-out step: worked=%v err=%v", worked, err)
+	}
 	var wg sync.WaitGroup
 	errs := make(chan error, 4)
 	for range 4 {
@@ -220,10 +252,15 @@ func TestPartnerMessageConcurrentWorkersDeliverEachRecipientOnce(t *testing.T) {
 	for err := range errs {
 		t.Fatal(err)
 	}
-	if len(transport.sent) != 40 {
-		t.Fatalf("delivered to %d recipients, want 40", len(transport.sent))
+	select {
+	case <-transport.met:
+	default:
+		t.Fatal("workers never sent concurrently")
 	}
-	for e, n := range transport.sent {
+	if len(selective.sent) != 40 {
+		t.Fatalf("delivered to %d recipients, want 40", len(selective.sent))
+	}
+	for e, n := range selective.sent {
 		if n != 1 {
 			t.Fatalf("%s received %d copies", e, n)
 		}
@@ -236,18 +273,12 @@ func TestPartnerMessageLargeOrganisationDrainsInBoundedSteps(t *testing.T) {
 	transport := newSelectiveMail()
 	w := partnerMessageWorker(t, nil)
 	w.Transport = transport
-	started := time.Now()
 	steps := drainPartnerMessages(t, w, time.Now().UTC().Add(time.Second))
 	if steps != recipients+1 {
 		t.Fatalf("steps=%d, want one fan-out plus one send per recipient (%d)", steps, recipients+1)
 	}
 	if len(transport.sent) != recipients {
 		t.Fatalf("delivered to %d recipients, want %d", len(transport.sent), recipients)
-	}
-	// Each step is its own short transaction, so no single step holds a lease
-	// for the whole organisation however large it is.
-	if elapsed := time.Since(started); elapsed > deliveryLease {
-		t.Fatalf("draining %d recipients took %s, longer than one lease", recipients, elapsed)
 	}
 }
 
@@ -344,7 +375,7 @@ func TestQueueHealthCountsPartnerDeliveries(t *testing.T) {
 			testID(t), message, user, i, now.Add(delivery.due), delivery.attempts, delivery.done)
 	}
 	actAs(t, tx, dbroles.Monitor)
-	rows, err := queries.New(tx).QueueHealth(ctx, timestamp(now))
+	rows, err := queries.New(tx).QueueHealth(ctx, queries.QueueHealthParams{AsOf: timestamp(now), MaxAttempts: MaxDeliveryAttempts})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,20 +5,45 @@ import { donorApiBase } from "@/lib/donorApi";
 
 type Context = { params: Promise<{ provider: string }> };
 const equal = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+const maxBody = 16384;
+
+/** The request body as text, or null once it passes `maxBody` bytes, however it was framed. */
+async function boundedText(request: Request): Promise<string | null> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBody) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString();
+}
+
 async function handle(request: NextRequest, context: Context) {
   const { provider } = await context.params;
-  if (Number(request.headers.get("content-length") ?? 0) > 16384) return new Response(null, { status: 413 });
+  if (Number(request.headers.get("content-length") ?? 0) > maxBody) return new Response(null, { status: 413 });
   if (provider !== "apple" && provider !== "google") return new Response(null, { status: 404 });
   const origin = process.env.DONOR_PUBLIC_ORIGIN;
-  if (!origin) return new Response("Sign-in is not configured.", { status: 503 });
+  if (!origin || (provider === "apple" && !origin.startsWith("https:")))
+    return new Response("Sign-in is not configured.", { status: 503 });
   const key = provider.toUpperCase();
   const client = process.env[`DONOR_OAUTH_${key}_CLIENT_ID`];
   const secret = process.env[`DONOR_OAUTH_${key}_CLIENT_SECRET`];
-  if (!client || !secret) return new Response("This sign-in method is not configured.", { status: 503 });
+  if (!client || !secret)
+    return NextResponse.redirect(new URL("/account/sign-in?social_error=unavailable", origin), 303);
   const callback = `${origin}/account/oauth/${provider}`;
   const jar = await cookies();
   const cookie = `dad_oauth_${provider}`;
-  const params = request.method === "POST" ? new URLSearchParams(await request.text()) : request.nextUrl.searchParams;
+  const posted = request.method === "POST" ? await boundedText(request) : "";
+  if (posted === null) return new Response(null, { status: 413 });
+  const params = request.method === "POST" ? new URLSearchParams(posted) : request.nextUrl.searchParams;
   if (!params.has("code") && !params.has("error") && request.method === "GET") {
     const state = randomBytes(32).toString("base64url");
     const nonce = randomBytes(32).toString("base64url");

@@ -1,3 +1,6 @@
+-- name: LockPushInstallation :exec
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(token)::text, 0));
+
 -- name: ReleasePushToken :exec
 UPDATE donor_sessions SET push_token=NULL,push_environment=NULL WHERE push_token=$1 AND id<>$2;
 
@@ -71,7 +74,7 @@ AND (c.category<>'REFERRAL_CONVERTED' OR NOT EXISTS(
 ON CONFLICT(dedup_key) DO NOTHING;
 
 -- name: NextPushNotification :one
-SELECT * FROM donor_push_notifications WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+SELECT * FROM donor_push_notifications WHERE completed_at IS NULL AND attempts<sqlc.arg(max_attempts)::int AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
 
 -- name: PushTargets :many

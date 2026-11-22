@@ -162,3 +162,30 @@ func TestZeroKeyringIsUnconfigured(t *testing.T) {
 		t.Fatal("zero keyring decrypted", err)
 	}
 }
+
+func TestQuoteASCIIMatchesJSONEnsureASCII(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"plain", "donor@example.org", `"donor@example.org"`},
+		{"empty", "", `""`},
+		{"quote and backslash", "a\"b\\c", `"a\"b\\c"`},
+		{"named escapes", "\b\f\n\r\t", `"\b\f\n\r\t"`},
+		{"other control", "\x00\x01\x1f", `"\u0000\u0001\u001f"`},
+		{"slash and tilde stay", "/~", `"/~"`},
+		{"DEL", "\x7f", `"\u007f"`},
+		{"latin", "caf\u00e9", `"caf\u00e9"`},
+		{"BMP", "\u20ac", `"\u20ac"`},
+		{"astral pair", "\U0001F600", `"\ud83d\ude00"`},
+		{"lowest astral", "\U00010000", `"\ud800\udc00"`},
+		{"highest astral", "\U0010FFFF", `"\udbff\udfff"`},
+	} {
+		got, err := QuoteASCII(tc.in)
+		if err != nil || got != tc.want {
+			t.Errorf("%s: QuoteASCII(%q) = %q, %v; want %q", tc.name, tc.in, got, err, tc.want)
+		}
+	}
+	for _, in := range []string{"\xff", "a\xc3", "\xed\xa0\x80"} {
+		if got, err := QuoteASCII(in); !errors.Is(err, ErrInvalid) || got != "" {
+			t.Errorf("QuoteASCII(%q) = %q, %v; want ErrInvalid", in, got, err)
+		}
+	}
+}

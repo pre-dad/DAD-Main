@@ -65,3 +65,22 @@ func TestEmailChangeHTTPOriginValidationAndSafeErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestEmailChangeWithoutEmailAnswersUnconfiguredBeforeTheService(t *testing.T) {
+	for _, tc := range []struct{ path, body string }{
+		{"/donor/me/email-change", `{"email":"new@example.org"}`},
+		{"/donor/email-change/confirm", `{"token":"` + strings.Repeat("a", 43) + `"}`},
+	} {
+		stub := &emailChangeStub{}
+		server := NewServer("", Services{EmailChange: stub, Origin: "https://dad.example.org"})
+		req := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
+		req.Header.Set("Origin", "https://dad.example.org")
+		req.AddCookie(&http.Cookie{Name: "dad_donor_session", Value: "session"})
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, req)
+		if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), `"code":"EMAIL_UNCONFIGURED"`) ||
+			stub.calls != 0 {
+			t.Errorf("%s: got %d %s with %d service calls", tc.path, response.Code, response.Body, stub.calls)
+		}
+	}
+}

@@ -72,7 +72,7 @@ func signalsFor(ctx context.Context, q *queries.Queries, donor queries.Donor, no
 	if s.RaisedAmount, err = q.DonorRaisedAmount(ctx, donor.ID); err != nil {
 		return s, err
 	}
-	rank, err := ForDonor(ctx, q, donor.ID)
+	rank, err := RankingForDonor(ctx, q, donor.ID)
 	if err != nil {
 		return s, err
 	}

@@ -2,11 +2,14 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
+import { KeysetPager } from "@/components/donor/KeysetPager";
 import { Page } from "@/components/donor/Page";
-import { api, type Schema } from "@/lib/api";
+import type { Schema } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
+import { useKeysetResource } from "@/lib/useKeysetResource";
+import { usePageTurnFocus } from "@/lib/usePageTurnFocus";
 
 import { RecomputeRecognition } from "./RecomputeRecognition";
 
@@ -17,31 +20,48 @@ const statusWords: Record<string, string> = {
   canceled: "Cancelled",
   incomplete_expired: "Cancelled",
   incomplete: "Setting up",
+  trialing: "Trial",
+  paused: "Paused",
+};
+
+const actionKinds: Record<string, string> = { REFUND: "Refund", CANCEL: "Cancellation" };
+
+/** Title-cases an enum value the page has no wording for, so raw codes never reach staff. */
+const humanize = (value: string) => {
+  const words = value.toLowerCase().replaceAll("_", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
 };
 
 export default function DonorDetail({ donor }: { donor: string }) {
+  return <DonorRecord key={donor} donor={donor} />;
+}
+
+function DonorRecord({ donor }: { donor: string }) {
   const id = encodeURIComponent(donor);
   const [gifts, setGifts] = useState(0);
-  const [referrals, setReferrals] = useState(0);
+  const [referrals, setReferrals] = useState("");
   const [repairStatus, setRepairStatus] = useState("");
-  const path = `/donor/staff/donors/${id}?gifts_offset=${gifts}&referrals_offset=${referrals}`;
-  const { resource, data, reload } = useApiResource(path, {
-    load: async (signal) => {
-      const [detail, actor] = await Promise.all([
-        api<Schema<"DonorDetail">>(path, { signal }),
-        api<Schema<"StaffView">>("/donor/staff/me", { signal }),
-      ]);
-      return { detail, actor };
-    },
-  });
+  const path = `/donor/staff/donors/${id}?gifts_offset=${gifts}${referrals && `&referrals_cursor=${encodeURIComponent(referrals)}`}`;
+  const { resource, data, reload } = useApiResource<Schema<"DonorDetail">>(path, { keepPrevious: true });
+  const { resource: actorResource, data: actor } = useApiResource<Schema<"StaffView">>("/donor/staff/me");
+  const giftsFocus = usePageTurnFocus(data);
+  const referralsFocus = usePageTurnFocus(data);
   const messages = resourceMessages(resource, {
     loading: "Loading donor record…",
     failure: "The donor record could not be loaded right now. Please retry in a moment.",
     forbidden: "Your staff role does not permit viewing donor records.",
     notFound: "No donor record matches this link. Search again from the staff back office.",
   });
-  const detail = data?.detail;
-  const can = (permission: string) => data?.actor.permissions.includes(permission) ?? false;
+  const detail = actorResource.state === "loading" ? null : data;
+  const turnGifts = (offset: number) => {
+    giftsFocus.turned();
+    setGifts(offset);
+  };
+  const turnReferrals = (cursor: string) => {
+    referralsFocus.turned();
+    setReferrals(cursor);
+  };
+  const can = (permission: string) => actor?.permissions.includes(permission) ?? false;
   return (
     <Page
       wide
@@ -94,12 +114,14 @@ export default function DonorDetail({ donor }: { donor: string }) {
               "No attributed referrer"
             )}
           </p>
-          <h2>Gifts</h2>
+          <h2 ref={giftsFocus.heading} tabIndex={-1}>
+            Gifts
+          </h2>
           <p>
             {detail.subscription ? (
               <>
                 Monthly gift: {formatMoney(detail.subscription.amount_minor)}/month{" · "}
-                {statusWords[detail.subscription.status] ?? detail.subscription.status} ·{" "}
+                {statusWords[detail.subscription.status] ?? humanize(detail.subscription.status)} ·{" "}
                 {detail.subscription.stops_at
                   ? `Ends ${formatDate(detail.subscription.stops_at)}`
                   : `Next renewal ${formatDate(detail.subscription.next_renewal)}`}
@@ -140,16 +162,18 @@ export default function DonorDetail({ donor }: { donor: string }) {
             <p>No gifts recorded.</p>
           )}
           {gifts > 0 && (
-            <button type="button" className="secondary" onClick={() => setGifts(0)}>
+            <button type="button" className="secondary" onClick={() => turnGifts(0)}>
               Newest gifts
             </button>
           )}
           {detail.next_gifts_offset !== null && (
-            <button type="button" className="secondary" onClick={() => setGifts(detail.next_gifts_offset ?? 0)}>
+            <button type="button" className="secondary" onClick={() => turnGifts(detail.next_gifts_offset ?? 0)}>
               Older gifts
             </button>
           )}
-          <h2>People referred</h2>
+          <h2 ref={referralsFocus.heading} tabIndex={-1}>
+            People referred
+          </h2>
           {detail.referred.length ? (
             <ul>
               {detail.referred.map((person) => (
@@ -162,13 +186,17 @@ export default function DonorDetail({ donor }: { donor: string }) {
           ) : (
             <p>No converting referrals recorded.</p>
           )}
-          {referrals > 0 && (
-            <button type="button" className="secondary" onClick={() => setReferrals(0)}>
+          {referrals !== "" && (
+            <button type="button" className="secondary" onClick={() => turnReferrals("")}>
               First referrals
             </button>
           )}
-          {detail.next_referrals_offset !== null && (
-            <button type="button" className="secondary" onClick={() => setReferrals(detail.next_referrals_offset ?? 0)}>
+          {detail.next_referrals_cursor !== null && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => turnReferrals(detail.next_referrals_cursor ?? "")}
+            >
               More referrals
             </button>
           )}
@@ -186,11 +214,8 @@ export default function DonorDetail({ donor }: { donor: string }) {
 }
 
 function ActionHistory({ donor }: { donor: string }) {
-  // Keyset paging: each entry is the cursor that opened a page, the first being none.
-  const [cursors, setCursors] = useState<string[]>([]);
-  const cursor = cursors.at(-1);
-  const { resource, data, reload } = useApiResource<Schema<"ActionPage">>(
-    `/donor/staff/donors/${donor}/actions${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+  const { resource, data, reload, heading, newer, older } = useKeysetResource<Schema<"ActionPage">>(
+    (cursor) => `/donor/staff/donors/${donor}/actions${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
   );
   const messages = resourceMessages(resource, {
     loading: "Loading staff actions…",
@@ -198,14 +223,16 @@ function ActionHistory({ donor }: { donor: string }) {
   });
   return (
     <section aria-labelledby="staff-actions">
-      <h2 id="staff-actions">Staff financial actions</h2>
+      <h2 id="staff-actions" ref={heading} tabIndex={-1}>
+        Staff financial actions
+      </h2>
       {data && (
         <>
           {data.actions.length ? (
             <ul>
               {data.actions.map((item) => (
                 <li key={item.id}>
-                  {item.kind} · {item.status}
+                  {actionKinds[item.kind] ?? humanize(item.kind)} · {humanize(item.status)}
                   {item.amount_minor !== null && ` · ${formatMoney(item.amount_minor)}`}
                   {item.period_end && ` · Stops ${formatDate(item.period_end)}`} ·{" "}
                   {item.completed_at ? `Completed ${formatDateTime(item.completed_at)}` : "Not completed"}
@@ -219,20 +246,7 @@ function ActionHistory({ donor }: { donor: string }) {
           ) : (
             <p>No refunds or cancellations recorded.</p>
           )}
-          {cursors.length > 0 && (
-            <button type="button" className="secondary" onClick={() => setCursors(cursors.slice(0, -1))}>
-              Newer actions
-            </button>
-          )}
-          {data.next_cursor !== null && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setCursors([...cursors, data.next_cursor ?? ""])}
-            >
-              Older actions
-            </button>
-          )}
+          <KeysetPager newer={newer} older={older} labels={{ newer: "Newer actions", older: "Older actions" }} />
         </>
       )}
       <Announcer status={messages.status} alert={messages.alert} />

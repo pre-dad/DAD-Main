@@ -164,18 +164,6 @@ func (q *Queries) InitiativeSpend(ctx context.Context, initiativeID pgtype.UUID)
 	return items, nil
 }
 
-const initiativeSpendTotal = `-- name: InitiativeSpendTotal :one
-SELECT COALESCE(SUM(amount_minor), 0)::bigint AS total_minor
-FROM donor_initiative_spend WHERE initiative_id=$1
-`
-
-func (q *Queries) InitiativeSpendTotal(ctx context.Context, initiativeID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, initiativeSpendTotal, initiativeID)
-	var total_minor int64
-	err := row.Scan(&total_minor)
-	return total_minor, err
-}
-
 const insertInitiative = `-- name: InsertInitiative :exec
 INSERT INTO donor_initiatives
   (id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id,
@@ -407,6 +395,7 @@ type PublishedInitiativesRow struct {
 	Partner   string      `json:"partner"`
 }
 
+// Hard cap: published initiatives beyond 500 are silently dropped from the list.
 func (q *Queries) PublishedInitiatives(ctx context.Context) ([]PublishedInitiativesRow, error) {
 	rows, err := q.db.Query(ctx, publishedInitiatives)
 	if err != nil {

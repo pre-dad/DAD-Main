@@ -4,7 +4,7 @@ SQLC_GO := github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
 # SQLC_MODE=docker or go forces one way to run sqlc; by default Docker is used when its daemon answers.
 SQLC_MODE ?=
 GOLINES := go tool -modfile=tools/go.mod golines -m 140
-GENERATED := apps/donor-api/internal/store/queries apps/web/lib/openapi.d.ts apps/web/design/tokens.ts
+GENERATED := apps/donor-api/internal/store/queries apps/web/lib/openapi.d.ts apps/web/design/tokens.ts deploy/nginx/conf/native-routes.conf
 
 # Load testing against a disposable, seeded deployment; see docs/operations.md.
 SEED_DONORS ?= 50000
@@ -62,6 +62,7 @@ generate:
 	fi
 	cd apps/web && npm run --silent generate:api
 	node scripts/mobile-foundation.mjs generate
+	node scripts/native-ingress.mjs
 
 generate-mobile:
 	node scripts/mobile-foundation.mjs generate
@@ -111,7 +112,7 @@ test-ledger:
 lint: lint-go lint-web lint-ledger lint-scripts
 
 lint-ledger:
-	cd apps/atm-ledger && npm run lint && npm audit --audit-level=high
+	cd apps/atm-ledger && npm run lint && node ../../scripts/npm-audit.mjs
 
 # staticcheck is pinned in apps/donor-api/tools/go.mod with a newer x/tools than its
 # release requires, which is what reads the export data of the Go release CI uses.
@@ -119,14 +120,19 @@ lint-go:
 	cd apps/donor-api && bash ../../scripts/check-go-dependencies.sh && go tool -modfile=tools/go.mod staticcheck ./... && go run $(GOVULNCHECK) ./... && go run $(GOVULNCHECK) -C tools tool
 
 # The Node scripts share the web app's Biome install, so they are checked here.
+# npm-audit.mjs fails on high advisories except dated, development-only exceptions
+# in scripts/npm-audit-exceptions.json.
 lint-web:
-	cd apps/web && npm audit --audit-level=high
+	node --test scripts/npm-audit.test.mjs
+	cd apps/web && node ../../scripts/npm-audit.mjs
 	cd scripts && ../apps/web/node_modules/.bin/biome check --error-on-warnings .
 
 lint-scripts:
 	@if command -v shellcheck >/dev/null || [ -n "$$CI" ]; then shellcheck scripts/*.sh deploy/nginx/*.sh deploy/nginx/*.envsh; else echo "shellcheck not installed; skipping script lint" >&2; fi
 
 check-ingress:
+	node scripts/native-ingress.mjs --check
+	node --test scripts/native-ingress.test.mjs scripts/ingress-template.test.mjs
 	./scripts/check-ingress.sh config
 
 smoke-ingress:
@@ -134,7 +140,7 @@ smoke-ingress:
 
 # The web image is built for the ingress check's hosts so it can be served through nginx.
 check-images:
-	docker build -f apps/donor-api/Dockerfile -t dad/api:check .
+	docker build -f apps/donor-api/Dockerfile -t dad/api:check --build-arg BUILD_REVISION="$(shell git rev-parse HEAD)" .
 	docker run --rm --entrypoint sh dad/api:check -c \
 		'for binary in api worker migrate provision monitor reconcile staff rekey; do command -v "$$binary" >/dev/null || exit 1; done'
 	docker build -f apps/web/Dockerfile -t dad/web:check \

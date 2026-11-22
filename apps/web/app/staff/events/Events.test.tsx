@@ -3,9 +3,11 @@ import { afterEach, expect, it, vi } from "vitest";
 import EventEditor, { eventInput, instant, localInput } from "./[eventId]/EventEditor";
 import Events from "./Events";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+const { push } = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 
 afterEach(() => {
+  push.mockClear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -37,10 +39,11 @@ function stubApi() {
   const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (init?.method === "POST") return Promise.resolve(Response.json({ cancelled: true }));
-    if (url.includes("?offset=")) return Promise.resolve(Response.json({ events: [event], next_offset: null }));
+    if (url.includes("/events?offset=")) return Promise.resolve(Response.json({ events: [event], next_offset: null }));
     return Promise.resolve(
       Response.json({
         ...event,
+        next_offset: null,
         attendees: [
           {
             donor_id: "d-1",
@@ -101,9 +104,51 @@ it("validates the editor form", () => {
   expect(eventInput(form)).toMatchObject({ time_zone: "America/Chicago" });
 });
 
+it.each([
+  ["missing start", { starts_at: "" }, "Enter when the event starts and ends."],
+  ["missing end", { ends_at: "" }, "Enter when the event starts and ends."],
+  ["unparseable start", { starts_at: "soon" }, "Enter when the event starts and ends."],
+  [
+    "non-numeric capacity",
+    { capacity: "ten" },
+    "Enter the capacity as a whole number up to 1,000,000, or 0 for no limit.",
+  ],
+  ["negative capacity", { capacity: "-1" }, "Enter the capacity as a whole number up to 1,000,000, or 0 for no limit."],
+  ["unparseable booking open", { booking_opens_at: "later" }, "Enter when booking opens, or leave it empty."],
+])("rejects %s", (_name, override, message) => {
+  const form = new FormData();
+  for (const [name, value] of Object.entries({
+    slug: "s",
+    title: "t",
+    type: "COMMUNITY",
+    starts_at: "2026-11-07T10:00",
+    ends_at: "2026-11-07T12:00",
+    capacity: "5",
+    ...override,
+  }))
+    form.set(name, value);
+  expect(eventInput(form)).toBe(message);
+});
+
+it("keeps the qualifying perk only for invite-only events", () => {
+  const form = new FormData();
+  for (const [name, value] of Object.entries({
+    slug: "s",
+    title: "t",
+    type: "INVITE_ONLY",
+    perk: "FOUNDING_EVENTS",
+    starts_at: "2026-11-07T10:00",
+    ends_at: "2026-11-07T12:00",
+    capacity: "5",
+  }))
+    form.set(name, value);
+  expect(eventInput(form)).toMatchObject({ qualifying_perk: "FOUNDING_EVENTS" });
+  form.set("type", "COMMUNITY");
+  expect(eventInput(form)).toMatchObject({ qualifying_perk: "" });
+});
+
 it("checks an attendee in by hand and cancels the event", async () => {
   const fetch = stubApi();
-  vi.spyOn(window, "confirm").mockReturnValue(true);
   render(<EventEditor event="e-1" />);
   fireEvent.click(await screen.findByRole("button", { name: "Check in ann@example.org" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("ann@example.org checked in."));
@@ -113,11 +158,193 @@ it("checks an attendee in by hand and cancels the event", async () => {
   ).toBe(true);
 
   fireEvent.click(await screen.findByRole("button", { name: "Cancel event" }));
-  expect(window.confirm).toHaveBeenCalledWith("Cancel Beach cleanup? 2 people will be notified.");
+  const confirm = screen.getByRole("button", { name: "Confirm cancellation" });
+  expect(confirm).toHaveAccessibleDescription("Cancel Beach cleanup? 2 people will be notified.");
+  fireEvent.click(confirm);
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Event cancelled."));
+});
+
+it("shows the check-in QR code for a published event", async () => {
+  stubApi();
+  render(<EventEditor event="e-1" />);
   fireEvent.click(await screen.findByRole("button", { name: "Show check-in QR code" }));
   expect(screen.getByRole("img", { name: "Check-in QR code for Beach cleanup" })).toHaveAttribute(
     "src",
     "/api/donor/staff/events/e-1/check-in.svg",
   );
+});
+
+it("locks a cancelled event and offers no publish, cancel or QR actions", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() =>
+      Promise.resolve(
+        Response.json({ ...event, cancelled_at: "2026-11-01T00:00:00Z", next_offset: null, attendees: [] }),
+      ),
+    ),
+  );
+  const { container } = render(<EventEditor event="e-1" />);
+  expect(await screen.findByText(/cancelled/i)).toBeInTheDocument();
+  expect(container.querySelector("fieldset")).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Cancel event" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Publish event" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Show check-in QR code" })).not.toBeInTheDocument();
+});
+
+it("creates a draft and opens it", async () => {
+  const fetch = vi.fn(() => Promise.resolve(Response.json({ id: "new/1" })));
+  vi.stubGlobal("fetch", fetch);
+  const { container } = render(<EventEditor event={null} />);
+  const set = (name: string, value: string) =>
+    fireEvent.change(container.querySelector(`[name="${name}"]`) as HTMLInputElement, { target: { value } });
+  set("slug", "new-event");
+  set("title", "New event");
+  set("starts_at", "2026-11-07T10:00");
+  set("ends_at", "2026-11-07T12:00");
+  set("capacity", "10");
+  fireEvent.submit(container.querySelector("form") as HTMLFormElement);
+  await waitFor(() => expect(push).toHaveBeenCalledWith("/staff/events/new%2F1"));
+  expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/events$/), expect.objectContaining({ method: "POST" }));
+});
+
+it("pages the RSVP roster while retaining full event totals", async () => {
+  const fetch = vi.fn((input: RequestInfo | URL) => {
+    const second = String(input).endsWith("?offset=50");
+    return Promise.resolve(
+      Response.json({
+        ...event,
+        reserved: 75,
+        waitlisted: 35,
+        next_offset: second ? null : 50,
+        attendees: [
+          {
+            donor_id: second ? "later" : "first",
+            email: second ? "later@example.org" : "first@example.org",
+            public_name: "",
+            status: "RESERVED",
+            reserved_at: "2026-10-20T12:00:00Z",
+            checked_in_at: null,
+          },
+        ],
+      }),
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<EventEditor event="e-1" />);
+  expect(await screen.findByRole("link", { name: "first@example.org" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Next RSVPs" }));
+  expect(await screen.findByRole("link", { name: "later@example.org" })).toBeInTheDocument();
+  expect(screen.getByText("75 of 20 reserved · 35 waitlisted · 0 checked in")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Next RSVPs" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Previous RSVPs" }));
+  expect(await screen.findByRole("link", { name: "first@example.org" })).toBeInTheDocument();
+});
+
+it("reads and shows event times in the venue's zone, not the browser's", () => {
+  expect(instant("2026-11-07T19:00", "America/Chicago")).toBe("2026-11-08T01:00:00Z");
+  expect(localInput("2026-11-08T01:00:00Z", "America/Chicago")).toBe("2026-11-07T19:00");
+  const form = new FormData();
+  for (const [name, value] of Object.entries({
+    slug: "s",
+    title: "t",
+    type: "COMMUNITY",
+    perk: "",
+    time_zone: "America/Chicago",
+    starts_at: "2026-11-07T19:00",
+    ends_at: "2026-11-07T21:00",
+    booking_opens_at: "2026-11-01T09:00",
+    capacity: "0",
+  }))
+    form.set(name, value);
+  expect(eventInput(form)).toMatchObject({
+    starts_at: "2026-11-08T01:00:00Z",
+    ends_at: "2026-11-08T03:00:00Z",
+    booking_opens_at: "2026-11-01T15:00:00Z",
+  });
+  form.set("time_zone", "Mars/Olympus");
+  expect(eventInput(form)).toBe("Enter a time zone such as America/Chicago, or leave it empty.");
+});
+
+it("bounds the capacity", () => {
+  const form = new FormData();
+  for (const [name, value] of Object.entries({
+    slug: "s",
+    title: "t",
+    type: "COMMUNITY",
+    perk: "",
+    starts_at: "2026-11-07T10:00",
+    ends_at: "2026-11-07T12:00",
+    capacity: "1000000",
+  }))
+    form.set(name, value);
+  expect(eventInput(form)).toMatchObject({ capacity: 1_000_000 });
+  form.set("capacity", "1000001");
+  expect(eventInput(form)).toMatch(/up to 1,000,000/);
+});
+
+it("shows the stored event time in the venue's zone in the editor", async () => {
+  stubApi();
+  render(<EventEditor event="e-1" />);
+  expect(await screen.findByLabelText("Starts")).toHaveValue("2026-11-07T09:00");
+});
+
+it("keeps unsaved edits while paging the RSVP roster and moves focus to the roster heading", async () => {
+  const fetch = vi.fn((input: RequestInfo | URL) => {
+    const second = String(input).endsWith("?offset=50");
+    return Promise.resolve(
+      Response.json({
+        ...event,
+        next_offset: second ? null : 50,
+        attendees: [
+          {
+            donor_id: second ? "later" : "first",
+            email: second ? "later@example.org" : "first@example.org",
+            public_name: "",
+            status: "RESERVED",
+            reserved_at: "2026-10-20T12:00:00Z",
+            checked_in_at: null,
+          },
+        ],
+      }),
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<EventEditor event="e-1" />);
+  const title = await screen.findByLabelText("Title");
+  fireEvent.change(title, { target: { value: "Edited title" } });
+  fireEvent.click(screen.getByRole("button", { name: "Next RSVPs" }));
+  expect(await screen.findByRole("link", { name: "later@example.org" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Title")).toBe(title);
+  expect(screen.getByLabelText("Title")).toHaveValue("Edited title");
+  await waitFor(() => expect(screen.getByRole("heading", { name: "RSVPs" })).toHaveFocus());
+});
+
+it("offers sign-in when creating an event without a session", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => Promise.resolve(Response.json({ detail: "Sign in" }, { status: 401 }))),
+  );
+  render(<EventEditor event={null} />);
+  fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "s" } });
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "t" } });
+  fireEvent.change(screen.getByLabelText("Venue"), { target: { value: "v" } });
+  fireEvent.change(screen.getByLabelText("City"), { target: { value: "c" } });
+  fireEvent.change(screen.getByLabelText("Starts"), { target: { value: "2026-11-07T10:00" } });
+  fireEvent.change(screen.getByLabelText("Ends"), { target: { value: "2026-11-07T12:00" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+  expect(await screen.findByRole("link", { name: "Staff sign-in" })).toHaveAttribute("href", "/staff/sign-in");
+});
+
+it("moves focus to the event list heading after paging", async () => {
+  const fetch = vi.fn((input: RequestInfo | URL) => {
+    const second = String(input).endsWith("?offset=50");
+    return Promise.resolve(
+      Response.json({ events: [{ ...event, id: second ? "e-2" : "e-1" }], next_offset: second ? null : 50 }),
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<Events />);
+  fireEvent.click(await screen.findByRole("button", { name: "Earlier events" }));
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Event list" })).toHaveFocus());
+  expect(fetch).toHaveBeenCalledWith("/api/donor/staff/events?offset=50", expect.anything());
 });

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { choosePasskey, createPasskey, passkeyFailure } from "./passkeys";
+import { choosePasskey, createPasskey, isIpHostname, passkeyFailure } from "./passkeys";
 
 const bytes = (...values: number[]) => new Uint8Array(values).buffer;
 
@@ -84,4 +84,42 @@ it("names WebAuthn rejections and leaves other failures alone", () => {
   expect(passkeyFailure(new DOMException("", "NotSupportedError"))).toBe("unsupported");
   expect(passkeyFailure(new DOMException("", "SecurityError"))).toBe("refused");
   expect(passkeyFailure(new Error("network"))).toBeNull();
+});
+
+it("uses the browser's own JSON helpers and credential serialisation when present", async () => {
+  const toJSON = () => ({ id: "modern", type: "public-key" });
+  class PublicKeyCredential {
+    toJSON = toJSON;
+    static parseRequestOptionsFromJSON = vi.fn((json: { challenge: string }) => ({ parsed: json.challenge }));
+  }
+  vi.stubGlobal("PublicKeyCredential", PublicKeyCredential);
+  const get = vi.fn(async () => new PublicKeyCredential());
+  Object.defineProperty(navigator, "credentials", { value: { create: vi.fn(), get }, configurable: true });
+  await expect(choosePasskey({ challenge: "abc" })).resolves.toEqual({ id: "modern", type: "public-key" });
+  expect(get).toHaveBeenCalledWith({ publicKey: { parsed: "abc" } });
+});
+
+it("reports a dismissed prompt as not allowed rather than a credential", async () => {
+  olderBrowser().get.mockResolvedValueOnce(null as never);
+  await expect(choosePasskey({ challenge: "AQID" })).rejects.toMatchObject({ name: "NotAllowedError" });
+});
+
+it("encodes a large attestation without exceeding the argument limit", async () => {
+  const credentials = olderBrowser();
+  const large = new Uint8Array(200_000).fill(65).buffer;
+  const credential = await credentials.create.getMockImplementation()?.({ publicKey: {} as never });
+  Object.assign(credential?.response as object, { attestationObject: large });
+  credentials.create.mockResolvedValueOnce(credential as never);
+  const created = (await createPasskey({
+    challenge: "AQID",
+    rp: { name: "DAD" },
+    user: { id: "AAE", name: "a", displayName: "A" },
+    pubKeyCredParams: [],
+  })) as { response: { attestationObject: string } };
+  expect(created.response.attestationObject).toHaveLength(Math.ceil((200_000 * 4) / 3));
+});
+
+it("recognises IP-address hosts, which cannot be a passkey relying party", () => {
+  expect(["127.0.0.1", "10.0.0.8", "[::1]", "::1"].map(isIpHostname)).toEqual([true, true, true, true]);
+  expect(["localhost", "dad.example", "staff.localhost"].map(isIpHostname)).toEqual([false, false, false]);
 });

@@ -29,7 +29,7 @@ export default function DonorHome() {
               See how it works
             </Link>
           </div>
-          <div>
+          <div className="heroGift">
             <GiftFraming minor={3000} />
           </div>
           <FoundingLine />
@@ -70,7 +70,7 @@ export default function DonorHome() {
             completes.
           </p>
           <p className="note">
-            Run an aid organization?{" "}
+            Does your company or organization want to co-fund initiatives?{" "}
             <RoleLink className="quiet" href="/apply">
               Become a partner{" "}
               <span aria-hidden="true" className="arrow">

@@ -85,6 +85,7 @@ type Streak struct {
 }
 
 func utc(t time.Time) time.Time { return t.Round(0).UTC() }
+
 func cleanGifts(input []Gift) ([]Gift, error) {
 	seen := map[string]Gift{}
 	result := []Gift{}
@@ -115,7 +116,8 @@ func cleanGifts(input []Gift) ([]Gift, error) {
 }
 
 // NetGifts returns each gift paid by asOf, keyed by gift ID, net of the
-// refunds that had succeeded by then.
+// refunds that had succeeded by then. A refund updated after asOf is invalid,
+// so callers pass only the refunds known at asOf.
 func NetGifts(input []Gift, refunds []Refund, asOf time.Time) (map[string]int64, error) {
 	if asOf.IsZero() {
 		return nil, ErrInvalid
@@ -463,7 +465,8 @@ func (s Streak) LadderWithMilestones(asOf time.Time, zone *time.Location, milest
 	return ladder
 }
 
-// Reaches is the local midnight in zone at which the run is days long.
+// Reaches is the local midnight in zone at which the run is days long. The
+// streak must have a start: Since is not nil.
 func (s Streak) Reaches(days int64, zone *time.Location) time.Time {
 	start := s.Since.In(zone)
 	return time.Date(start.Year(), start.Month(), start.Day()+int(days), 0, 0, 0, 0, zone)

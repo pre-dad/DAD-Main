@@ -16,14 +16,25 @@ it("explains the donor release, monthly billing, direct referral credit, and lau
   expect(screen.getByText(/streak growing in local calendar days/)).toHaveTextContent(
     "Cancellation ends it at the first skipped renewal",
   );
-  expect(screen.getByText(/does not enrol recipients/)).toHaveTextContent("Aid programs begin at launch");
-  expect(screen.getByText(/does not enrol recipients/)).toHaveTextContent("approved partners use the partner portal");
-  expect(screen.getByText(/does not enrol recipients/)).toHaveTextContent(
+  expect(screen.getByText(/does not enroll recipients/)).toHaveTextContent("Aid programs begin at launch");
+  expect(screen.getByText(/does not enroll recipients/)).toHaveTextContent("approved partners use the partner portal");
+  expect(screen.getByText(/does not enroll recipients/)).toHaveTextContent(
     "Donor apps for iOS and Android are being developed separately",
   );
   expect(screen.queryByText(/R2/)).not.toBeInTheDocument();
   expect(screen.getByText(/approved by the board/)).toHaveTextContent("From launch, programs invite");
   expect(screen.queryByText(/sandbox preview/)).not.toBeInTheDocument();
+});
+
+it("explains recognition, display attribution, events, and employee giving within the product's privacy rules", () => {
+  render(<HowItWorks />);
+  expect(screen.getByText(/Badges mark milestones/)).toHaveTextContent("stay earned even if a streak later ends");
+  expect(screen.getByText(/Badges mark milestones/)).toHaveTextContent("Only you see your own position");
+  expect(screen.getByText(/one active initiative each day/)).toHaveTextContent(
+    "every gift is unrestricted and supports DAD as a whole, and none is designated to this initiative",
+  );
+  expect(screen.getByText(/Reserve a spot/)).toHaveTextContent("the first person waiting takes their place");
+  expect(screen.getByText(/company code/)).toHaveTextContent("groups of five or more");
 });
 
 it("links the explanation to giving, spend by category, and partner interest", () => {
@@ -42,6 +53,7 @@ it("leaves the test-payment caveat to the preview banner that frames every page"
     "Test payments only. No real money moves.",
   );
 });
+
 it("keeps /about as a permanent alias of the single About / how it works screen", () => {
   expect(() => About()).toThrow("NEXT_REDIRECT");
 });

@@ -31,7 +31,7 @@ const detail = {
   ],
   referred: [{ id: "donor-2", email: "invitee@example.org", type: "LINK", net_minor: 4500 }],
   next_gifts_offset: null,
-  next_referrals_offset: null,
+  next_referrals_cursor: null,
 };
 const actor = {
   id: "staff-1",
@@ -104,7 +104,7 @@ it("shows the donor record with links scoped to the staff member's permissions",
   expect(synced).toHaveTextContent(`Last updated from Stripe ${formatDateTime(detail.subscription.observed_at)}.`);
   expect(synced.querySelector("time")).toHaveAttribute("dateTime", detail.subscription.observed_at);
   const history = screen.getByRole("region", { name: "Staff financial actions" });
-  expect(await within(history).findByText(/REFUND · SUCCEEDED · \$10.00/)).toBeVisible();
+  expect(await within(history).findByText(/Refund · Succeeded · \$10.00/)).toBeVisible();
   expect(within(history).queryByRole("button", { name: "Older actions" })).not.toBeInTheDocument();
 });
 
@@ -136,20 +136,70 @@ it("pages through the action history by the cursor the API returns", async () =>
   expect(await screen.findByRole("button", { name: "Older actions" })).toBeVisible();
 });
 
+it("requests the next page of referred donors by the cursor the API returns", async () => {
+  const fetch = serve({
+    "/donor/staff/donors/donor-1?gifts_offset=0": reply(200, { ...detail, next_referrals_cursor: "c/2+" }),
+    "/donor/staff/donors/donor-1?gifts_offset=0&referrals_cursor=c%2F2%2B": reply(200, detail),
+    "/donor/staff/me": reply(200, actor),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
+  });
+  render(<DonorDetail donor="donor-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "More referrals" }));
+  expect(await screen.findByRole("button", { name: "First referrals" })).toBeVisible();
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/donor/staff/donors/donor-1?gifts_offset=0&referrals_cursor=c%2F2%2B",
+    expect.anything(),
+  );
+});
+
+it("returns to the first page of referred donors", async () => {
+  const fetch = serve({
+    "/donor/staff/donors/donor-1?gifts_offset=0": reply(200, { ...detail, next_referrals_cursor: "c2" }),
+    "/donor/staff/donors/donor-1?gifts_offset=0&referrals_cursor=c2": reply(200, detail),
+    "/donor/staff/me": reply(200, actor),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
+  });
+  render(<DonorDetail donor="donor-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "More referrals" }));
+  fireEvent.click(await screen.findByRole("button", { name: "First referrals" }));
+  expect(await screen.findByRole("button", { name: "More referrals" })).toBeVisible();
+  const firstPage = fetch.mock.calls.filter(([url]) => url === "/api/donor/staff/donors/donor-1?gifts_offset=0");
+  expect(firstPage).toHaveLength(2);
+});
+
+it("starts at the first page when navigating to another donor", async () => {
+  const fetch = serve({
+    "/donor/staff/donors/donor-1?gifts_offset=0": reply(200, { ...detail, next_gifts_offset: 50 }),
+    "/donor/staff/donors/donor-1?gifts_offset=50": reply(200, detail),
+    "/donor/staff/donors/donor-2?gifts_offset=0": reply(200, {
+      ...detail,
+      id: "donor-2",
+      email: "invitee@example.org",
+    }),
+    "/donor/staff/me": reply(200, actor),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
+    "/donor/staff/donors/donor-2/actions": reply(200, { actions: [], next_cursor: null }),
+  });
+  const { rerender } = render(<DonorDetail donor="donor-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Older gifts" }));
+  expect(await screen.findByRole("button", { name: "Newest gifts" })).toBeVisible();
+  rerender(<DonorDetail donor="donor-2" />);
+  expect(await screen.findByRole("heading", { level: 1, name: "invitee@example.org" })).toBeVisible();
+  expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining("donor-2"), expect.anything());
+  expect(fetch).not.toHaveBeenCalledWith("/api/donor/staff/donors/donor-2?gifts_offset=50", expect.anything());
+});
+
 it("requests the next page of gifts from the detail endpoint", async () => {
   const fetch = serve({
-    "/donor/staff/donors/donor-1?gifts_offset=0&referrals_offset=0": reply(200, { ...detail, next_gifts_offset: 50 }),
-    "/donor/staff/donors/donor-1?gifts_offset=50&referrals_offset=0": reply(200, detail),
+    "/donor/staff/donors/donor-1?gifts_offset=0": reply(200, { ...detail, next_gifts_offset: 50 }),
+    "/donor/staff/donors/donor-1?gifts_offset=50": reply(200, detail),
     "/donor/staff/me": reply(200, actor),
     "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
   });
   render(<DonorDetail donor="donor-1" />);
   fireEvent.click(await screen.findByRole("button", { name: "Older gifts" }));
   expect(await screen.findByRole("button", { name: "Newest gifts" })).toBeVisible();
-  expect(fetch).toHaveBeenCalledWith(
-    "/api/donor/staff/donors/donor-1?gifts_offset=50&referrals_offset=0",
-    expect.anything(),
-  );
+  expect(fetch).toHaveBeenCalledWith("/api/donor/staff/donors/donor-1?gifts_offset=50", expect.anything());
 });
 
 it("announces loading until the record arrives", async () => {
@@ -247,6 +297,9 @@ it("names Stripe statuses in words", async () => {
     ["unpaid", "Payment overdue"],
     ["canceled", "Cancelled"],
     ["incomplete", "Setting up"],
+    ["trialing", "Trial"],
+    ["paused", "Paused"],
+    ["some_new_state", "Some new state"],
   ]) {
     serve({
       "/donor/staff/donors/donor-1": reply(200, { ...detail, subscription: { ...detail.subscription, status } }),
@@ -277,4 +330,52 @@ it("keeps the repair confirmation visible after reloading the donor record", asy
   expect(
     screen.getByText("Recognition recomputed from recorded facts. The reason and result are in the audit log."),
   ).toBeVisible();
+});
+
+const page = (donor: string, offset = 0) => ({
+  ...detail,
+  email: `${donor}@example.org`,
+  next_gifts_offset: offset === 0 ? 50 : null,
+});
+
+it("starts a different donor's record at the first page of gifts", async () => {
+  const fetch = serve({
+    "/donor/staff/donors/donor-1?gifts_offset=0": reply(200, page("one")),
+    "/donor/staff/donors/donor-1?gifts_offset=50": reply(200, page("one", 50)),
+    "/donor/staff/donors/donor-2?gifts_offset=0": reply(200, page("two")),
+    "/donor/staff/me": reply(200, actor),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_cursor: null }),
+    "/donor/staff/donors/donor-2/actions": reply(200, { actions: [], next_cursor: null }),
+  });
+  const { rerender } = render(<DonorDetail key="donor-1" donor="donor-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Older gifts" }));
+  expect(await screen.findByRole("button", { name: "Newest gifts" })).toBeVisible();
+  rerender(<DonorDetail key="donor-2" donor="donor-2" />);
+  expect(await screen.findByRole("heading", { level: 1, name: "two@example.org" })).toBeVisible();
+  expect(fetch).toHaveBeenCalledWith("/api/donor/staff/donors/donor-2?gifts_offset=0", expect.anything());
+  expect(fetch).not.toHaveBeenCalledWith("/api/donor/staff/donors/donor-2?gifts_offset=50", expect.anything());
+});
+
+it("keys the record by donor so navigating between donors resets its state", async () => {
+  const { default: Page } = await import("./page");
+  const element = await Page({ params: Promise.resolve({ donorId: "donor-9" }) } as Parameters<typeof Page>[0]);
+  expect(element.key).toBe("donor-9");
+});
+
+it("keeps the staff history mounted and refetches the actor once while paging gifts", async () => {
+  const fetch = serve({
+    "/donor/staff/donors/donor-1?gifts_offset=0": reply(200, page("one")),
+    "/donor/staff/donors/donor-1?gifts_offset=50": reply(200, page("one", 50)),
+    "/donor/staff/me": reply(200, actor),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [action("a1")], next_cursor: null }),
+  });
+  render(<DonorDetail donor="donor-1" />);
+  const history = await screen.findByRole("region", { name: "Staff financial actions" });
+  fireEvent.click(await screen.findByRole("button", { name: "Older gifts" }));
+  expect(screen.getByRole("region", { name: "Staff financial actions" })).toBe(history);
+  const newest = await screen.findByRole("button", { name: "Newest gifts" });
+  expect(newest).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: "Gifts" })).toHaveFocus());
+  expect(fetch.mock.calls.filter(([url]) => url === "/api/donor/staff/me")).toHaveLength(1);
+  expect(fetch.mock.calls.filter(([url]) => String(url).endsWith("/actions"))).toHaveLength(1);
 });

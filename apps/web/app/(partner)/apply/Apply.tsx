@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { ApiError, api, failureMessage, unconfirmedMessage } from "@/lib/api";
+import { api, classifyFailure, failureMessage, unconfirmedMessage } from "@/lib/api";
 import { useFocusOnSuccess } from "@/lib/useStepFocus";
 
 const PARTNER_TYPES = ["Corporate", "Nonprofit", "Foundation", "Government", "Other"];
@@ -53,11 +53,11 @@ export default function Apply() {
       });
       setDone(true);
     } catch (cause) {
-      if (cause instanceof ApiError && [409, 422].includes(cause.status)) {
+      if (classifyFailure(cause) === "rejected") {
         setFrozen(null);
         key.current = null;
         receipt.current = null;
-        setError(failureMessage(cause, "Check the highlighted fields, then submit again."));
+        setError(failureMessage(cause, "Check your answers, then submit again."));
       } else setError(unconfirmedMessage(cause, "Your application is not confirmed. Retry the same form."));
     } finally {
       setBusy(false);

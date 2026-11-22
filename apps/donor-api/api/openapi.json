@@ -7,7 +7,7 @@
    "name": "MIT",
    "identifier": "MIT"
   },
-  "description": "The DAD (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <access token>`. A request with Origin or cookies is a browser request whatever else it carries. Sign in by calling POST /donor/login, opening the emailed `/account/claim#token=\u2026` link in the app, and sending the fragment's token to POST /donor/claim as a native request, which returns a 15-minute access token and a rotating refresh token. Exchange the refresh token at POST /donor/refresh when the access token expires or a request answers 401; send one refresh at a time and keep only the newest tokens. Routes that admit the app list `native` in `x-clients`, and POST /donor/refresh, the push-device routes, POST /donor/me/company-touch, and POST /donor/me/recurring/checkout admit nothing else. The app may record referral and company-code link visits, keeping the returned token in place of the browser's cookie. Guest giving, partner applications, and every staff route are web-only.\n- **Partner portal** users are separate from donors (P-5). They sign in by calling POST /donor/partner/sign-in and opening the emailed `/partner/accept#token=\u2026` link, whose token POST /donor/partner/accept-invite exchanges for a 12-hour session: an HttpOnly cookie for a browser (`__Host-dad_partner_session` over HTTPS, otherwise `dad_partner_session`), or a bearer token for a native request, sent like the donor app's.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"\u2026\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `\u2026+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
+  "description": "The DAD (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <access token>`. A request with Origin or cookies is a browser request whatever else it carries. Sign in by calling POST /donor/login, opening the emailed `/account/claim#token=\u2026` link in the app, and sending the fragment's token to POST /donor/claim as a native request, which returns a 15-minute access token and a rotating refresh token. Exchange the refresh token at POST /donor/refresh when the access token expires or a request answers 401; send one refresh at a time and keep only the newest tokens. Routes that admit the app list `native` in `x-clients`, and POST /donor/refresh, the push-device routes, POST /donor/me/company-touch, and POST /donor/me/recurring/checkout admit nothing else. The app may record referral and company-code link visits, keeping the returned token in place of the browser's cookie. Giving requires a verified donor session. Native recurring checkout uses its dedicated operation; partner applications admit both browser and native clients. Every staff route is browser-only.\n- **Partner portal** users are separate from donors (P-5). They sign in by calling POST /donor/partner/sign-in and opening the emailed `/partner/accept#token=\u2026` link, whose token POST /donor/partner/accept-invite exchanges for a 12-hour session: an HttpOnly cookie for a browser (`__Host-dad_partner_session` over HTTPS, otherwise `dad_partner_session`), or a bearer token for a native request, sent like the donor app's.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, analytics 120/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"\u2026\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `\u2026+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor, and operations that declare the `Idempotency-Key` header, require it; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
  },
  "servers": [
   {
@@ -39,6 +39,26 @@
   {
    "name": "Wallet",
    "description": "Referral code passes for Apple and Google Wallet. Web and app."
+  },
+  {
+   "name": "Events",
+   "description": "Giving events: listing, reservation, check-in, and calendar files. Web and app."
+  },
+  {
+   "name": "Initiatives",
+   "description": "Funded initiatives and their published spend. Web and app."
+  },
+  {
+   "name": "Badges",
+   "description": "The donor badge wall (web and app) and staff badge grants (web only)."
+  },
+  {
+   "name": "Partner",
+   "description": "Partner portal sign-in, users, applications, and employer matching. Web and app."
+  },
+  {
+   "name": "Network",
+   "description": "The donor's referral network. Web and app."
   },
   {
    "name": "Recurring",
@@ -672,7 +692,7 @@
             "occurred_at": {
              "type": "string",
              "format": "date-time",
-             "description": "Client event time (RFC 3339). Rejected if missing or implausibly in the future."
+             "description": "Client event time (RFC 3339). Rejected if missing, implausibly in the future, or more than 30 days old."
             },
             "properties": {
              "type": "object",
@@ -1493,7 +1513,7 @@
    "post": {
     "operationId": "saveProfile",
     "summary": "Save identity profile fields",
-    "description": "Replaces the donor's self-service identity fields. `timezone` is derived from `zip` (US ZIP to IANA zone) and is never accepted from the client; `account_role` is immutable and cannot be set here. A field sent empty clears its stored value; a blank `zip` clears the derived `timezone` with it. 422 for an invalid ZIP, phone, or city.",
+    "description": "Replaces ZIP, city and phone. The ZIP suggests the IANA time zone. Optional timezone_override corrects that suggestion: omit it to preserve the saved choice, send an empty string to restore ZIP-based time, or choose a supported US zone. A blank ZIP clears only an automatically derived zone; a manual correction remains. account_role is immutable. 422 for invalid ZIP, phone, city or zone.",
     "tags": [
      "Donor"
     ],
@@ -1519,7 +1539,7 @@
         "properties": {
          "zip": {
           "type": "string",
-          "description": "US ZIP (`12345` or `12345-6789`). Empty clears the ZIP and derived timezone.",
+          "description": "US ZIP or ZIP+4. Empty clears the ZIP and its automatic zone; a manual time zone remains.",
           "pattern": "^$|^[0-9]{5}(-[0-9]{4})?$"
          },
          "city": {
@@ -1531,6 +1551,24 @@
           "type": "string",
           "description": "E.164 phone, e.g. `+14155550123`. Empty clears it.",
           "pattern": "^$|^\\+[1-9][0-9]{1,14}$"
+         },
+         "timezone_override": {
+          "type": "string",
+          "enum": [
+           "",
+           "America/New_York",
+           "America/Chicago",
+           "America/Denver",
+           "America/Phoenix",
+           "America/Los_Angeles",
+           "America/Anchorage",
+           "America/Adak",
+           "Pacific/Honolulu",
+           "America/Puerto_Rico",
+           "Pacific/Guam",
+           "Pacific/Pago_Pago"
+          ],
+          "description": "Omit to preserve the manual correction. Empty restores the ZIP suggestion. Controls the local midnight used by the streak."
          }
         },
         "additionalProperties": false
@@ -3862,15 +3900,14 @@
       }
      },
      {
-      "name": "referrals_offset",
+      "name": "referrals_cursor",
       "in": "query",
       "required": false,
       "schema": {
-       "type": "integer",
-       "format": "int64",
-       "minimum": 0,
-       "default": 0
-      }
+       "type": "string",
+       "maxLength": 600
+      },
+      "description": "The previous page's next_referrals_cursor; omit for the first page."
      }
     ],
     "responses": {
@@ -6605,6 +6642,9 @@
        "type": "string",
        "format": "uuid"
       }
+     },
+     {
+      "$ref": "#/components/parameters/Offset"
      }
     ],
     "responses": {
@@ -7548,28 +7588,36 @@
         "type": "object",
         "properties": {
          "organization": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 200
          },
          "website": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 500
          },
          "type": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 80
          },
          "contact_name": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 100
          },
          "title": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 100
          },
          "work_email": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 320
          },
          "phone": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 40
          },
          "workforce_size": {
-          "type": "integer"
+          "type": "integer",
+          "minimum": 0
          }
         },
         "required": [
@@ -8159,13 +8207,17 @@
              },
              "role": {
               "type": "string"
+             },
+             "accepted": {
+              "type": "boolean"
              }
             },
             "required": [
              "id",
              "email",
              "name",
-             "role"
+             "role",
+             "accepted"
             ],
             "additionalProperties": false
            }
@@ -8409,12 +8461,49 @@
       "$ref": "#/components/responses/Forbidden"
      },
      "429": {
-      "$ref": "#/components/responses/RateLimitedByIngress"
+      "description": "The daily new-artifact limit or ingress request limit was reached. PARTNER_REPORT_DAILY_LIMIT identifies the daily quota; Retry-After is seconds until the next UTC day.",
+      "headers": {
+       "Retry-After": {
+        "schema": {
+         "type": "integer",
+         "minimum": 1
+        },
+        "description": "Seconds before retrying."
+       }
+      },
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
+     },
+     "409": {
+      "description": "Report storage is full; existing artifacts remain available. Code PARTNER_REPORT_STORAGE_LIMIT.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "Report exceeds 1,000 spend categories or the 2 MiB PDF limit. Code PARTNER_REPORT_TOO_LARGE. Existing reports remain available.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
      }
-    }
+    },
+    "description": "Admin-only. Reuses the immutable PDF for the same organization snapshot and UTC day. New artifacts are limited to 20 per UTC day and 1,000 retained reports or 128 MiB per organization. Existing reports remain downloadable after a limit is reached."
    }
   },
   "/donor/partner/company-code.svg": {
@@ -8459,7 +8548,97 @@
     }
    }
   },
-  "/donor/partner/users/{userID}/remove": {
+  "/donor/partner/users/{user_id}/reinvite": {
+   "post": {
+    "operationId": "partnerReinviteUser",
+    "summary": "Resend a partner portal invitation",
+    "tags": [
+     "Partner"
+    ],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
+    "x-rate-limit": "account",
+    "x-clients": [
+     "browser",
+     "native"
+    ],
+    "parameters": [
+     {
+      "name": "user_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "invited": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "invited"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "description": "Admin only. For a user who has not accepted their invitation yet: ends the old link and emails a fresh single-use link that expires after 7 days. Not found once the user has accepted or was removed. Limited to one resend a minute and five an hour per user (429)."
+   }
+  },
+  "/donor/partner/users/{user_id}/remove": {
    "post": {
     "operationId": "partnerRemoveUser",
     "summary": "Remove a partner portal user",
@@ -8481,7 +8660,7 @@
     ],
     "parameters": [
      {
-      "name": "userID",
+      "name": "user_id",
       "in": "path",
       "required": true,
       "schema": {
@@ -8736,7 +8915,7 @@
     ]
    }
   },
-  "/donor/staff/partners/{appID}/approve": {
+  "/donor/staff/partners/{app_id}/approve": {
    "post": {
     "operationId": "staffPartnerApprove",
     "summary": "Approve a partner application",
@@ -8754,7 +8933,7 @@
     ],
     "parameters": [
      {
-      "name": "appID",
+      "name": "app_id",
       "in": "path",
       "required": true,
       "schema": {
@@ -8821,7 +9000,7 @@
     "description": "Refused with 409 when the applicant's work email already has a donor or staff login, or signs in to another partner organization (one email, one role)."
    }
   },
-  "/donor/staff/partners/{appID}/reject": {
+  "/donor/staff/partners/{app_id}/reject": {
    "post": {
     "operationId": "staffPartnerReject",
     "summary": "Reject a partner application",
@@ -8839,7 +9018,7 @@
     ],
     "parameters": [
      {
-      "name": "appID",
+      "name": "app_id",
       "in": "path",
       "required": true,
       "schema": {
@@ -8912,7 +9091,7 @@
     }
    }
   },
-  "/donor/staff/partners/{partnerID}/link": {
+  "/donor/staff/partners/{partner_id}/link": {
    "post": {
     "operationId": "staffPartnerLink",
     "summary": "Link an initiative to a partner",
@@ -8930,7 +9109,7 @@
     ],
     "parameters": [
      {
-      "name": "partnerID",
+      "name": "partner_id",
       "in": "path",
       "required": true,
       "schema": {
@@ -9008,7 +9187,7 @@
     }
    }
   },
-  "/donor/staff/partners/{partnerID}/match": {
+  "/donor/staff/partners/{partner_id}/match": {
    "post": {
     "operationId": "staffPartnerMatch",
     "summary": "Set a partner's match terms",
@@ -9026,7 +9205,7 @@
     ],
     "parameters": [
      {
-      "name": "partnerID",
+      "name": "partner_id",
       "in": "path",
       "required": true,
       "schema": {
@@ -9043,14 +9222,17 @@
         "type": "object",
         "properties": {
          "match_rate_bp": {
-          "type": "integer"
+          "type": "integer",
+          "minimum": 0
          },
          "match_cap_minor": {
           "type": "integer",
-          "format": "int64"
+          "format": "int64",
+          "minimum": 0
          },
          "workforce_size": {
-          "type": "integer"
+          "type": "integer",
+          "minimum": 0
          }
         },
         "required": [
@@ -9380,6 +9562,10 @@
           },
           "suppressed": {
            "type": "boolean"
+          },
+          "streak_verified": {
+           "type": "boolean",
+           "description": "The average streak is current for every linked employee. Hide the average streak while false; other totals come from recorded facts."
           }
          },
          "required": [
@@ -9390,7 +9576,8 @@
           "avg_streak_days",
           "volunteer_minutes",
           "teams",
-          "suppressed"
+          "suppressed",
+          "streak_verified"
          ],
          "additionalProperties": false
         }
@@ -9495,7 +9682,8 @@
         "type": "object",
         "properties": {
          "workforce_size": {
-          "type": "integer"
+          "type": "integer",
+          "minimum": 0
          }
         },
         "required": [
@@ -9621,7 +9809,7 @@
     "description": "Replaces the organization's name and description (\u00a77.2). Partner administrators only; viewers get 403. Both are trimmed; the name must be 1 to 200 characters and the description at most 4000."
    }
   },
-  "/donor/staff/partners/{partnerID}/match-status": {
+  "/donor/staff/partners/{partner_id}/match-status": {
    "get": {
     "operationId": "staffPartnerMatchStatus",
     "summary": "Match owed/paid for a year",
@@ -9635,7 +9823,7 @@
     ],
     "parameters": [
      {
-      "name": "partnerID",
+      "name": "partner_id",
       "in": "path",
       "required": true,
       "schema": {
@@ -9719,7 +9907,7 @@
     }
    }
   },
-  "/donor/staff/partners/{partnerID}/match-payment": {
+  "/donor/staff/partners/{partner_id}/match-payment": {
    "post": {
     "operationId": "staffPartnerMatchPayment",
     "summary": "Record an offline match payment",
@@ -9737,7 +9925,7 @@
     ],
     "parameters": [
      {
-      "name": "partnerID",
+      "name": "partner_id",
       "in": "path",
       "required": true,
       "schema": {
@@ -9746,14 +9934,7 @@
       }
      },
      {
-      "in": "header",
-      "name": "Idempotency-Key",
-      "required": false,
-      "schema": {
-       "type": "string",
-       "format": "uuid"
-      },
-      "description": "Version-4 UUID identifying this offline payment. Reuse the same key and payload after an uncertain result. Reusing it with another payload returns 409. Omission remains compatible with older clients but cannot deduplicate a retry."
+      "$ref": "#/components/parameters/IdempotencyKey"
      }
     ],
     "requestBody": {
@@ -9768,7 +9949,8 @@
          },
          "amount_minor": {
           "type": "integer",
-          "format": "int64"
+          "format": "int64",
+          "minimum": 1
          }
         },
         "required": [
@@ -9885,7 +10067,7 @@
     }
    }
   },
-  "/donor/staff/partners/{partnerID}": {
+  "/donor/staff/partners/{partner_id}": {
    "get": {
     "operationId": "staffPartnerDetail",
     "summary": "A partner's linked initiatives, match terms, and users",
@@ -9899,7 +10081,7 @@
     ],
     "parameters": [
      {
-      "name": "partnerID",
+      "name": "partner_id",
       "in": "path",
       "required": true,
       "schema": {
@@ -9934,7 +10116,7 @@
     }
    }
   },
-  "/donor/staff/partners/{partnerID}/users": {
+  "/donor/staff/partners/{partner_id}/users": {
    "post": {
     "operationId": "staffPartnerInviteUser",
     "summary": "Invite a user to a partner organization",
@@ -9950,7 +10132,7 @@
     "x-rate-limit": "staff",
     "parameters": [
      {
-      "name": "partnerID",
+      "name": "partner_id",
       "in": "path",
       "required": true,
       "schema": {
@@ -10038,7 +10220,7 @@
     ]
    }
   },
-  "/donor/staff/partners/{partnerID}/logo": {
+  "/donor/staff/partners/{partner_id}/logo": {
    "get": {
     "operationId": "staffPartnerLogo",
     "summary": "Read a partner organization's logo",
@@ -10077,7 +10259,7 @@
     },
     "parameters": [
      {
-      "name": "partnerID",
+      "name": "partner_id",
       "in": "path",
       "required": true,
       "schema": {
@@ -10166,7 +10348,7 @@
     "description": "Staff with partnerships access set the logo while enrolling an approved partner. The partner's administrators can replace it from the portal. Audited.",
     "parameters": [
      {
-      "name": "partnerID",
+      "name": "partner_id",
       "in": "path",
       "required": true,
       "schema": {
@@ -10177,7 +10359,86 @@
     ]
    }
   },
-  "/donor/staff/partners/{partnerID}/users/{userID}/remove": {
+  "/donor/staff/partners/{partner_id}/users/{user_id}/reinvite": {
+   "post": {
+    "operationId": "staffPartnerReinviteUser",
+    "summary": "Resend a partner user invitation",
+    "tags": [
+     "Staff"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "parameters": [
+     {
+      "name": "partner_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     },
+     {
+      "name": "user_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "invited": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "invited"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "x-clients": [
+     "browser"
+    ],
+    "description": "For a user who has not accepted their invitation yet: ends the old link and emails a fresh single-use link that expires after 7 days. Not found once the user has accepted or was removed. Limited to one resend a minute and five an hour per user (429). Audited."
+   }
+  },
+  "/donor/staff/partners/{partner_id}/users/{user_id}/remove": {
    "post": {
     "operationId": "staffPartnerRemoveUser",
     "summary": "Remove a partner user and end their sessions",
@@ -10192,7 +10453,7 @@
     "x-rate-limit": "staff",
     "parameters": [
      {
-      "name": "partnerID",
+      "name": "partner_id",
       "in": "path",
       "required": true,
       "schema": {
@@ -10201,7 +10462,7 @@
       }
      },
      {
-      "name": "userID",
+      "name": "user_id",
       "in": "path",
       "required": true,
       "schema": {
@@ -11217,28 +11478,36 @@
           "type": "object",
           "properties": {
            "organization": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 200
            },
            "website": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 500
            },
            "type": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 80
            },
            "contact_name": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 100
            },
            "title": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 100
            },
            "work_email": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 320
            },
            "phone": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 40
            },
            "workforce_size": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 0
            }
           },
           "required": [
@@ -11309,7 +11578,7 @@
     "operationId": "applicationStatus",
     "summary": "Read the status of the application named by a private receipt",
     "tags": [
-     "Partners"
+     "Partner"
     ],
     "security": [
      {
@@ -11512,7 +11781,7 @@
   "/donor/staff/donors/{donor_id}/recognition/reset": {
    "post": {
     "operationId": "postDonorStaffDonorsDonorIdRecognitionReset",
-    "summary": "/donor/staff/donors/{donor_id}/recognition/reset",
+    "summary": "Replay recognition from recorded facts",
     "tags": [
      "Staff donors"
     ],
@@ -11606,7 +11875,7 @@
   "/donor/staff/content/rules": {
    "get": {
     "operationId": "getDonorStaffContentRules",
-    "summary": "/donor/staff/content/rules",
+    "summary": "Read recognition rules",
     "tags": [
      "Content"
     ],
@@ -11639,8 +11908,8 @@
    },
    "post": {
     "operationId": "postDonorStaffContentRules",
-    "summary": "/donor/staff/content/rules",
-    "description": "Replaces the words only; how badges and milestones are earned does not change. An empty title and text restore the default.",
+    "summary": "Replace recognition rules",
+    "description": "Replaces badge earning thresholds, minimum ranking populations, PNG/JPEG artwork, and the milestone ladder. Every catalog badge must be supplied. The JSON body may be up to 10 MiB to hold the complete artwork batch. Wording changes use /donor/staff/content/wording.",
     "tags": [
      "Content"
     ],
@@ -11698,6 +11967,12 @@
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
+     },
+     "413": {
+      "$ref": "#/components/responses/PayloadTooLarge"
+     },
+     "415": {
+      "$ref": "#/components/responses/UnsupportedMediaType"
      }
     }
    }
@@ -11705,7 +11980,7 @@
   "/donor/signup": {
    "post": {
     "operationId": "postDonorSignup",
-    "summary": "/donor/signup",
+    "summary": "Start account creation",
     "description": "Starts account creation by emailing a verification link; no session is issued here. Answers 200 `{\"sent\":true}` whether or not the address already has an account, so it never reveals which. 503 `EMAIL_UNCONFIGURED` when the deployment has no email. The link (`/account/claim#token=\u2026`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim, which takes the optional `device_name` and `platform` that label the resulting session. The response does not reveal whether an email belongs to a disabled donor, staff or partner; unavailable identities receive the same sent:true response without creating a donor account.",
     "tags": [
      "Account"
@@ -11725,16 +12000,20 @@
         "additionalProperties": false,
         "properties": {
          "name": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 150
          },
          "email": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 320
          },
          "zip": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 10
          },
          "city": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 80
          }
         },
         "required": [
@@ -11782,7 +12061,7 @@
   "/donor/password/sign-in": {
    "post": {
     "operationId": "postDonorPasswordSignIn",
-    "summary": "/donor/password/sign-in",
+    "summary": "Sign in with a password",
     "description": "Signs in with an email and password. 401 covers a wrong password, an unknown email, an unclaimed account and a disabled account alike, so none reveals whether an account exists. A browser request receives an HttpOnly cookie; a native request (`X-DAD-Client: native`, no Origin, no cookies) receives NativeSession and may describe its device so the donor can recognize the session later.",
     "tags": [
      "Account"
@@ -11802,7 +12081,8 @@
         "additionalProperties": false,
         "properties": {
          "email": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 320
          },
          "password": {
           "type": "string",
@@ -11861,8 +12141,8 @@
   "/donor/me/password": {
    "post": {
     "operationId": "postDonorMePassword",
-    "summary": "/donor/me/password",
-    "description": "Sets or changes the signed-in donor's password. `current_password` is required unless the session proved its password within the last 15 minutes; leave it empty when setting a first password right after signing in by email link. 401 means the session is missing, expired or revoked: sign in again. 422 with `code` `CURRENT_PASSWORD_INCORRECT` means the session is fine but `current_password` was missing or wrong: keep the donor signed in and let them retry (attempts are rate limited). Contract versions before 2.4 answered 401 with the same `detail` (\"The email or password is incorrect\"); a client that must still talk to such a server should treat that 401 on this route as a wrong current password when the access token is otherwise valid.",
+    "summary": "Set or change the password",
+    "description": "Sets or changes the signed-in donor's password. `current_password` is required unless the session proved its password within the last 15 minutes; leave it empty when setting a first password right after signing in by email link. A successful change signs out the donor's other sessions and keeps the calling one. 401 means the session is missing, expired or revoked: sign in again. 422 with `code` `CURRENT_PASSWORD_INCORRECT` means the session is fine but `current_password` was missing or wrong: keep the donor signed in and let them retry (attempts are rate limited). Contract versions before 2.4 answered 401 with the same `detail` (\"The email or password is incorrect\"); a client that must still talk to such a server should treat that 401 on this route as a wrong current password when the access token is otherwise valid.",
     "tags": [
      "Donor"
     ],
@@ -12303,7 +12583,7 @@
      },
      "code": {
       "type": "string",
-      "description": "Present on a 503 for a feature this deployment has deliberately not configured (not transient: do not retry; show the feature as unavailable), and on the 422 of POST /donor/me/password when `current_password` is missing or wrong.",
+      "description": "Present on a 503 for a feature this deployment has deliberately not configured (not transient: do not retry; show the feature as unavailable), and on the 422 of POST /donor/me/password when `current_password` is missing or wrong. Report export refusals use PARTNER_REPORT_DAILY_LIMIT (429, retry at the next UTC day) PARTNER_REPORT_STORAGE_LIMIT (409), or PARTNER_REPORT_TOO_LARGE (413). Existing reports remain available.",
       "enum": [
        "PAYMENTS_UNCONFIGURED",
        "EMAIL_UNCONFIGURED",
@@ -12311,7 +12591,10 @@
        "PUSH_UNCONFIGURED",
        "FOUNDING_CLAIMS_UNCONFIGURED",
        "PASSKEYS_UNCONFIGURED",
-       "CURRENT_PASSWORD_INCORRECT"
+       "CURRENT_PASSWORD_INCORRECT",
+       "PARTNER_REPORT_DAILY_LIMIT",
+       "PARTNER_REPORT_STORAGE_LIMIT",
+       "PARTNER_REPORT_TOO_LARGE"
       ]
      },
      "errors": {
@@ -12693,6 +12976,11 @@
      "push_gift_processed": {
       "type": "boolean",
       "description": "App notification when a verified gift is processed. Starts on."
+     },
+     "timezone_override": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "The saved manual IANA zone correction. Omitted while using the ZIP suggestion."
      }
     },
     "required": [
@@ -13836,14 +14124,12 @@
       "description": "Pass as gifts_offset for the next page of gifts.",
       "minimum": 0
      },
-     "next_referrals_offset": {
+     "next_referrals_cursor": {
       "type": [
-       "integer",
+       "string",
        "null"
       ],
-      "format": "int64",
-      "description": "Pass as referrals_offset for the next page of referred donors.",
-      "minimum": 0
+      "description": "Pass as referrals_cursor for the next page of referred donors."
      },
      "public_name": {
       "type": [
@@ -13896,7 +14182,7 @@
      "gifts",
      "id",
      "next_gifts_offset",
-     "next_referrals_offset",
+     "next_referrals_cursor",
      "public_name",
      "referred",
      "referrer",
@@ -14551,7 +14837,8 @@
      },
      "committed_minor": {
       "type": "integer",
-      "format": "int64"
+      "format": "int64",
+      "minimum": 0
      },
      "partner_signup_id": {
       "type": "string"
@@ -14629,7 +14916,8 @@
      },
      "amount_minor": {
       "type": "integer",
-      "format": "int64"
+      "format": "int64",
+      "minimum": 0
      },
      "verification_note": {
       "type": "string",
@@ -15016,7 +15304,7 @@
     "properties": {
      "name": {
       "type": "string",
-      "description": "First name + last initial, as the invitee chose to display it."
+      "description": "First name and last initial from the invitee's full name, or their public first name when no full name is on record."
      },
      "active": {
       "type": "boolean",
@@ -15663,6 +15951,10 @@
      "volunteer_minutes": {
       "type": "integer",
       "format": "int64"
+     },
+     "metrics_verified": {
+      "type": "boolean",
+      "description": "Giving and streak fields are current under the active recognition rules for every member. Hide those fields and rankings while false; volunteer minutes are independent."
      }
     },
     "required": [
@@ -15671,7 +15963,8 @@
      "active_givers",
      "annualized_minor",
      "avg_streak_days",
-     "volunteer_minutes"
+     "volunteer_minutes",
+     "metrics_verified"
     ],
     "additionalProperties": false
    },
@@ -16487,6 +16780,14 @@
       "items": {
        "$ref": "#/components/schemas/EventAttendee"
       }
+     },
+     "next_offset": {
+      "type": [
+       "integer",
+       "null"
+      ],
+      "format": "int64",
+      "description": "Next roster page offset, or null on the last page. Totals describe the whole event."
      }
     },
     "additionalProperties": false,
@@ -16512,7 +16813,8 @@
      "reserved",
      "waitlisted",
      "checked_in",
-     "attendees"
+     "attendees",
+     "next_offset"
     ]
    },
    "ImpactSummary": {

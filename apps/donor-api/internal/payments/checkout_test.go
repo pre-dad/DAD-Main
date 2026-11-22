@@ -6,9 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
-
-	"github.com/stripe/stripe-go/v87"
 )
 
 func TestCheckoutUsesPinnedSDKAndSavedParameters(t *testing.T) {
@@ -31,15 +30,7 @@ func TestCheckoutUsesPinnedSDKAndSavedParameters(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"cs_test_fixture","url":"https://checkout.stripe.com/c/test","livemode":false}`))
 	}))
 	defer server.Close()
-	backends := stripe.NewBackendsWithConfig(
-		&stripe.BackendConfig{
-			URL:               stripe.String(server.URL),
-			HTTPClient:        server.Client(),
-			MaxNetworkRetries: stripe.Int64(0),
-			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
-		},
-	)
-	gateway := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}
+	gateway := gatewayAt(server)
 	raw := []byte(
 		`{"mode":"payment","customer_email":"donor@example.org","allowed_payment_method_types":["card"],"line_items":[{"price_data":{"currency":"usd","unit_amount":3000,"product_data":{"name":"DAD one-time gift"}},"quantity":1}]}`,
 	)
@@ -53,6 +44,36 @@ func TestCheckoutUsesPinnedSDKAndSavedParameters(t *testing.T) {
 	}
 }
 
+func TestValidateRemoteCheckoutBoundaries(t *testing.T) {
+	live, test := true, false
+	remote := func(mutate func(*RemoteCheckout)) RemoteCheckout {
+		r := RemoteCheckout{ID: "cs_test_fixture", URL: "https://checkout.stripe.com/c/test", Livemode: &test}
+		mutate(&r)
+		return r
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*RemoteCheckout)
+		ok     bool
+	}{
+		{"valid", func(*RemoteCheckout) {}, true},
+		{"explicit https port", func(r *RemoteCheckout) { r.URL = "https://checkout.stripe.com:443/c/test" }, true},
+		{"longest id", func(r *RemoteCheckout) { r.ID = "cs_test_" + strings.Repeat("a", 255-len("cs_test_")) }, true},
+		{"id too long", func(r *RemoteCheckout) { r.ID = "cs_test_" + strings.Repeat("a", 256-len("cs_test_")) }, false},
+		{"live id", func(r *RemoteCheckout) { r.ID = "cs_live_fixture" }, false},
+		{"livemode true", func(r *RemoteCheckout) { r.Livemode = &live }, false},
+		{"livemode missing", func(r *RemoteCheckout) { r.Livemode = nil }, false},
+		{"http", func(r *RemoteCheckout) { r.URL = "http://checkout.stripe.com/c/test" }, false},
+		{"other host", func(r *RemoteCheckout) { r.URL = "https://checkout.stripe.com.example.org/c/test" }, false},
+		{"other port", func(r *RemoteCheckout) { r.URL = "https://checkout.stripe.com:8443/c/test" }, false},
+		{"userinfo", func(r *RemoteCheckout) { r.URL = "https://user@checkout.stripe.com/c/test" }, false},
+	} {
+		if err := ValidateRemoteCheckout(remote(tc.mutate)); (err == nil) != tc.ok {
+			t.Errorf("%s: got %v, want ok=%v", tc.name, err, tc.ok)
+		}
+	}
+}
+
 func TestPaymentBoundariesRejectLiveAndUnsafeOrigins(t *testing.T) {
 	for _, key := range []string{"sk_live_test", "rk_live_test", ""} {
 		if _, err := NewStripeGateway(key); err == nil {
@@ -60,7 +81,8 @@ func TestPaymentBoundariesRejectLiveAndUnsafeOrigins(t *testing.T) {
 		}
 	}
 	for _, origin := range []string{"http://example.org", "https://user:pass@example.org", "https://example.org/", "https://example.org?x=y", "https://example.org#part", "https://", "http://staff.localhost.example.org", "http://localhostx",
-		"https://Donor.example.org", "HTTPS://donor.example.org", "https://donor.example.org:443", "http://localhost:80", "https://donor.example.org:"} {
+		"https://Donor.example.org", "HTTPS://donor.example.org", "https://donor.example.org:443", "http://localhost:80", "https://donor.example.org:",
+		"https://donor.example.org:0443", "https://donor.example.org:99999", "https://donor.example.org:0", "http://localhost:03000"} {
 		if ValidateOrigin(origin) == nil {
 			t.Fatalf("unsafe origin accepted: %s", origin)
 		}
@@ -104,15 +126,7 @@ func TestFinancialGatewayUsesPinnedSDKAndIdempotentCardUpdate(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"fixture","livemode":false}`))
 	}))
 	defer server.Close()
-	backends := stripe.NewBackendsWithConfig(
-		&stripe.BackendConfig{
-			URL:               stripe.String(server.URL),
-			HTTPClient:        server.Client(),
-			MaxNetworkRetries: stripe.Int64(0),
-			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
-		},
-	)
-	g := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}
+	g := gatewayAt(server)
 	for _, read := range []func(context.Context, string) (Object, error){g.RetrievePaymentIntent, g.RetrieveRefund, g.RetrieveSubscription, g.RetrieveCheckout, g.RetrieveSetupIntent} {
 		value, err := read(context.Background(), "fixture")
 		if err != nil || !value.BoolIs("livemode", false) {
@@ -145,15 +159,7 @@ func TestSubscriptionMutationsNeverProrate(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"sub_fixture","object":"subscription"}`))
 	}))
 	defer server.Close()
-	backends := stripe.NewBackendsWithConfig(
-		&stripe.BackendConfig{
-			URL:               stripe.String(server.URL),
-			HTTPClient:        server.Client(),
-			MaxNetworkRetries: stripe.Int64(0),
-			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
-		},
-	)
-	gateway := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}
+	gateway := gatewayAt(server)
 	ctx := context.Background()
 	for _, err := range []error{
 		gateway.ScheduleCancellation(ctx, "sub_fixture", 1800000000, "key"),
@@ -200,15 +206,7 @@ func TestExpireCheckoutReportsWhoWonTheRace(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	backends := stripe.NewBackendsWithConfig(
-		&stripe.BackendConfig{
-			URL:               stripe.String(server.URL),
-			HTTPClient:        server.Client(),
-			MaxNetworkRetries: stripe.Int64(0),
-			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
-		},
-	)
-	gateway := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}
+	gateway := gatewayAt(server)
 	ctx := context.Background()
 	if status, err := gateway.ExpireCheckout(ctx, "cs_test_open", "key"); err != nil || status != "expired" {
 		t.Fatalf("open session: %q %v", status, err)

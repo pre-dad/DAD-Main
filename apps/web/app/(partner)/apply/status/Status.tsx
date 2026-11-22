@@ -45,7 +45,7 @@ export default function Status() {
       )}
       <p className="links">
         <Link href="/apply">Partner applications</Link>
-        <Link href="/about">About DAD</Link>
+        <Link href="/how-it-works">About DAD</Link>
         {data?.status === "APPROVED" && <a href="/partner/sign-in">Partner sign-in</a>}
       </p>
     </Page>

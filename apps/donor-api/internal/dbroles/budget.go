@@ -2,6 +2,7 @@ package dbroles
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -89,7 +90,11 @@ func Plan(logins []Login, replicas map[string]int32, budget int32) error {
 		if n, set := replicas[logins[i].Role.Key()]; set {
 			logins[i].Replicas = n
 		}
-		total += int64(logins[i].ConnectionLimit())
+		limit := logins[i].ConnectionLimit()
+		if limit < 1 || limit > math.MaxInt32 {
+			return fmt.Errorf("%s connection limit %d is out of range", logins[i].Role.Name, limit)
+		}
+		total += limit
 	}
 	if total > int64(budget) {
 		return fmt.Errorf(

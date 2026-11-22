@@ -1,5 +1,11 @@
 import { env } from "cloudflare:workers";
-import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
+import {
+	createLocalJWKSet,
+	errors,
+	exportJWK,
+	generateKeyPair,
+	SignJWT,
+} from "jose";
 import { describe, expect, it } from "vitest";
 import { authenticate, authorize } from "../src/auth";
 
@@ -38,6 +44,47 @@ describe("GitHub OIDC authorization", () => {
 		"rejects identities outside the configured trust boundary: %j",
 		(override) => {
 			expect(() => authorize({ ...claims, ...override }, env)).toThrow();
+		},
+	);
+
+	it.each(["refs/pull/7/merge", "refs/pull/123456/merge"])(
+		"accepts pull request merge refs: %s",
+		(ref) => {
+			const workflow_ref = `pre-dad/DAD-Main/.github/workflows/atm.yml@${ref}`;
+			expect(
+				authorize({ ...claims, event_name: "pull_request", workflow_ref }, env)
+					.role,
+			).toBe("read");
+		},
+	);
+
+	it.each([
+		"refs/pull/merge",
+		"refs/pull/x/merge",
+		"refs/pull/7/head",
+		"refs/pull/7/merge/extra",
+		"refs/tags/v1",
+	])("rejects unsupported workflow refs: %s", (ref) => {
+		const workflow_ref = `pre-dad/DAD-Main/.github/workflows/atm.yml@${ref}`;
+		expect(() =>
+			authorize({ ...claims, event_name: "pull_request", workflow_ref }, env),
+		).toThrow();
+	});
+
+	it.each(["refs/heads/main", "refs/pull/7/merge"])(
+		"never grants admin from %s",
+		(ref) => {
+			expect(() =>
+				authorize(
+					{
+						...claims,
+						environment: "atm-ledger-admin",
+						event_name: "workflow_dispatch",
+						workflow_ref: `pre-dad/DAD-Main/.github/workflows/atm.yml@${ref}`,
+					},
+					env,
+				),
+			).toThrow();
 		},
 	);
 
@@ -98,5 +145,45 @@ describe("GitHub OIDC authorization", () => {
 		const parts = valid.split(".");
 		parts[1] = btoa(JSON.stringify({ ...claims, actor_id: "1" }));
 		await expect(authenticate(parts.join("."), env, verify)).rejects.toThrow();
+	});
+
+	it.each([
+		["a key fetch timeout", () => new errors.JWKSTimeout()],
+		["a failed key fetch", () => new errors.JOSEError("bad status")],
+		["a network failure", () => new TypeError("fetch failed")],
+	])(
+		"reports %s as unavailable, not as a rejected identity",
+		async (_n, fail) => {
+			const key = await generateKeyPair("RS256", { modulusLength: 2048 });
+			const jwt = await new SignJWT(claims)
+				.setProtectedHeader({ alg: "RS256", kid: "test" })
+				.setIssuer("https://token.actions.githubusercontent.com")
+				.setAudience("atm-ledger:github:pre-dad/DAD-Main")
+				.setIssuedAt()
+				.setNotBefore("0s")
+				.setExpirationTime("2m")
+				.sign(key.privateKey);
+			const failing = async () => {
+				throw fail();
+			};
+			await expect(authenticate(jwt, env, failing)).rejects.toMatchObject({
+				status: 503,
+			});
+		},
+	);
+
+	it("keeps rejecting an unknown signing key as forbidden", async () => {
+		const key = await generateKeyPair("RS256", { modulusLength: 2048 });
+		const jwt = await new SignJWT(claims)
+			.setProtectedHeader({ alg: "RS256", kid: "other" })
+			.setIssuer("https://token.actions.githubusercontent.com")
+			.setAudience("atm-ledger:github:pre-dad/DAD-Main")
+			.setIssuedAt()
+			.setNotBefore("0s")
+			.setExpirationTime("2m")
+			.sign(key.privateKey);
+		await expect(
+			authenticate(jwt, env, createLocalJWKSet({ keys: [] })),
+		).rejects.toMatchObject({ status: 403 });
 	});
 });

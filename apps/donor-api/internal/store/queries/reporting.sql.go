@@ -13,14 +13,14 @@ import (
 
 const reportFirstGiftBySource = `-- name: ReportFirstGiftBySource :many
 SELECT
-	CASE WHEN p.referral_kind IS NULL THEN 'DIRECT' ELSE p.referral_kind END AS source,
-	g.frequency,
-	count(*)::bigint AS donors,
-	coalesce(sum(g.amount_minor), 0)::bigint AS gross_minor
+ coalesce(p.referral_kind, 'DIRECT')::text AS source,
+ g.frequency,
+ count(*)::bigint AS donors,
+ coalesce(sum(g.amount_minor), 0)::bigint AS gross_minor
 FROM donor_metric_projections p
 JOIN donor_gifts g ON g.stripe_object_id = p.first_gift_id
 WHERE p.first_gift_id IS NOT NULL
-	AND g.paid_at >= $1 AND g.paid_at < $2
+ AND g.paid_at >= $1 AND g.paid_at < $2
 GROUP BY source, g.frequency
 `
 
@@ -30,10 +30,10 @@ type ReportFirstGiftBySourceParams struct {
 }
 
 type ReportFirstGiftBySourceRow struct {
-	Source     interface{} `json:"source"`
-	Frequency  string      `json:"frequency"`
-	Donors     int64       `json:"donors"`
-	GrossMinor int64       `json:"gross_minor"`
+	Source     string `json:"source"`
+	Frequency  string `json:"frequency"`
+	Donors     int64  `json:"donors"`
+	GrossMinor int64  `json:"gross_minor"`
 }
 
 // First-gift conversions grouped by frozen source (DIRECT/LINK/IRL). A "first
@@ -79,21 +79,20 @@ type ReportFoundingDonorsParams struct {
 
 // R1 staff reporting (PRD §4 success metrics / docs/analytics.md).
 //
-// Every metric here is computed from COMMITTED SERVER FACTS — gifts, billing
-// periods, refunds, and the donor metric projection — never from the browser
-// analytics_events stream, which docs/analytics.md marks deferred by product
-// agreement ("metrics requiring it must be marked unavailable, never displayed
-// as fabricated zeros"). The one browser-only metric (seven-day share rate) has
-// no query here; the service reports it unavailable.
+// These queries use committed financial facts. Consented journey and share
+// observations are queried separately in analytics.sql; missing observations
+// are unavailable, never fabricated zeros.
 //
 // Attribution is the FROZEN source on the donor's own projection row
 // (referrer_id / referral_kind, set at the earliest verified payment), not the
-// browser campaign parameters. DIRECT = no referrer. A donor's "first gift" is
+// browser campaign parameters or the candidate stored on the gift row, which
+// recognition may have withheld. DIRECT = no referrer. A donor's "first gift" is
 // the projection's first_gift_id, which references donor_gifts.stripe_object_id.
 //
 // Reporting periods are half-open [start, end) on gift paid_at / period due_at,
-// in UTC. The caller supplies $1=start, $2=end; the service echoes the cutoff
-// and timezone alongside the numbers.
+// in UTC. The range queries take $1=start, $2=end; the as-of queries take the
+// named cutoff, start_at and end_at. The service echoes the cutoff and
+// timezone alongside the numbers.
 // Distinct donors whose permanent founding award was granted (projection
 // founding_awarded_at). A later refund/cancellation does not remove it. Scoped
 // to awards recorded in the period so the report is period-attributable.
@@ -161,6 +160,7 @@ WITH failures AS (
 SELECT count(*)::bigint AS failed_periods,
   coalesce(sum(amount_minor) FILTER (WHERE due_at+interval '7 days' <= $1::timestamptz
     AND (paid_at IS NULL OR paid_at >= due_at+interval '7 days')),0)::bigint AS lost_minor,
+  -- A payment after the grace window counts in both lost_minor and recovered_periods.
   count(*) FILTER (WHERE paid_at IS NOT NULL)::bigint AS recovered_periods,
   coalesce(sum(paid_minor),0)::bigint AS recovered_minor,
   count(*) FILTER (WHERE paid_at < due_at+interval '7 days')::bigint AS recovered_within_grace,
@@ -205,9 +205,10 @@ func (q *Queries) ReportInvoluntaryChurn(ctx context.Context, arg ReportInvolunt
 
 const reportReferralDollars = `-- name: ReportReferralDollars :one
 WITH first_gifts AS (
-  SELECT DISTINCT ON (donor_id) donor_id,paid_at,referrer_id,referral_kind
-  FROM donor_gifts WHERE paid_at < $1::timestamptz
-  ORDER BY donor_id,paid_at,stripe_object_id
+  SELECT DISTINCT ON (g.donor_id) g.donor_id,g.paid_at,p.referrer_id,p.referral_kind
+  FROM donor_gifts g LEFT JOIN donor_metric_projections p ON p.donor_id=g.donor_id
+  WHERE g.paid_at < $1::timestamptz
+  ORDER BY g.donor_id,g.paid_at,g.stripe_object_id
 ), net AS (
   SELECT f.referral_kind,g.amount_minor-coalesce((SELECT sum(r.amount_minor) FROM donor_refunds r WHERE r.gift_id=g.id
     AND coalesce((SELECT o.status FROM donor_refund_observations o WHERE o.refund_id=r.id
@@ -307,9 +308,10 @@ func (q *Queries) ReportRetentionMissing(ctx context.Context, arg ReportRetentio
 
 const reportViralCoefficient = `-- name: ReportViralCoefficient :one
 WITH first_gifts AS MATERIALIZED (
-  SELECT DISTINCT ON (donor_id) donor_id, paid_at, referrer_id
-  FROM donor_gifts WHERE paid_at < $1::timestamptz
-  ORDER BY donor_id, paid_at, stripe_object_id
+  SELECT DISTINCT ON (g.donor_id) g.donor_id, g.paid_at, p.referrer_id
+  FROM donor_gifts g LEFT JOIN donor_metric_projections p ON p.donor_id=g.donor_id
+  WHERE g.paid_at < $1::timestamptz
+  ORDER BY g.donor_id, g.paid_at, g.stripe_object_id
 ), cohort AS (
   SELECT donor_id FROM first_gifts WHERE paid_at >= $2::timestamptz
     AND paid_at < $3::timestamptz

@@ -1,18 +1,16 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
+import { KeysetPager } from "@/components/donor/KeysetPager";
 import { Page } from "@/components/donor/Page";
 import type { Schema } from "@/lib/api";
 import { formatDateTime } from "@/lib/dates";
-import { resourceMessages, useApiResource } from "@/lib/useApiResource";
+import { resourceMessages } from "@/lib/useApiResource";
+import { useKeysetResource } from "@/lib/useKeysetResource";
 
 export default function Audit() {
-  // Keyset paging: each entry is the cursor that opened a page, the first being none.
-  const [cursors, setCursors] = useState<string[]>([]);
-  const cursor = cursors.at(-1);
-  const { resource, data, reload } = useApiResource<Schema<"AuditPage">>(
-    `/donor/staff/audit${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+  const { resource, data, reload, heading, newer, older } = useKeysetResource<Schema<"AuditPage">>(
+    (cursor) => `/donor/staff/audit${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
   );
   const messages = resourceMessages(resource, {
     loading: "Loading audit history…",
@@ -20,7 +18,13 @@ export default function Audit() {
     forbidden: "Audit history requires administrator access.",
   });
   return (
-    <Page wide eyebrow="Staff" back={{ href: "/staff", label: "Staff back office" }} title="Staff audit history">
+    <Page
+      wide
+      eyebrow="Staff"
+      back={{ href: "/staff", label: "Staff back office" }}
+      title="Staff audit history"
+      heading={heading}
+    >
       {resource.state === "signedOut" && (
         <p>
           <Link className="button" href="/staff/sign-in">
@@ -59,20 +63,7 @@ export default function Audit() {
           ) : (
             <p>No events recorded.</p>
           )}
-          {cursors.length > 0 && (
-            <button type="button" className="secondary" onClick={() => setCursors(cursors.slice(0, -1))}>
-              Newer events
-            </button>
-          )}
-          {data.next_cursor !== null && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setCursors([...cursors, data.next_cursor ?? ""])}
-            >
-              Older events
-            </button>
-          )}
+          <KeysetPager newer={newer} older={older} labels={{ newer: "Newer events", older: "Older events" }} />
         </>
       )}
       <Announcer status={messages.status} alert={messages.alert} />

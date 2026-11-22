@@ -4,6 +4,8 @@ import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { api, failureMessage } from "@/lib/api";
 
+const resetMessage = "Streak reset to zero. The reason is in the audit log.";
+
 export function RecomputeRecognition({
   donor,
   onComplete,
@@ -21,20 +23,27 @@ export function RecomputeRecognition({
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (busy) return;
+    const trimmed = reason.trim();
+    if (trimmed.length < 10) {
+      setStatus("");
+      setError("Enter a reason of at least 10 characters.");
+      return;
+    }
     setBusy(true);
+    setStatus("");
     setError("");
     try {
       await api(`/donor/staff/donors/${donor}/recognition/${reset ? "reset" : "recompute"}`, {
         method: "POST",
-        body: JSON.stringify({ reason }),
+        body: JSON.stringify({ reason: trimmed }),
       });
       setStatus(
         reset
-          ? "Streak reset to zero. The reason is in the audit log."
+          ? resetMessage
           : "Recognition recomputed from recorded facts. The reason and result are in the audit log.",
       );
       setReason("");
-      onComplete(reset ? "Streak reset to zero. The reason is in the audit log." : undefined);
+      onComplete(reset ? resetMessage : undefined);
     } catch (cause) {
       setError(failureMessage(cause, "Recognition could not be recomputed. Please retry."));
     } finally {
@@ -65,7 +74,7 @@ export function RecomputeRecognition({
           />
         </label>
         <button className="secondary" type="submit" disabled={busy}>
-          {busy ? "Recomputing…" : "Recompute recognition"}
+          {busy ? (reset ? "Resetting…" : "Recomputing…") : reset ? "Reset streak" : "Recompute recognition"}
         </button>
         <Announcer status={announce ? status : ""} alert={error} />
       </form>

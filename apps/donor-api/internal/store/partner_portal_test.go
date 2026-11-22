@@ -9,6 +9,7 @@ import (
 
 	"dad/donor-api/internal/dbroles"
 	"dad/donor-api/internal/mail"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -72,11 +73,11 @@ func TestPartnerPortalSignInJourney(t *testing.T) {
 	}
 
 	links := deliverPartnerLinks(t, time.Now().UTC())
-	adminSession, err := portal.AcceptInvite(ctx, links["lead@gamma.test"])
+	adminSession, err := portal.AcceptInvite(ctx, links["lead@gamma.test"], false)
 	if err != nil {
 		t.Fatalf("approval link did not sign the signer in: %v", err)
 	}
-	if _, err := portal.AcceptInvite(ctx, links["lead@gamma.test"]); !errors.Is(err, ErrPartnerInvite) {
+	if _, err := portal.AcceptInvite(ctx, links["lead@gamma.test"], false); !errors.Is(err, ErrPartnerInvite) {
 		t.Fatalf("approval link worked twice: %v", err)
 	}
 	if shown, err := portal.CompanyCode(ctx, adminSession); err != nil || shown != code {
@@ -89,11 +90,11 @@ func TestPartnerPortalSignInJourney(t *testing.T) {
 	if err := portal.Invite(ctx, adminSession, "viewer@gamma.test", "Val Viewer", "VIEWER"); err != nil {
 		t.Fatalf("admin invite: %v", err)
 	}
-	viewerSession, err := portal.AcceptInvite(ctx, deliverPartnerLinks(t, time.Now().UTC())["viewer@gamma.test"])
+	viewerSession, err := portal.AcceptInvite(ctx, deliverPartnerLinks(t, time.Now().UTC())["viewer@gamma.test"], false)
 	if err != nil {
 		t.Fatalf("invitation link: %v", err)
 	}
-	if _, err := portal.AcceptInvite(ctx, "not-a-real-invite-token-0123456789abcdef"); !errors.Is(err, ErrPartnerInvite) {
+	if _, err := portal.AcceptInvite(ctx, "not-a-real-invite-token-0123456789abcdef", false); !errors.Is(err, ErrPartnerInvite) {
 		t.Fatalf("bad invite accepted: %v", err)
 	}
 
@@ -123,7 +124,7 @@ func TestPartnerPortalSignInJourney(t *testing.T) {
 	if len(signIn) != 1 {
 		t.Fatalf("sign-in requests sent %v, want one throttled link for the admin only", signIn)
 	}
-	if adminSession, err = portal.AcceptInvite(ctx, signIn["lead@gamma.test"]); err != nil {
+	if adminSession, err = portal.AcceptInvite(ctx, signIn["lead@gamma.test"], false); err != nil {
 		t.Fatalf("requested sign-in link: %v", err)
 	}
 	if _, err := portal.Users(ctx, adminSession); err != nil {
@@ -172,7 +173,7 @@ func TestPartnerPortalSignInJourney(t *testing.T) {
 	if err := portal.Invite(ctx, adminSession, "viewer@gamma.test", "Val Viewer", "VIEWER"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := portal.AcceptInvite(ctx, staleProof); !errors.Is(err, ErrPartnerInvite) {
+	if _, err := portal.AcceptInvite(ctx, staleProof, false); !errors.Is(err, ErrPartnerInvite) {
 		t.Fatalf("reinviting a removed user revived their old proof: %v", err)
 	}
 	if err := portal.RemoveUser(ctx, adminSession, mustNewID(t)); !errors.Is(err, pgx.ErrNoRows) {
@@ -218,6 +219,64 @@ func TestPartnerLinkReplacedBeforeDeliveryIsNotSent(t *testing.T) {
 	}
 }
 
+// A stored link that cannot be decrypted counts as a failed try, so the job
+// parks after five instead of being retried every minute for ever.
+func TestPartnerLinkUnreadableCiphertextParksAfterFiveTries(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	apps := PartnerApplicationService{DB: pool, Staff: &StaffService{DB: as(t, dbroles.API)}}
+	_, superToken := staffFixture(t, pool, "SUPER_ADMIN")
+	cleanPartners(t, pool)
+	mustExec(t, pool, "DELETE FROM donor_partner_login_emails")
+
+	appID := testID(t)
+	if err := apps.Apply(ctx, appID, validApplication("Lambda Org", "lee@lambda.test")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := apps.Approve(ctx, superToken, appID); err != nil {
+		t.Fatal(err)
+	}
+	transport := &recordingMail{failure: errors.New("connection reset")}
+	w := PartnerLoginEmailWorker{
+		DB:        as(t, dbroles.LoginEmailWorker),
+		Settings:  mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys},
+		Origin:    "https://donor.example.org",
+		Transport: transport,
+	}
+	now := time.Now().UTC()
+	if worked, err := w.DeliverNext(ctx, now); err != nil || !worked {
+		t.Fatal(worked, err)
+	}
+	transport.messages = nil
+	mustExec(t, pool, "UPDATE donor_partner_login_emails SET encrypted_token=decode('00','hex') WHERE completed_at IS NULL")
+	for i := 1; i <= 8; i++ {
+		if _, err := w.DeliverNext(ctx, now.Add(time.Duration(i)*2*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var attempts int
+	if err := pool.QueryRow(ctx, "SELECT attempts FROM donor_partner_login_emails WHERE completed_at IS NULL").Scan(&attempts); err != nil ||
+		attempts != 5 {
+		t.Fatalf("unreadable link was tried %d times, want it parked at 5: %v", attempts, err)
+	}
+	if len(transport.messages) != 0 {
+		t.Fatalf("mailed an unreadable link: %v", transport.messages)
+	}
+}
+
+func TestPartnerLoginEmailStatesTheLinkLifetime(t *testing.T) {
+	user := queries.LockPartnerLoginRecipientRow{Organization: "Org", Role: "ADMIN"}
+	for kind, want := range map[string]string{
+		partnerLinkApproved: "expires in 7 days",
+		partnerLinkInvited:  "expires in 7 days",
+		partnerLinkSignIn:   "expires in 15 minutes",
+	} {
+		if _, body := partnerLoginEmail(kind, user, "https://x"); !strings.Contains(body, want) {
+			t.Errorf("%s email does not say %q:\n%s", kind, want, body)
+		}
+	}
+}
+
 // issueTestPartnerSession mints a live partner session token for a user id,
 // bypassing the invite dance (used to bootstrap the admin in tests).
 func issueTestPartnerSession(t *testing.T, pool *pgxpool.Pool, userID string) string {
@@ -248,4 +307,63 @@ func mustUUID(t *testing.T, s string) pgtype.UUID {
 		t.Fatalf("bad uuid %q: %v", s, err)
 	}
 	return id
+}
+
+func TestPartnerSignInSerializesWithRecipientChanges(t *testing.T) {
+	pool := database(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	partner := approvedPartner(t, pool, "Serialized inbox", "SERIALINBOX", 0, 0)
+	user, _ := partnerPushSession(t, pool, partner, false)
+	email := user.String() + "@partner.test"
+	lock, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback(context.Background())
+	mustExec(t, lock, "UPDATE donor_partner_users SET disabled=true WHERE id=$1", user)
+	done := make(chan error, 1)
+	portal := PartnerPortalService{DB: as(t, dbroles.API)}
+	go func() { done <- portal.RequestSignIn(ctx, email) }()
+	select {
+	case err := <-done:
+		t.Fatalf("sign-in did not wait for recipient changes: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := lock.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_partner_login_emails WHERE partner_user_id=$1 AND kind='SIGN_IN'", user).Scan(&count); err != nil ||
+		count != 0 {
+		t.Fatalf("disabled recipient queued %d sign-in emails: %v", count, err)
+	}
+}
+
+func TestPartnerProfileRejectsControlsAndKeepsMultilineDescriptions(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	partner := approvedPartner(t, pool, "Profile validation", "PROFILEVALID", 0, 0)
+	_, token := partnerPushSession(t, pool, partner, false)
+	service := PartnerPortalService{DB: as(t, dbroles.API)}
+	for _, input := range [][2]string{{"Injected\nOrganization", "Details"}, {"Organization", "Hidden\x1bvalue"}} {
+		if err := service.SaveProfile(ctx, token, input[0], input[1]); !errors.Is(err, ErrPartnerApplication) {
+			t.Errorf("accepted control characters: %v", err)
+		}
+	}
+	if err := service.SaveProfile(ctx, token, "Organization", "First line\nSecond line"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDonorProfileRejectsCityControls(t *testing.T) {
+	service, token, _ := donorServiceFixture(t)
+	for _, city := range []string{"New\nYork", "Hidden\x1bcity", "Directional\u202ecity"} {
+		if _, err := service.SaveProfile(context.Background(), token, ProfileUpdate{City: city}); !errors.Is(err, ErrCity) {
+			t.Errorf("accepted city control characters: %v", err)
+		}
+	}
 }

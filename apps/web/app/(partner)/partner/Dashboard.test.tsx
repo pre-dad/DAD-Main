@@ -133,7 +133,7 @@ function stub(overrides: Record<string, unknown> = {}, calls: { url: string; ini
       if (url.endsWith("/users") && init?.method === "POST") return Promise.resolve(Response.json({ invited: true }));
       if (url.endsWith("/users"))
         return Promise.resolve(
-          Response.json({ users: [{ id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN" }] }),
+          Response.json({ users: [{ id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN", accepted: true }] }),
         );
       if (url.endsWith("/exports")) return Promise.resolve(Response.json({ exports: [] }));
       if (url.endsWith("/our-people"))
@@ -191,6 +191,95 @@ it("gives a partner admin export and user management, and emails invitations", a
   expect(screen.getByText("DELTA-7KQ4MX")).toBeInTheDocument();
 });
 
+it("tells a partner admin why an export was refused instead of asking them to retry", async () => {
+  stub();
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/report.pdf"))
+      return Promise.resolve(Response.json({ detail: "Too many requests" }, { status: 429 }));
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  fireEvent.click(await screen.findByRole("button", { name: "Export verified report (PDF)" }));
+  expect(await screen.findByText("Too many requests from this connection. Wait a minute, then retry.")).toBeVisible();
+});
+
+it("lets a partner admin remove a colleague but not themselves", async () => {
+  stub({ user_id: "u1" });
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/users") && init?.method !== "POST")
+      return Promise.resolve(
+        Response.json({
+          users: [
+            { id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN", accepted: true },
+            { id: "u2", email: "v@delta.test", name: "Val", role: "VIEWER", accepted: true },
+          ],
+        }),
+      );
+    if (String(input).endsWith("/remove")) return Promise.resolve(Response.json({ removed: true }));
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  expect(await screen.findByRole("button", { name: "Remove v@delta.test" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Remove a@delta.test" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Remove v@delta.test" }));
+  expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith("/remove"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Keep v@delta.test" }));
+  expect(screen.getByRole("button", { name: "Remove v@delta.test" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Remove v@delta.test" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm removal of v@delta.test" }));
+  expect(screen.getByRole("button", { name: "Confirm removal of v@delta.test" })).toBeDisabled();
+  expect(await screen.findByText("Removed v@delta.test.")).toBeInTheDocument();
+  expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+    "/api/donor/partner/users/u2/remove",
+    expect.objectContaining({ method: "POST" }),
+  );
+});
+
+it("lets a partner admin resend an unused invitation and shows the throttle", async () => {
+  stub({ user_id: "u1" });
+  const base = vi.mocked(fetch).getMockImplementation();
+  let resends = 0;
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/users") && init?.method !== "POST")
+      return Promise.resolve(
+        Response.json({
+          users: [
+            { id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN", accepted: true },
+            { id: "u2", email: "v@delta.test", name: "Val", role: "VIEWER", accepted: false },
+            { id: "u3", email: "w@delta.test", name: "Wes", role: "VIEWER", accepted: true },
+          ],
+        }),
+      );
+    if (String(input).endsWith("/u2/reinvite"))
+      return Promise.resolve(
+        resends++ === 0 ? Response.json({ invited: true }) : Response.json({ detail: "slow down" }, { status: 429 }),
+      );
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  expect(await screen.findByText(/v@delta.test · Viewer · Invitation not yet used/)).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: /Resend invitation/ })).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Resend invitation to v@delta.test" }));
+  expect(await screen.findByText(/emailed v@delta.test a new invitation/)).toBeInTheDocument();
+  expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+    "/api/donor/partner/users/u2/reinvite",
+    expect.objectContaining({ method: "POST" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Resend invitation to v@delta.test" }));
+  const throttled = await screen.findByText(/Too many requests/);
+  expect(throttled).toHaveAttribute("role", "alert");
+  const list = screen.getByText(/v@delta.test · Viewer/).closest("ul");
+  const invite = screen.getByRole("heading", { name: "Invite a colleague" }).closest("form");
+  if (!list || !invite) throw new Error("Missing users list or invite form");
+  expect(list.compareDocumentPosition(throttled) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(throttled.compareDocumentPosition(invite) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
 it("keeps a partner viewer read-only", async () => {
   stub({ role: "VIEWER" });
   render(<Dashboard />);
@@ -240,4 +329,144 @@ it("leaves the workforce size alone when only the profile changes", async () => 
   fireEvent.click(organization.getByRole("button", { name: "Save profile" }));
   expect(await organization.findByText("Organization profile saved.")).toBeInTheDocument();
   expect(calls.some((c) => c.url.endsWith("/workforce"))).toBe(false);
+});
+
+it.each([
+  ["exports", "report history", "Reports"],
+  ["users", "users", "Users"],
+  ["teams", "teams", "Our People"],
+])("shows and retries a failed %s read independently", async (endpoint, label, section) => {
+  stub();
+  const base = vi.mocked(fetch).getMockImplementation();
+  let failed = false;
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith(`/${endpoint}`) && !failed) {
+      failed = true;
+      return Promise.resolve(Response.json({ detail: "Unavailable" }, { status: 503 }));
+    }
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  const region = within(await screen.findByRole("region", { name: section }));
+  fireEvent.click(await region.findByRole("button", { name: `Retry ${label}` }));
+  await waitFor(() => expect(region.queryByRole("button", { name: `Retry ${label}` })).not.toBeInTheDocument());
+  expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith(`/${endpoint}`))).toHaveLength(2);
+  expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method)).toBe(true);
+});
+
+it("downloads the verified report through a temporary object URL and refreshes the history", async () => {
+  stub();
+  const createObjectURL = vi.fn(() => "blob:report");
+  const revokeObjectURL = vi.fn();
+  const original = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+  Object.assign(URL, { createObjectURL, revokeObjectURL });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/report.pdf")) return Promise.resolve(new Response(new Blob(["%PDF"])));
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  fireEvent.click(await screen.findByRole("button", { name: "Export verified report (PDF)" }));
+  expect(await screen.findByText("Your verified impact report was downloaded.")).toBeVisible();
+  expect(createObjectURL).toHaveBeenCalledTimes(1);
+  expect(click).toHaveBeenCalledTimes(1);
+  expect(revokeObjectURL).not.toHaveBeenCalled();
+  await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:report"), { timeout: 2500 });
+  await waitFor(() =>
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith("/exports"))).toHaveLength(2),
+  );
+  click.mockRestore();
+  Object.assign(URL, { createObjectURL: original.create, revokeObjectURL: original.revoke });
+});
+
+it("sends the partner to sign-in once sign-out is confirmed", async () => {
+  stub();
+  const assign = vi.fn();
+  vi.stubGlobal("location", { ...window.location, assign });
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/sign-out")) return Promise.resolve(Response.json({}));
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+  await waitFor(() => expect(assign).toHaveBeenCalledWith("/partner/sign-in"));
+});
+
+it("shows employee figures once enough employees have linked their giving", async () => {
+  stub();
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/our-people"))
+      return Promise.resolve(
+        Response.json({
+          enrolled: 12,
+          workforce_size: 400,
+          given_minor: 120000,
+          matched_minor: 60000,
+          avg_streak_days: 9,
+          volunteer_minutes: 180,
+          teams: 2,
+          suppressed: false,
+          streak_verified: true,
+        }),
+      );
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  const people = within(await screen.findByRole("region", { name: "Our People" }));
+  expect(await people.findByText("of 400 employees")).toBeVisible();
+  expect(people.getByText("$1,200.00")).toBeVisible();
+  expect(people.getByText("$600.00")).toBeVisible();
+  expect(people.getByText("Average streak 9 days")).toBeVisible();
+  expect(people.queryByText(/appear once at least 5 employees/)).not.toBeInTheDocument();
+  expect(people.queryByRole("button", { name: "Refresh employee figures" })).not.toBeInTheDocument();
+});
+
+it("keeps the saved profile and says so when only the workforce size fails to save", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  stub({}, calls);
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/workforce"))
+      return Promise.resolve(Response.json({ detail: "Down" }, { status: 503 }));
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  const organization = within(await screen.findByRole("region", { name: "Organization" }));
+  fireEvent.change(organization.getByLabelText("Organization name"), { target: { value: "Delta Group" } });
+  fireEvent.change(organization.getByLabelText("Workforce size"), { target: { value: "450" } });
+  fireEvent.click(organization.getByRole("button", { name: "Save profile" }));
+  expect(await organization.findByText(/Profile saved; workforce size was not/)).toBeInTheDocument();
+  expect(organization.queryByText(/could not be saved right now/)).not.toBeInTheDocument();
+  expect(calls.filter((c) => c.url.endsWith("/overview")).length).toBeGreaterThanOrEqual(2);
+});
+
+it("does not report a profile save when the profile request itself fails", async () => {
+  stub();
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/profile")) return Promise.resolve(Response.json({ detail: "Down" }, { status: 503 }));
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  const organization = within(await screen.findByRole("region", { name: "Organization" }));
+  fireEvent.click(organization.getByRole("button", { name: "Save profile" }));
+  expect(await organization.findByText(/The profile could not be saved right now/)).toBeInTheDocument();
+  expect(organization.queryByText("Organization profile saved.")).not.toBeInTheDocument();
+  expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith("/workforce"))).toBe(false);
+});
+
+it("lets keyboard users scroll the spend table", async () => {
+  stub();
+  render(<Dashboard />);
+  const table = await screen.findByRole("region", { name: "Spend by category across all initiatives" });
+  expect(table).toHaveAttribute("tabindex", "0");
 });

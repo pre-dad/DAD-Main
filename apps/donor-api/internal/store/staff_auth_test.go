@@ -118,7 +118,10 @@ func TestStaffPasskeyActivationSignsInOnceAndSignInIsSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	creation := invitation.Options.(protocol.PublicKeyCredentialCreationOptions)
+	creation, ok := invitation.Options.(protocol.PublicKeyCredentialCreationOptions)
+	if !ok {
+		t.Fatalf("invitation options are %T, want creation options", invitation.Options)
+	}
 	selection := creation.AuthenticatorSelection
 	if invitation.Email != id.String()+"@example.org" || invitation.Name != "Test staff" || creation.RelyingParty.ID != staffTestRPID ||
 		selection.ResidentKey != protocol.ResidentKeyRequirementRequired || selection.UserVerification != protocol.VerificationRequired ||
@@ -145,7 +148,10 @@ func TestStaffPasskeyActivationSignsInOnceAndSignInIsSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := ceremony.Options.(protocol.PublicKeyCredentialRequestOptions)
+	request, ok := ceremony.Options.(protocol.PublicKeyCredentialRequestOptions)
+	if !ok {
+		t.Fatalf("sign-in options are %T, want request options", ceremony.Options)
+	}
 	if request.RelyingPartyID != staffTestRPID || request.UserVerification != protocol.VerificationRequired ||
 		len(request.AllowedCredentials) != 0 {
 		t.Fatalf("sign-in is not a usernameless, verified request: %+v", request)
@@ -436,27 +442,34 @@ func TestStaffActivationRefusesADisabledAccount(t *testing.T) {
 	}
 }
 
-func TestStaffCeremoniesAreSweptOnceExpired(t *testing.T) {
+// Serial, because every pass purges every expired staff ceremony in the shared database.
+func TestRetentionPurgesExpiredStaffCeremoniesOnly(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	s := staffService(t, dbroles.API)
-	_, invite := invitedStaff(t, pool, "OP_PARTNERSHIPS")
-	for _, begin := range []func() error{
-		func() error { _, err := s.BeginSignIn(ctx); return err },
-		func() error { _, err := s.BeginActivation(ctx, invite); return err },
-	} {
-		stale, err := s.BeginSignIn(ctx)
-		if err != nil {
+	stale, err := s.BeginSignIn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := s.BeginSignIn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, pool, "UPDATE donor_staff_ceremonies SET expires_at=now()-interval '1 second' WHERE token_hash=$1", HashToken(stale.ID))
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_staff_ceremonies WHERE token_hash=$1", HashToken(live.ID)) })
+
+	retention := &TouchRetention{DB: as(t, dbroles.ProjectionWorker)}
+	if _, err = retention.PurgeNext(ctx, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	present := func(id string) (found bool) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM donor_staff_ceremonies WHERE token_hash=$1)", HashToken(id)).Scan(&found); err != nil {
 			t.Fatal(err)
 		}
-		mustExec(t, pool, "UPDATE donor_staff_ceremonies SET expires_at=now()-interval '1 second' WHERE token_hash=$1", HashToken(stale.ID))
-		if err = begin(); err != nil {
-			t.Fatal(err)
-		}
-		var left int
-		if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_ceremonies WHERE token_hash=$1", HashToken(stale.ID)).Scan(&left); err != nil ||
-			left != 0 {
-			t.Fatal("expired ceremony not swept", left, err)
-		}
+		return found
+	}
+	if present(stale.ID) || !present(live.ID) {
+		t.Fatalf("after a pass: expired ceremony present=%t, live ceremony present=%t", present(stale.ID), present(live.ID))
 	}
 }

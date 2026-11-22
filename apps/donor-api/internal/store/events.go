@@ -186,7 +186,8 @@ func (s EventService) Create(ctx context.Context, token string, in EventInput) (
 		})
 }
 
-// Update edits an existing event's fields. Publishing is separate. Raising
+// Update edits an existing event's fields; the slug is fixed at creation, so a
+// different one is rejected. Publishing is separate. Raising
 // the capacity of an upcoming event seats waitlisted donors at once (E-4);
 // lowering it never removes a seat already held.
 func (s EventService) Update(ctx context.Context, token string, id pgtype.UUID, in EventInput) error {
@@ -203,6 +204,9 @@ func (s EventService) Update(ctx context.Context, token string, id pgtype.UUID, 
 			}
 			if event.CancelledAt.Valid {
 				return struct{}{}, ErrEventCancelled
+			}
+			if in.Slug != event.Slug {
+				return struct{}{}, ErrStaffInput
 			}
 			if err = q.UpdateEvent(ctx, queries.UpdateEventParams{
 				ID: id, Title: params.Title, Type: params.Type, Description: params.Description,
@@ -397,16 +401,25 @@ func bookingOpen(ctx context.Context, q *queries.Queries, donor pgtype.UUID, e q
 	if now.Before(e.BookingOpensAt.Time.Add(-earlyBookingLead)) {
 		return false, false, nil
 	}
-	codes, err := q.DonorEarnedBadgeCodes(ctx, donor)
+	earned, err := earnedBadges(ctx, q, donor)
 	if err != nil {
 		return false, false, err
+	}
+	captain := badges.HoldsPerk(earned, badges.PerkTeamCaptain)
+	return captain, captain, nil
+}
+
+// earnedBadges is the set of badge codes the donor holds.
+func earnedBadges(ctx context.Context, q *queries.Queries, donor pgtype.UUID) (map[string]bool, error) {
+	codes, err := q.DonorEarnedBadgeCodes(ctx, donor)
+	if err != nil {
+		return nil, err
 	}
 	earned := make(map[string]bool, len(codes))
 	for _, c := range codes {
 		earned[c] = true
 	}
-	captain := badges.HoldsPerk(earned, badges.PerkTeamCaptain)
-	return captain, captain, nil
+	return earned, nil
 }
 
 // spotsLeft is capacity minus RESERVED count, floored at 0; nil when uncapped.
@@ -605,6 +618,7 @@ func escapeICS(s string) string {
 	s = strings.ReplaceAll(s, ",", "\\,")
 	s = strings.ReplaceAll(s, "\r\n", "\\n")
 	s = strings.ReplaceAll(s, "\n", "\\n")
+	s = strings.ReplaceAll(s, "\r", "\\n")
 	return s
 }
 
@@ -649,13 +663,9 @@ func canSeeInviteOnly(ctx context.Context, q *queries.Queries, donor pgtype.UUID
 	// Perk side.
 	byPerk := false
 	if e.QualifyingPerk != "" {
-		codes, err := q.DonorEarnedBadgeCodes(ctx, donor)
+		earned, err := earnedBadges(ctx, q, donor)
 		if err != nil {
 			return false, false, err
-		}
-		earned := make(map[string]bool, len(codes))
-		for _, c := range codes {
-			earned[c] = true
 		}
 		byPerk = badges.HoldsPerk(earned, badges.Perk(e.QualifyingPerk))
 	}
@@ -680,13 +690,9 @@ func (r EventReader) InviteOnlyEvents(ctx context.Context, token string) ([]Even
 		if err != nil || len(rows) == 0 {
 			return []EventView{}, err
 		}
-		codes, err := q.DonorEarnedBadgeCodes(ctx, d.ID)
+		earned, err := earnedBadges(ctx, q, d.ID)
 		if err != nil {
 			return nil, err
-		}
-		earned := make(map[string]bool, len(codes))
-		for _, c := range codes {
-			earned[c] = true
 		}
 		ids := make([]pgtype.UUID, 0, len(rows))
 		for _, e := range rows {

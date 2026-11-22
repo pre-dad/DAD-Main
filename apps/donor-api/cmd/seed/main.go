@@ -194,11 +194,12 @@ func seed(ctx context.Context, pool *pgxpool.Pool, o options, now time.Time) (po
 	if r.Offset, err = guard(ctx, pool, o.appendPopulation); err != nil {
 		return nil, r, err
 	}
+	generated := time.Now()
 	pop = generate(o.donors, r.Offset, o.seed, now)
 	for _, d := range pop.donors {
 		r.MostReferrals, r.LongestStreak = max(r.MostReferrals, d.referrals()), max(r.LongestStreak, d.streak)
 	}
-	r.GenerateSeconds = time.Since(now).Seconds()
+	r.GenerateSeconds = time.Since(generated).Seconds()
 	copied := time.Now()
 	if r.Rows, err = copyAll(ctx, pool, pop.tables()); err != nil {
 		return nil, r, err
@@ -208,7 +209,10 @@ func seed(ctx context.Context, pool *pgxpool.Pool, o options, now time.Time) (po
 	// suppress it however refreshing ends, interrupted included.
 	defer func() {
 		var suppressErr error
-		r.SuppressedMessages, suppressErr = suppressHistory(context.WithoutCancel(ctx), pool)
+		// Large populations queue years of history; allow cleanup to finish after cancellation.
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+		defer cancel()
+		r.SuppressedMessages, suppressErr = suppressHistory(cleanup, pool)
 		err = errors.Join(err, suppressErr)
 	}()
 	projected := time.Now()

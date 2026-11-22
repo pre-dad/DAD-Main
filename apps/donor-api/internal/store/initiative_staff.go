@@ -19,11 +19,13 @@ type StaffInitiative struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+// StaffInitiativePage is one page of initiatives, with the offset of the next.
 type StaffInitiativePage struct {
 	Initiatives []StaffInitiative `json:"initiatives"`
 	NextOffset  *int64            `json:"next_offset"`
 }
 
+// StaffInitiativeMetric is a headline metric with its publish state.
 type StaffInitiativeMetric struct {
 	MetricInput
 	PublishState string `json:"publish_state"`
@@ -57,6 +59,7 @@ func staffInitiative(i queries.DonorInitiative) StaffInitiative {
 	}
 }
 
+// List returns a page of initiatives of any publish state for staff.
 func (s InitiativeService) List(ctx context.Context, token string, offset int64) (StaffInitiativePage, error) {
 	if !pageOffsetValid(offset) {
 		return StaffInitiativePage{}, ErrStaffInput

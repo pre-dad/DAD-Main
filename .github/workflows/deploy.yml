@@ -45,7 +45,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-${{ github.event_name == 'workflow_dispatch' && inputs.env || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
   cancel-in-progress: false
 
 env:
@@ -183,6 +183,7 @@ jobs:
           DONOR_STAFF_ORIGIN: ${{ vars.DONOR_STAFF_ORIGIN }}
         run: |
           set -euo pipefail
+          : "${DONOR_PUBLIC_ORIGIN:?}" "${DONOR_STAFF_ORIGIN:?}"
           # The api and web Dockerfiles copy `apps/...` paths, so they build from the
           # repository root (as docker-compose.prod.yml does); nginx copies from its own
           # directory. scripts/check-docker-contexts.sh enforces this in CI.
@@ -204,7 +205,7 @@ jobs:
             docker build -t "$REGISTRY/dad/$name:$IMAGE_TAG" "$@" -f "$dockerfile" "$context"
             docker push "$REGISTRY/dad/$name:$IMAGE_TAG"
           }
-          build_push api apps/donor-api/Dockerfile .
+          build_push api apps/donor-api/Dockerfile . --build-arg "BUILD_REVISION=$IMAGE_TAG"
           build_push web apps/web/Dockerfile . \
             --build-arg "DONOR_PUBLIC_ORIGIN=$DONOR_PUBLIC_ORIGIN" \
             --build-arg "DONOR_STAFF_ORIGIN=$DONOR_STAFF_ORIGIN"

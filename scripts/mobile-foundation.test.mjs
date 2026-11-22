@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
-import { nativeContract, swiftContract, tokenSources } from "./mobile-foundation.mjs";
+import { bundle, nativeContract, swiftContract, tokenSources } from "./mobile-foundation.mjs";
 
 const original = JSON.parse(await readFile(new URL("../apps/donor-api/api/openapi.json", import.meta.url), "utf8"));
 
@@ -88,6 +91,43 @@ test("token generators preserve semantic names and reject invalid numeric values
   assert.ok(output["tokens.ts"].includes('"1": 4.5'));
   assert.ok(output["DADTokens.kt"].includes('"1" to 4.5,'));
   assert.throws(() => tokenSources({ ...input, text: { md: -1 } }), /Invalid design token/);
+});
+
+test("token generators reject extra groups that are not valid identifiers or hold invalid values", () => {
+  const input = { schema_version: 1, color: { ink: "#000" }, radius: { card: 1 }, space: { 1: 4 }, text: { md: 16 } };
+  assert.throws(() => tokenSources({ ...input, 'bad"group': { a: 1 } }), /Invalid token group name/);
+  assert.throws(() => tokenSources({ ...input, motion: { fast: -1 } }), /Invalid design token in motion/);
+  assert.ok(tokenSources({ ...input, motion: { fast: 120 } })["DADTokens.kt"].includes("val motion:"));
+});
+
+test("mobile contract carries only the security schemes its operations use", () => {
+  const mobile = nativeContract(original);
+  const used = new Set(
+    Object.values(mobile.paths).flatMap((item) =>
+      Object.values(item)
+        .filter((operation) => !Array.isArray(operation))
+        .flatMap((operation) => (operation.security ?? []).flatMap((requirement) => Object.keys(requirement))),
+    ),
+  );
+  assert.deepEqual(Object.keys(mobile.components.securitySchemes).sort(), [...used].sort());
+  assert.equal("staffCookieAuth" in mobile.components.securitySchemes, false);
+});
+
+test("bundle writes a manifest whose digests match the emitted files", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "mobile-bundle-"));
+  try {
+    const manifest = await bundle(directory);
+    assert.match(manifest.source_revision, /^[a-f0-9]{40}$/);
+    const emitted = (await readdir(directory)).filter((name) => name !== "manifest.json");
+    assert.deepEqual(Object.keys(manifest.files).sort(), emitted.sort());
+    for (const [name, digest] of Object.entries(manifest.files)) {
+      const contents = await readFile(join(directory, name));
+      assert.equal(digest, createHash("sha256").update(contents).digest("hex"), name);
+    }
+    assert.deepEqual(JSON.parse(await readFile(join(directory, "manifest.json"), "utf8")), manifest);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("Swift nullable input preserves object constraints and admits null enum values", () => {

@@ -386,7 +386,7 @@ export interface paths {
         put?: never;
         /**
          * Save identity profile fields
-         * @description Replaces the donor's self-service identity fields. `timezone` is derived from `zip` (US ZIP to IANA zone) and is never accepted from the client; `account_role` is immutable and cannot be set here. A field sent empty clears its stored value; a blank `zip` clears the derived `timezone` with it. 422 for an invalid ZIP, phone, or city.
+         * @description Replaces ZIP, city and phone. The ZIP suggests the IANA time zone. Optional timezone_override corrects that suggestion: omit it to preserve the saved choice, send an empty string to restore ZIP-based time, or choose a supported US zone. A blank ZIP clears only an automatically derived zone; a manual correction remains. account_role is immutable. 422 for invalid ZIP, phone, city or zone.
          */
         post: operations["saveProfile"];
         delete?: never;
@@ -2141,7 +2141,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download the branded impact report */
+        /**
+         * Download the branded impact report
+         * @description Admin-only. Reuses the immutable PDF for the same organization snapshot and UTC day. New artifacts are limited to 20 per UTC day and 1,000 retained reports or 128 MiB per organization. Existing reports remain downloadable after a limit is reached.
+         */
         get: operations["partnerReport"];
         put?: never;
         post?: never;
@@ -2171,7 +2174,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/partner/users/{userID}/remove": {
+    "/donor/partner/users/{user_id}/reinvite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resend a partner portal invitation
+         * @description Admin only. For a user who has not accepted their invitation yet: ends the old link and emails a fresh single-use link that expires after 7 days. Not found once the user has accepted or was removed. Limited to one resend a minute and five an hour per user (429).
+         */
+        post: operations["partnerReinviteUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/users/{user_id}/remove": {
         parameters: {
             query?: never;
             header?: never;
@@ -2222,7 +2245,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{appID}/approve": {
+    "/donor/staff/partners/{app_id}/approve": {
         parameters: {
             query?: never;
             header?: never;
@@ -2242,7 +2265,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{appID}/reject": {
+    "/donor/staff/partners/{app_id}/reject": {
         parameters: {
             query?: never;
             header?: never;
@@ -2259,7 +2282,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}/link": {
+    "/donor/staff/partners/{partner_id}/link": {
         parameters: {
             query?: never;
             header?: never;
@@ -2276,7 +2299,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}/match": {
+    "/donor/staff/partners/{partner_id}/match": {
         parameters: {
             query?: never;
             header?: never;
@@ -2408,7 +2431,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}/match-status": {
+    "/donor/staff/partners/{partner_id}/match-status": {
         parameters: {
             query?: never;
             header?: never;
@@ -2425,7 +2448,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}/match-payment": {
+    "/donor/staff/partners/{partner_id}/match-payment": {
         parameters: {
             query?: never;
             header?: never;
@@ -2459,7 +2482,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}": {
+    "/donor/staff/partners/{partner_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2476,7 +2499,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}/users": {
+    "/donor/staff/partners/{partner_id}/users": {
         parameters: {
             query?: never;
             header?: never;
@@ -2496,7 +2519,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}/logo": {
+    "/donor/staff/partners/{partner_id}/logo": {
         parameters: {
             query?: never;
             header?: never;
@@ -2517,7 +2540,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/partners/{partnerID}/users/{userID}/remove": {
+    "/donor/staff/partners/{partner_id}/users/{user_id}/reinvite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resend a partner user invitation
+         * @description For a user who has not accepted their invitation yet: ends the old link and emails a fresh single-use link that expires after 7 days. Not found once the user has accepted or was removed. Limited to one resend a minute and five an hour per user (429). Audited.
+         */
+        post: operations["staffPartnerReinviteUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/partners/{partner_id}/users/{user_id}/remove": {
         parameters: {
             query?: never;
             header?: never;
@@ -2865,7 +2908,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * /donor/staff/donors/{donor_id}/recognition/reset
+         * Replay recognition from recorded facts
          * @description Replays recorded facts without editing financial history or granting arbitrary continuity. Requires donor.recompute and a reason. Permanent earned badges and historical best streaks remain permanent.
          */
         post: operations["postDonorStaffDonorsDonorIdRecognitionReset"];
@@ -2882,12 +2925,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** /donor/staff/content/rules */
+        /** Read recognition rules */
         get: operations["getDonorStaffContentRules"];
         put?: never;
         /**
-         * /donor/staff/content/rules
-         * @description Replaces the words only; how badges and milestones are earned does not change. An empty title and text restore the default.
+         * Replace recognition rules
+         * @description Replaces badge earning thresholds, minimum ranking populations, PNG/JPEG artwork, and the milestone ladder. Every catalog badge must be supplied. The JSON body may be up to 10 MiB to hold the complete artwork batch. Wording changes use /donor/staff/content/wording.
          */
         post: operations["postDonorStaffContentRules"];
         delete?: never;
@@ -2906,7 +2949,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * /donor/signup
+         * Start account creation
          * @description Starts account creation by emailing a verification link; no session is issued here. Answers 200 `{"sent":true}` whether or not the address already has an account, so it never reveals which. 503 `EMAIL_UNCONFIGURED` when the deployment has no email. The link (`/account/claim#token=…`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim, which takes the optional `device_name` and `platform` that label the resulting session. The response does not reveal whether an email belongs to a disabled donor, staff or partner; unavailable identities receive the same sent:true response without creating a donor account.
          */
         post: operations["postDonorSignup"];
@@ -2926,7 +2969,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * /donor/password/sign-in
+         * Sign in with a password
          * @description Signs in with an email and password. 401 covers a wrong password, an unknown email, an unclaimed account and a disabled account alike, so none reveals whether an account exists. A browser request receives an HttpOnly cookie; a native request (`X-DAD-Client: native`, no Origin, no cookies) receives NativeSession and may describe its device so the donor can recognize the session later.
          */
         post: operations["postDonorPasswordSignIn"];
@@ -2946,8 +2989,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * /donor/me/password
-         * @description Sets or changes the signed-in donor's password. `current_password` is required unless the session proved its password within the last 15 minutes; leave it empty when setting a first password right after signing in by email link. 401 means the session is missing, expired or revoked: sign in again. 422 with `code` `CURRENT_PASSWORD_INCORRECT` means the session is fine but `current_password` was missing or wrong: keep the donor signed in and let them retry (attempts are rate limited). Contract versions before 2.4 answered 401 with the same `detail` ("The email or password is incorrect"); a client that must still talk to such a server should treat that 401 on this route as a wrong current password when the access token is otherwise valid.
+         * Set or change the password
+         * @description Sets or changes the signed-in donor's password. `current_password` is required unless the session proved its password within the last 15 minutes; leave it empty when setting a first password right after signing in by email link. A successful change signs out the donor's other sessions and keeps the calling one. 401 means the session is missing, expired or revoked: sign in again. 422 with `code` `CURRENT_PASSWORD_INCORRECT` means the session is fine but `current_password` was missing or wrong: keep the donor signed in and let them retry (attempts are rate limited). Contract versions before 2.4 answered 401 with the same `detail` ("The email or password is incorrect"); a client that must still talk to such a server should treat that 401 on this route as a wrong current password when the access token is otherwise valid.
          */
         post: operations["postDonorMePassword"];
         delete?: never;
@@ -2999,10 +3042,10 @@ export interface components {
             /** @description Human-readable explanation, safe to show to the user. Never contains credentials, donor data, or internal error text. */
             detail: string;
             /**
-             * @description Present on a 503 for a feature this deployment has deliberately not configured (not transient: do not retry; show the feature as unavailable), and on the 422 of POST /donor/me/password when `current_password` is missing or wrong.
+             * @description Present on a 503 for a feature this deployment has deliberately not configured (not transient: do not retry; show the feature as unavailable), and on the 422 of POST /donor/me/password when `current_password` is missing or wrong. Report export refusals use PARTNER_REPORT_DAILY_LIMIT (429, retry at the next UTC day) PARTNER_REPORT_STORAGE_LIMIT (409), or PARTNER_REPORT_TOO_LARGE (413). Existing reports remain available.
              * @enum {string}
              */
-            code?: "PAYMENTS_UNCONFIGURED" | "EMAIL_UNCONFIGURED" | "SOURCE_STORAGE_UNCONFIGURED" | "PUSH_UNCONFIGURED" | "FOUNDING_CLAIMS_UNCONFIGURED" | "PASSKEYS_UNCONFIGURED" | "CURRENT_PASSWORD_INCORRECT";
+            code?: "PAYMENTS_UNCONFIGURED" | "EMAIL_UNCONFIGURED" | "SOURCE_STORAGE_UNCONFIGURED" | "PUSH_UNCONFIGURED" | "FOUNDING_CLAIMS_UNCONFIGURED" | "PASSKEYS_UNCONFIGURED" | "CURRENT_PASSWORD_INCORRECT" | "PARTNER_REPORT_DAILY_LIMIT" | "PARTNER_REPORT_STORAGE_LIMIT" | "PARTNER_REPORT_TOO_LARGE";
             /** @description Present only on a 422 from POST /donor/staff/founding-claims: every problem found, up to 100. */
             errors?: components["schemas"]["PublicationProblem"][];
         };
@@ -3152,6 +3195,8 @@ export interface components {
             consent_version: string;
             /** @description App notification when a verified gift is processed. Starts on. */
             push_gift_processed: boolean;
+            /** @description The saved manual IANA zone correction. Omitted while using the ZIP suggestion. */
+            timezone_override?: string;
         };
         /** @description The calling session's push registration. */
         PushRegistration: {
@@ -3576,11 +3621,8 @@ export interface components {
              * @description Pass as gifts_offset for the next page of gifts.
              */
             next_gifts_offset: number | null;
-            /**
-             * Format: int64
-             * @description Pass as referrals_offset for the next page of referred donors.
-             */
-            next_referrals_offset: number | null;
+            /** @description Pass as referrals_cursor for the next page of referred donors. */
+            next_referrals_cursor: string | null;
             public_name: string | null;
             referred: components["schemas"]["ReferredDonor"][];
             referrer: components["schemas"]["ReferrerLink"] | null;
@@ -3938,7 +3980,7 @@ export interface components {
         };
         /** @description One opted-in person the donor brought in (N-3). */
         NetworkInvitee: {
-            /** @description First name + last initial, as the invitee chose to display it. */
+            /** @description First name and last initial from the invitee's full name, or their public first name when no full name is on record. */
             name: string;
             /** @description Whether the invitee is still giving. */
             active: boolean;
@@ -4177,6 +4219,8 @@ export interface components {
             avg_streak_days: number;
             /** Format: int64 */
             volunteer_minutes: number;
+            /** @description Giving and streak fields are current under the active recognition rules for every member. Hide those fields and rankings while false; volunteer minutes are independent. */
+            metrics_verified: boolean;
         };
         StaffPartner: {
             /** Format: uuid */
@@ -4411,6 +4455,11 @@ export interface components {
              */
             checked_in: number;
             attendees: components["schemas"]["EventAttendee"][];
+            /**
+             * Format: int64
+             * @description Next roster page offset, or null on the last page. Totals describe the whole event.
+             */
+            next_offset: number | null;
         };
         /** @description The donor's own impact totals (I-1, I-3). */
         ImpactSummary: {
@@ -4987,7 +5036,7 @@ export interface operations {
                         name: "app_opened" | "role_selected" | "signup_started" | "signup_completed" | "attribution_captured" | "gift_started" | "gift_completed" | "gift_failed" | "gift_recovered" | "gift_lapsed" | "amount_changed" | "gift_cancelled" | "account_deleted" | "invite_shared" | "irl_code_shown" | "referral_converted" | "badge_earned" | "milestone_reached" | "rankings_toggled" | "volunteer_opted_in" | "event_viewed" | "event_reserved" | "event_waitlisted" | "event_checked_in" | "team_created" | "team_joined" | "partner_signup_submitted" | "partner_approved" | "partner_report_exported" | "push_opened";
                         /**
                          * Format: date-time
-                         * @description Client event time (RFC 3339). Rejected if missing or implausibly in the future.
+                         * @description Client event time (RFC 3339). Rejected if missing, implausibly in the future, or more than 30 days old.
                          */
                         occurred_at: string;
                         /** @description Typed payload for the events that carry one: attribution_captured requires {source: link|IRL|company}, invite_shared requires {channel}, push_opened requires {type}. All other events take no properties. */
@@ -5405,12 +5454,17 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description US ZIP (`12345` or `12345-6789`). Empty clears the ZIP and derived timezone. */
+                    /** @description US ZIP or ZIP+4. Empty clears the ZIP and its automatic zone; a manual time zone remains. */
                     zip?: string;
                     /** @description Display city. Empty clears it. */
                     city?: string;
                     /** @description E.164 phone, e.g. `+14155550123`. Empty clears it. */
                     phone?: string;
+                    /**
+                     * @description Omit to preserve the manual correction. Empty restores the ZIP suggestion. Controls the local midnight used by the streak.
+                     * @enum {string}
+                     */
+                    timezone_override?: "" | "America/New_York" | "America/Chicago" | "America/Denver" | "America/Phoenix" | "America/Los_Angeles" | "America/Anchorage" | "America/Adak" | "Pacific/Honolulu" | "America/Puerto_Rico" | "Pacific/Guam" | "Pacific/Pago_Pago";
                 };
             };
         };
@@ -6504,7 +6558,8 @@ export interface operations {
         parameters: {
             query?: {
                 gifts_offset?: number;
-                referrals_offset?: number;
+                /** @description The previous page's next_referrals_cursor; omit for the first page. */
+                referrals_cursor?: string;
             };
             header?: never;
             path: {
@@ -7868,7 +7923,10 @@ export interface operations {
     };
     staffEvent: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Rows to skip. Pages hold up to 50 rows; pass the previous page's `next_offset` until it is null. */
+                offset?: components["parameters"]["Offset"];
+            };
             header?: never;
             path: {
                 event_id: string;
@@ -8580,6 +8638,7 @@ export interface operations {
                             email: string;
                             name: string;
                             role: string;
+                            accepted: boolean;
                         }[];
                     };
                 };
@@ -8685,7 +8744,35 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            429: components["responses"]["RateLimitedByIngress"];
+            /** @description Report storage is full; existing artifacts remain available. Code PARTNER_REPORT_STORAGE_LIMIT. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Report exceeds 1,000 spend categories or the 2 MiB PDF limit. Code PARTNER_REPORT_TOO_LARGE. Existing reports remain available. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The daily new-artifact limit or ingress request limit was reached. PARTNER_REPORT_DAILY_LIMIT identifies the daily quota; Retry-After is seconds until the next UTC day. */
+            429: {
+                headers: {
+                    /** @description Seconds before retrying. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
             503: components["responses"]["Unavailable"];
         };
     };
@@ -8713,12 +8800,48 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
+    partnerReinviteUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, unknown>;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        invited: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
     partnerRemoveUser: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                userID: string;
+                user_id: string;
             };
             cookie?: never;
         };
@@ -8828,7 +8951,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                appID: string;
+                app_id: string;
             };
             cookie?: never;
         };
@@ -8863,7 +8986,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                appID: string;
+                app_id: string;
             };
             cookie?: never;
         };
@@ -8901,7 +9024,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -8941,7 +9064,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -9103,6 +9226,8 @@ export interface operations {
                         /** Format: int64 */
                         teams: number;
                         suppressed: boolean;
+                        /** @description The average streak is current for every linked employee. Hide the average streak while false; other totals come from recorded facts. */
+                        streak_verified: boolean;
                     };
                 };
             };
@@ -9211,7 +9336,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -9249,12 +9374,12 @@ export interface operations {
     staffPartnerMatchPayment: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Version-4 UUID identifying this offline payment. Reuse the same key and payload after an uncertain result. Reusing it with another payload returns 409. Omission remains compatible with older clients but cannot deduplicate a retry. */
-                "Idempotency-Key"?: string;
+            header: {
+                /** @description A fresh version 4 UUID per distinct command. Retrying with the same key and body returns the original outcome and never repeats the effect; the same key with a different body is a 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
             };
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -9329,7 +9454,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -9355,7 +9480,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -9396,7 +9521,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -9422,7 +9547,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                partnerID: string;
+                partner_id: string;
             };
             cookie?: never;
         };
@@ -9455,13 +9580,45 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
+    staffPartnerReinviteUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                partner_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        invited: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
     staffPartnerRemoveUser: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                partnerID: string;
-                userID: string;
+                partner_id: string;
+                user_id: string;
             };
             cookie?: never;
         };
@@ -10165,6 +10322,8 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];

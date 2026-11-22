@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -24,7 +25,7 @@ func TestPhoneSignIn(t *testing.T) {
 	if _, err := pool.Exec(ctx, "UPDATE donors SET phone=$2 WHERE id=$1", id, phone); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { pool.Exec(ctx, "DELETE FROM donor_phone_codes WHERE phone=$1", phone) })
+	cleanup(t, "DELETE FROM donor_phone_codes WHERE phone=$1", phone)
 
 	sender := &sms.StubSender{}
 	sends := &sync.WaitGroup{}
@@ -218,9 +219,16 @@ func TestPhoneChangeInvalidatesPendingCode(t *testing.T) {
 		phone,
 		HashToken("123456"),
 	)
-	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_phone_codes WHERE phone=$1", phone) })
+	cleanup(t, "DELETE FROM donor_phone_codes WHERE phone=$1", phone)
+	// An empty update clears the donor's phone, which must also drop the code
+	// pending for the number they no longer hold.
 	if _, err := s.SaveProfile(ctx, token, ProfileUpdate{}); err != nil {
 		t.Fatal(err)
+	}
+	var pending int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_phone_codes WHERE phone=$1", phone).Scan(&pending); err != nil ||
+		pending != 0 {
+		t.Fatalf("pending codes after the phone was cleared = %d: %v", pending, err)
 	}
 	other, _ := donor(t, pool)
 	mustExec(t, pool, "UPDATE donors SET phone=$2 WHERE id=$1", other, phone)
@@ -235,7 +243,7 @@ func TestOIDCSignInLinksAndAuthenticates(t *testing.T) {
 	api := as(t, dbroles.API)
 	id, email := donor(t, pool)
 	ctx := context.Background()
-	t.Cleanup(func() { pool.Exec(ctx, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id) })
+	cleanup(t, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id)
 
 	settings := &oidc.Settings{Mode: "stub", StubKey: "secret", ClientIDs: map[oidc.Provider][]string{
 		oidc.Apple: {"com.dad.app"}, oidc.Google: {"g.apps"},
@@ -302,7 +310,7 @@ func TestOIDCNonceBinding(t *testing.T) {
 	api := as(t, dbroles.API)
 	id, email := donor(t, pool)
 	ctx := context.Background()
-	t.Cleanup(func() { pool.Exec(ctx, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id) })
+	cleanup(t, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id)
 	settings := &oidc.Settings{Mode: "stub", StubKey: "secret", ClientIDs: map[oidc.Provider][]string{oidc.Google: {"g.apps"}}}
 	svc := OIDCService{DB: api, Verifier: oidc.NewVerifier(settings), Settings: settings}
 	required := *settings
@@ -386,22 +394,16 @@ func TestOIDCLinkRechecksEmailAfterDonorLock(t *testing.T) {
 	}
 }
 
+var sixDigitCode = regexp.MustCompile(`\b\d{6}\b`)
+
 // extractCode pulls the 6-digit code out of the stub SMS message.
 func extractCode(t *testing.T, msg string) string {
 	t.Helper()
-	var code string
-	for _, f := range []byte(msg) {
-		if f >= '0' && f <= '9' {
-			code += string(f)
-		}
+	code := sixDigitCode.FindString(msg)
+	if code == "" {
+		t.Fatalf("no code in %q", msg)
 	}
-	// The message contains only the code's digits and the "10 minutes" literal;
-	// take the first run of 6 digits.
-	for i := 0; i+6 <= len(code); i++ {
-		return code[i : i+6]
-	}
-	t.Fatalf("no code in %q", msg)
-	return ""
+	return code
 }
 
 type unreachableProvider struct{}
@@ -442,4 +444,126 @@ func TestPhoneSignInHidesAFailedSend(t *testing.T) {
 		}
 	}
 	sends.Wait()
+}
+
+func TestPhoneSignInRefusesADisabledDonor(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	id, _ := donor(t, pool)
+	phone := "+14155550199"
+	mustExec(t, pool, "UPDATE donors SET phone=$2 WHERE id=$1", id, phone)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_phone_codes WHERE phone=$1", phone) })
+	sender := &sms.StubSender{}
+	sends := &sync.WaitGroup{}
+	svc := PhoneService{DB: as(t, dbroles.API), Sender: sender, sends: sends}
+
+	mustExec(t, pool, "UPDATE donors SET disabled=true WHERE id=$1", id)
+	if err := svc.BeginSignIn(ctx, phone); err != nil {
+		t.Fatal(err)
+	}
+	sends.Wait()
+	var stored int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_phone_codes WHERE phone=$1", phone).Scan(&stored); err != nil || stored != 0 {
+		t.Fatalf("a code was stored for a disabled donor: count=%d err=%v", stored, err)
+	}
+	if _, sent := sender.Last(phone); sent {
+		t.Fatal("a code was sent to a disabled donor")
+	}
+
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_phone_codes(phone,code_hash,expires_at) VALUES($1,$2,now()+interval '10 minutes')",
+		phone,
+		HashToken("123456"),
+	)
+	if _, err := svc.FinishSignIn(ctx, phone, "123456", Client{}); !errors.Is(err, ErrSignInCode) {
+		t.Fatalf("a disabled donor signed in with a valid code: %v", err)
+	}
+	var sessions int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_sessions WHERE donor_id=$1", id).Scan(&sessions); err != nil || sessions != 0 {
+		t.Fatalf("a disabled donor got %d sessions: %v", sessions, err)
+	}
+}
+
+func TestOIDCSignInRefusesADisabledDonor(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	settings := &oidc.Settings{Mode: "stub", StubKey: "fixture", ClientIDs: map[oidc.Provider][]string{oidc.Google: {"g.apps"}}}
+	svc := OIDCService{DB: as(t, dbroles.API), Verifier: oidc.NewVerifier(settings), Settings: settings}
+	signIn := func(subject, email string) error {
+		_, err := svc.SignIn(
+			ctx,
+			oidc.Google,
+			oidc.SignStubToken("fixture", oidc.Google, subject, "g.apps", email, time.Now().Add(time.Hour)),
+			"",
+			Client{},
+		)
+		return err
+	}
+	t.Run("unlinked", func(t *testing.T) {
+		id, email := donor(t, pool)
+		t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id) })
+		mustExec(t, pool, "UPDATE donors SET disabled=true WHERE id=$1", id)
+		if err := signIn("sub-"+id.String(), email); !errors.Is(err, ErrSignInCode) {
+			t.Fatalf("a disabled donor signed in by email: %v", err)
+		}
+		var links int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_oidc_identities WHERE donor_id=$1", id).Scan(&links); err != nil ||
+			links != 0 {
+			t.Fatalf("a disabled donor got %d links: %v", links, err)
+		}
+	})
+	t.Run("linked", func(t *testing.T) {
+		id, email := donor(t, pool)
+		t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id) })
+		subject := "sub-" + id.String()
+		if err := signIn(subject, email); err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, pool, "UPDATE donors SET disabled=true WHERE id=$1", id)
+		if err := signIn(subject, ""); !errors.Is(err, ErrSignInCode) {
+			t.Fatalf("a disabled donor signed in by link: %v", err)
+		}
+	})
+}
+
+func TestOIDCConcurrentFirstSignInsBothSucceed(t *testing.T) {
+	pool := database(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	id, email := donor(t, pool)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id) })
+	settings := &oidc.Settings{Mode: "stub", StubKey: "fixture", ClientIDs: map[oidc.Provider][]string{oidc.Google: {"g.apps"}}}
+	svc := OIDCService{DB: as(t, dbroles.API), Verifier: oidc.NewVerifier(settings), Settings: settings}
+	token := oidc.SignStubToken("fixture", oidc.Google, "sub-"+id.String(), "g.apps", email, time.Now().Add(time.Hour))
+	// Holding the donor's lock parks both sign-ins after their link lookup missed.
+	lock, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback(ctx)
+	mustExec(t, lock, "SELECT id FROM donors WHERE id=$1 FOR NO KEY UPDATE", id)
+	const racers = 2
+	results := make(chan error, racers)
+	for range racers {
+		go func() {
+			_, err := svc.SignIn(ctx, oidc.Google, token, "", Client{})
+			results <- err
+		}()
+	}
+	awaitPartnerWaiters(t, pool, racers)
+	if err := lock.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for range racers {
+		if err := <-results; err != nil {
+			t.Fatalf("a concurrent first sign-in failed: %v", err)
+		}
+	}
+	var links int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_oidc_identities WHERE donor_id=$1", id).Scan(&links); err != nil ||
+		links != 1 {
+		t.Fatalf("links=%d err=%v, want exactly one", links, err)
+	}
 }

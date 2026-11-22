@@ -1,18 +1,16 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
+import { KeysetPager } from "@/components/donor/KeysetPager";
 import { Page } from "@/components/donor/Page";
 import type { Schema } from "@/lib/api";
 import { formatDateTime } from "@/lib/dates";
-import { resourceMessages, useApiResource } from "@/lib/useApiResource";
+import { resourceMessages } from "@/lib/useApiResource";
+import { useKeysetResource } from "@/lib/useKeysetResource";
 
 export default function Deletions() {
-  // Keyset paging: each entry is the cursor that opened a page, the first being none.
-  const [cursors, setCursors] = useState<string[]>([]);
-  const cursor = cursors.at(-1);
-  const { resource, data, reload } = useApiResource<Schema<"AccountDeletionPage">>(
-    `/donor/staff/deletions${cursor ? `?${new URLSearchParams({ cursor })}` : ""}`,
+  const { resource, data, reload, heading, newer, older } = useKeysetResource<Schema<"AccountDeletionPage">>(
+    (cursor) => `/donor/staff/deletions${cursor ? `?${new URLSearchParams({ cursor })}` : ""}`,
   );
   const messages = resourceMessages(resource, {
     loading: "Loading account deletions…",
@@ -20,7 +18,13 @@ export default function Deletions() {
     forbidden: "Account deletions require donors and money access.",
   });
   return (
-    <Page wide eyebrow="Staff" back={{ href: "/staff", label: "Staff back office" }} title="Account deletions">
+    <Page
+      wide
+      eyebrow="Staff"
+      back={{ href: "/staff", label: "Staff back office" }}
+      title="Account deletions"
+      heading={heading}
+    >
       <p>
         Donors delete their own accounts in the app, and the erasure happens at once: personal data is removed and gift
         records are kept for legal and tax purposes. There is no request to approve, so this is the record of what was
@@ -70,24 +74,7 @@ export default function Deletions() {
         ) : (
           <p>No accounts have been deleted.</p>
         ))}
-      {data && (
-        <p className="actions">
-          {cursors.length > 0 && (
-            <button type="button" className="secondary" onClick={() => setCursors(cursors.slice(0, -1))}>
-              Newer deletions
-            </button>
-          )}
-          {data.next_cursor !== null && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setCursors([...cursors, data.next_cursor ?? ""])}
-            >
-              Older deletions
-            </button>
-          )}
-        </p>
-      )}
+      <KeysetPager newer={newer} older={older} labels={{ newer: "Newer deletions", older: "Older deletions" }} />
       <Announcer status={messages.status} alert={messages.alert} />
       {resource.state !== "signedOut" && (
         <button type="button" className="secondary" onClick={reload}>

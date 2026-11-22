@@ -56,16 +56,9 @@ func (reader InitiativeReader) Spend(ctx context.Context, id pgtype.UUID) (Initi
 	if err != nil {
 		return InitiativeSpend{}, err
 	}
-	total, err := q.InitiativeSpendTotal(ctx, id)
-	if err != nil {
-		return InitiativeSpend{}, err
-	}
-	out := InitiativeSpend{
-		InitiativeID: id.String(),
-		TotalMinor:   total,
-		Categories:   make([]SpendCategory, 0, len(rows)),
-	}
+	out := InitiativeSpend{InitiativeID: id.String(), Categories: make([]SpendCategory, 0, len(rows))}
 	for _, row := range rows {
+		out.TotalMinor += row.AmountMinor
 		out.Categories = append(out.Categories, SpendCategory{Category: row.Category, AmountMinor: row.AmountMinor})
 	}
 	return out, nil
@@ -154,6 +147,17 @@ func (s DonorInitiativeService) Today(ctx context.Context, token string) (TodayI
 			shown, err := q.DistinctInitiativeExposures(ctx, donor.ID)
 			if err != nil {
 				return TodayInitiative{}, err
+			}
+			rules, err := badgeRules(ctx, q)
+			if err != nil {
+				return TodayInitiative{}, err
+			}
+			for _, rule := range rules {
+				if rule.Signal == "initiatives" && shown >= rule.Threshold {
+					if err := earnBadge(ctx, q, donor.ID, rule.Code, pgtype.Text{}, now); err != nil {
+						return TodayInitiative{}, err
+					}
+				}
 			}
 			metrics, err := q.PublishedInitiativeMetrics(ctx, chosen.ID)
 			if err != nil {

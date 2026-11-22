@@ -5,7 +5,7 @@ import { Announcer } from "@/components/donor/Announcer";
 import { LogoEditor } from "@/components/donor/LogoEditor";
 import { Page } from "@/components/donor/Page";
 import { hours, TeamLeaderboard } from "@/components/donor/TeamLeaderboard";
-import { api, failureMessage, type RequestBody, type ResponseBody, unconfirmedMessage } from "@/lib/api";
+import { api, apiFile, failureMessage, type RequestBody, type ResponseBody, unconfirmedMessage } from "@/lib/api";
 import { formatDateTime, formatDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
@@ -59,7 +59,8 @@ function Progress({ deployed, committed }: { deployed: number; committed: number
 
 function SpendTable({ rows, caption }: { rows: Spend["categories"]; caption: string }) {
   return (
-    <div className="tableScroll">
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: a focusable scroll region lets keyboard users pan a wide table.
+    <section className="tableScroll" tabIndex={0} aria-label={caption}>
       <table className="dataTable">
         <caption className="visuallyHidden">{caption}</caption>
         <thead>
@@ -79,7 +80,7 @@ function SpendTable({ rows, caption }: { rows: Spend["categories"]; caption: str
           ))}
         </tbody>
       </table>
-    </div>
+    </section>
   );
 }
 
@@ -136,7 +137,7 @@ function InitiativeCard({ item }: { item: Initiative }) {
 }
 
 function InitiativesSection() {
-  const { resource, data } = useApiResource<Initiatives>("/donor/partner/initiatives");
+  const { resource, data, failed, reload } = useApiResource<Initiatives>("/donor/partner/initiatives");
   const messages = resourceMessages(resource, {
     loading: "Loading initiatives…",
     failure: "Your initiatives could not be loaded right now.",
@@ -154,13 +155,18 @@ function InitiativesSection() {
         ) : (
           <p>No published initiatives are linked to your organization yet. DAD links them when they launch.</p>
         ))}
+      {failed && (
+        <button type="button" className="secondary" onClick={reload}>
+          Retry initiatives
+        </button>
+      )}
       <Announcer status={messages.status} alert={messages.alert} />
     </section>
   );
 }
 
 function SpendSection() {
-  const { resource, data } = useApiResource<Spend>("/donor/partner/spend");
+  const { resource, data, failed, reload } = useApiResource<Spend>("/donor/partner/spend");
   const messages = resourceMessages(resource, {
     loading: "Loading spend…",
     failure: "Spend by category could not be loaded right now.",
@@ -177,6 +183,11 @@ function SpendSection() {
         ) : (
           <p>No spend has been recorded for your initiatives yet.</p>
         ))}
+      {failed && (
+        <button type="button" className="secondary" onClick={reload}>
+          Retry spend
+        </button>
+      )}
       <Announcer status={messages.status} alert={messages.alert} />
     </section>
   );
@@ -188,6 +199,10 @@ function PeopleSection({ companyCode }: { companyCode: string }) {
   const messages = resourceMessages(people.resource, {
     loading: "Loading Our People…",
     failure: "Employee figures could not be loaded right now.",
+  });
+  const teamMessages = resourceMessages(teams.resource, {
+    loading: "Loading teams…",
+    failure: "Your team leaderboard could not be loaded right now.",
   });
   const p = people.data;
   return (
@@ -231,23 +246,40 @@ function PeopleSection({ companyCode }: { companyCode: string }) {
             <Tile
               label="Teams"
               value={p.teams.toLocaleString("en-US")}
-              detail={`Average streak ${p.avg_streak_days} days`}
+              detail={
+                p.streak_verified ? `Average streak ${p.avg_streak_days} days` : "Average streak awaiting verification"
+              }
             />
           </div>
         ))}
       {teams.data && teams.data.teams.length > 0 && (
         <>
           <h3>Team leaderboard</h3>
-          <TeamLeaderboard teams={teams.data.teams} />
+          <TeamLeaderboard teams={teams.data.teams} onRefresh={teams.reload} />
         </>
       )}
+      {(people.failed || (people.data && !people.data.suppressed && !people.data.streak_verified)) && (
+        <button type="button" className="secondary" onClick={people.reload}>
+          {people.failed ? "Retry employee figures" : "Refresh employee figures"}
+        </button>
+      )}
+      {teams.failed && (
+        <button type="button" className="secondary" onClick={teams.reload}>
+          Retry teams
+        </button>
+      )}
       <Announcer status={messages.status} alert={messages.alert} />
+      <Announcer status={teamMessages.status} alert={teamMessages.alert} />
     </section>
   );
 }
 
 function ReportsSection({ admin }: { admin: boolean }) {
   const exports = useApiResource<Exports>("/donor/partner/exports");
+  const messages = resourceMessages(exports.resource, {
+    loading: "Loading report history…",
+    failure: "Your report history could not be loaded right now.",
+  });
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -257,18 +289,16 @@ function ReportsSection({ admin }: { admin: boolean }) {
     setError("");
     setStatus("");
     try {
-      const response = await fetch("/api/donor/partner/report.pdf", { credentials: "include" });
-      if (!response.ok) throw new Error(String(response.status));
-      const url = URL.createObjectURL(await response.blob());
+      const url = URL.createObjectURL(await apiFile("/donor/partner/report.pdf"));
       const link = document.createElement("a");
       link.href = url;
       link.download = "dad-impact-report.pdf";
       link.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       setStatus("Your verified impact report was downloaded.");
       exports.reload();
-    } catch {
-      setError("The report could not be generated right now. Please retry in a moment.");
+    } catch (cause) {
+      setError(failureMessage(cause, "The report could not be generated right now. Please retry in a moment."));
     } finally {
       setBusy(false);
     }
@@ -320,14 +350,25 @@ function ReportsSection({ admin }: { admin: boolean }) {
         ) : (
           <p className="note">No reports have been exported yet.</p>
         ))}
-      <Announcer status={status} alert={error} />
+      {exports.failed && (
+        <button type="button" className="secondary" onClick={exports.reload}>
+          Retry report history
+        </button>
+      )}
+      <Announcer status={status || messages.status} alert={error || messages.alert} />
     </section>
   );
 }
 
-function UsersSection() {
+function UsersSection({ self }: { self: string }) {
   const users = useApiResource<Users>("/donor/partner/users");
+  const messages = resourceMessages(users.resource, {
+    loading: "Loading users…",
+    failure: "Your users could not be loaded right now.",
+  });
   const [invite, setInvite] = useState({ email: "", name: "", role: "VIEWER" });
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -350,14 +391,30 @@ function UsersSection() {
   }
 
   async function removeUser(id: string, email: string) {
+    if (removing) return;
+    setRemoving(id);
     setError("");
     setStatus("");
     try {
-      await api(`/donor/partner/users/${id}/remove`, { method: "POST", body: "{}" });
+      await api(`/donor/partner/users/${encodeURIComponent(id)}/remove`, { method: "POST", body: "{}" });
       setStatus(`Removed ${email}.`);
+      setConfirming(null);
       users.reload();
     } catch (cause) {
       setError(failureMessage(cause, "That user could not be removed right now."));
+    } finally {
+      setRemoving(null);
+    }
+  }
+
+  async function resendInvite(id: string, email: string) {
+    setError("");
+    setStatus("");
+    try {
+      await api(`/donor/partner/users/${id}/reinvite`, { method: "POST", body: "{}" });
+      setStatus(`We emailed ${email} a new invitation. The previous link no longer works.`);
+    } catch (cause) {
+      setError(failureMessage(cause, "The invitation could not be resent right now."));
     }
   }
 
@@ -373,15 +430,49 @@ function UsersSection() {
                 <br />
                 <span className="note">
                   {u.email} · {u.role === "ADMIN" ? "Administrator" : "Viewer"}
+                  {!u.accepted && " · Invitation not yet used"}
                 </span>
               </span>
-              <button type="button" className="secondary" onClick={() => removeUser(u.id, u.email)}>
-                Remove<span className="visuallyHidden"> {u.email}</span>
-              </button>
+              {u.id === self ? (
+                <span className="note">You</span>
+              ) : (
+                <span className="actions">
+                  {!u.accepted && confirming !== u.id && (
+                    <button type="button" className="secondary" onClick={() => resendInvite(u.id, u.email)}>
+                      Resend invitation <span className="visuallyHidden">to {u.email}</span>
+                    </button>
+                  )}
+                  {confirming === u.id ? (
+                    <>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={removing !== null}
+                        onClick={() => removeUser(u.id, u.email)}
+                      >
+                        Confirm removal <span className="visuallyHidden">of {u.email}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={removing !== null}
+                        onClick={() => setConfirming(null)}
+                      >
+                        Keep <span className="visuallyHidden">{u.email}</span>
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="secondary" onClick={() => setConfirming(u.id)}>
+                      Remove <span className="visuallyHidden">{u.email}</span>
+                    </button>
+                  )}
+                </span>
+              )}
             </li>
           ))}
         </ul>
       )}
+      <Announcer status={status || messages.status} alert={error || messages.alert} />
       <form onSubmit={sendInvite}>
         <h3>Invite a colleague</h3>
         <p className="note">
@@ -420,7 +511,11 @@ function UsersSection() {
           {busy ? "Sending…" : "Email invitation"}
         </button>
       </form>
-      <Announcer status={status} alert={error} />
+      {users.failed && (
+        <button type="button" className="secondary" onClick={users.reload}>
+          Retry users
+        </button>
+      )}
     </section>
   );
 }
@@ -445,6 +540,12 @@ function OrganizationSection({ overview, onSaved }: { overview: Overview; onSave
           description: String(form.get("description") ?? ""),
         } satisfies RequestBody<"/donor/partner/profile", "post">),
       });
+    } catch (cause) {
+      setError(failureMessage(cause, "The profile could not be saved right now. Please retry in a moment."));
+      setBusy(false);
+      return;
+    }
+    try {
       if (workforce !== overview.workforce_size) {
         await api("/donor/partner/workforce", {
           method: "POST",
@@ -452,10 +553,10 @@ function OrganizationSection({ overview, onSaved }: { overview: Overview; onSave
         });
       }
       setStatus("Organization profile saved.");
-      onSaved();
     } catch (cause) {
-      setError(failureMessage(cause, "The profile could not be saved right now. Please retry in a moment."));
+      setError(failureMessage(cause, "Profile saved; workforce size was not. Please retry in a moment."));
     } finally {
+      onSaved();
       setBusy(false);
     }
   }
@@ -594,7 +695,7 @@ export default function Dashboard() {
           <SpendSection />
           <PeopleSection companyCode={o.company_code} />
           <ReportsSection admin={admin} />
-          {admin && <UsersSection />}
+          {admin && <UsersSection self={o.user_id} />}
           {admin && <OrganizationSection overview={o} onSaved={overview.reload} />}
           <p>
             <button type="button" className="secondary" onClick={signOut} disabled={signingOut}>
@@ -602,6 +703,11 @@ export default function Dashboard() {
             </button>
           </p>
         </>
+      )}
+      {overview.failed && (
+        <button type="button" className="secondary" onClick={overview.reload}>
+          Retry dashboard
+        </button>
       )}
       <Announcer status={messages.status} alert={signOutError || messages.alert} />
     </Page>

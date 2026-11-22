@@ -25,10 +25,13 @@ Their screens and platform interactions are separate from the Go financial domai
 The mobile contract is an integration surface, not a decision to expose every operation
 in the first mobile product. Backend authorization remains authoritative. Native requests
 call the API host directly with `X-DAD-Client: native`, no cookies or Origin, and a bearer
-access token when authenticated. Browser-only giving and staff operations stay on the web.
+access token when authenticated. The website checkout and staff operations stay on the
+web; native recurring checkout uses its dedicated operation. Partner applications admit
+both client types. A deployed native API host is configured through `DONOR_NATIVE_API_ORIGIN`; activation and acceptance
+prerequisites are in [native ingress](edge.md#native-api-ingress-prerequisite).
 
 After checks pass on the release commit, tag it `mobile-foundation-v<version>` (using the
-version in the file, for example `mobile-foundation-v2.12.0`) and push that tag. The
+version in the file, for example `mobile-foundation-v2.13.0`) and push that tag. The
 mobile-foundation workflow verifies the tag matches the declared version and publishes the
 individual files as GitHub Release assets.
 Existing release assets are never overwritten. The workflow also retains a candidate
@@ -42,7 +45,7 @@ the vendored contract without network access to this repository. A maintainer
 can obtain a release with:
 
 ```sh
-gh release download mobile-foundation-v2.12.0 --repo pre-dad/DAD-Main --dir /tmp/dad-foundation
+gh release download "mobile-foundation-v$(jq -r .version contracts/mobile/version.json)" --repo pre-dad/DAD-Main --dir /tmp/dad-foundation
 ```
 
 Use patch versions for equivalent packaging corrections, minor versions for compatible
@@ -50,6 +53,23 @@ additions, and major versions for breaking contract/token/link changes. A mobile
 pins its dependency; changing the backend must preserve supported installed clients.
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
+
+## Compatible additions in version 2.13
+
+Version 2.13 adds response and request fields that clients generated from 2.12 do not
+know. Swift clients generated from 2.12 reject unknown object properties
+(`additionalProperties: false`), so adopt 2.13 in the native apps before this API
+revision reaches them (see [operations](operations.md#r1-native-contract-rollout)).
+
+- `employeeOurPeople` (`GET /donor/partner/our-people`) returns a required boolean
+  `streak_verified`: the average streak is current for every linked employee. Hide the
+  average streak while it is false.
+- `saveProfile` (`POST /donor/me/profile`) takes an optional `timezone_override`, one
+  of the supported US civil zones or an empty string to reset to the ZIP suggestion. The
+  profile response includes the saved correction only while one is set.
+- Browser checkout now requires a verified donor session; native recurring checkout is
+  unchanged.
+- `login` (`POST /donor/login`) accepts `/donate` as a `next` page.
 
 ## Compatible additions in version 2.12
 

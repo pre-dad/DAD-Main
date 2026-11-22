@@ -30,6 +30,8 @@ type StripeBudget struct {
 	PerSecond float64
 }
 
+// Acquire reserves bucket's next slot and blocks until it arrives. It returns
+// ErrStripeBudget when the slot is further off than the wait allows.
 func (b StripeBudget) Acquire(ctx context.Context, bucket string) error {
 	rate, burst, ok := payments.BucketRate(bucket, b.PerSecond)
 	if !ok {

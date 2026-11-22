@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,13 @@ var (
 	// ErrProcessorUnavailable reports a processor call that failed or could not
 	// be made; the caller may retry the same request.
 	ErrProcessorUnavailable = errors.New("payment processor is unavailable; retry the same request")
+	// ErrProcessorRejected reports that the processor refused a request with a
+	// client error; repeating the same request cannot succeed.
+	ErrProcessorRejected = errors.New("payment processor rejected the request")
+	// ErrCheckoutRejected reports a processor response, or saved request, that
+	// this service refuses to use. The same request gets the same answer, so
+	// retrying cannot help.
+	ErrCheckoutRejected = errors.New("checkout was rejected")
 	// ErrUnconfigured reports that this deployment has no payment processor
 	// configured; retrying cannot help.
 	ErrUnconfigured = errors.New("payments are not configured")
@@ -60,12 +68,14 @@ type NativeCheckoutResult struct {
 	URL       string    `json:"url"`
 }
 
+// RemoteCheckout is the hosted checkout session the processor reports back.
 type RemoteCheckout struct {
 	ID       string `json:"id"`
 	URL      string `json:"url"`
 	Livemode *bool  `json:"livemode"`
 }
 
+// CheckoutGateway opens and closes hosted checkout sessions at the processor.
 type CheckoutGateway interface {
 	CreateCheckout(context.Context, []byte, string) (RemoteCheckout, error)
 	// ExpireCheckout closes an open hosted checkout so it can no longer be paid
@@ -73,6 +83,21 @@ type CheckoutGateway interface {
 	// the donor paid first. Any other outcome is an error.
 	ExpireCheckout(ctx context.Context, sessionID, idempotencyKey string) (string, error)
 }
+
+// ProcessorError is a processor's client-error verdict on a request. It holds
+// only the identifiers needed to find the call in the processor's logs, and
+// matches ErrProcessorRejected.
+type ProcessorError struct {
+	Status    int
+	Code      string
+	RequestID string
+}
+
+func (e *ProcessorError) Error() string {
+	return fmt.Sprintf("%v: status %d, code %q, request %q", ErrProcessorRejected, e.Status, e.Code, e.RequestID)
+}
+
+func (e *ProcessorError) Is(target error) bool { return target == ErrProcessorRejected }
 
 // ValidateOrigin accepts an exact HTTPS origin, or plain HTTP on a loopback
 // name for local runs. It must be written as browsers serialize it, in
@@ -88,8 +113,13 @@ func ValidateOrigin(origin string) error {
 	if strings.Contains(host, ":") {
 		host = "[" + host + "]"
 	}
-	if port := u.Port(); port != "" && port != map[string]string{"http": "80", "https": "443"}[u.Scheme] {
-		host += ":" + port
+	if port := u.Port(); port != "" {
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 || port[0] == '0' {
+			return errors.New("must use a port from 1 to 65535 without leading zeros")
+		}
+		if port != map[string]string{"http": "80", "https": "443"}[u.Scheme] {
+			host += ":" + port
+		}
 	}
 	if canonical := u.Scheme + "://" + host; origin != canonical {
 		return fmt.Errorf("must be written as browsers send it: %s", canonical)
@@ -110,14 +140,18 @@ func loopback(host string) bool {
 	return host == "localhost" || strings.HasSuffix(host, ".localhost") || host == "127.0.0.1"
 }
 
+// ValidateRemoteCheckout accepts only a test-mode session whose URL is on
+// checkout.stripe.com over HTTPS, so a donor is never sent anywhere else.
 func ValidateRemoteCheckout(remote RemoteCheckout) error {
 	u, err := url.Parse(remote.URL)
-	if err != nil || !strings.HasPrefix(remote.ID, "cs_test_") || len(remote.ID) > 255 || remote.Livemode == nil || *remote.Livemode ||
-		u.Scheme != "https" ||
-		u.Hostname() != "checkout.stripe.com" ||
-		u.User != nil ||
-		(u.Port() != "" && u.Port() != "443") {
-		return ErrProcessorUnavailable
+	switch {
+	case remote.Livemode == nil || *remote.Livemode:
+		return fmt.Errorf("%w: session is not confirmed test mode", ErrCheckoutRejected)
+	case !strings.HasPrefix(remote.ID, "cs_test_") || len(remote.ID) > 255:
+		return fmt.Errorf("%w: unexpected session id", ErrCheckoutRejected)
+	case err != nil || u.Scheme != "https" || u.Hostname() != "checkout.stripe.com" || u.User != nil ||
+		(u.Port() != "" && u.Port() != "443"):
+		return fmt.Errorf("%w: unexpected checkout url", ErrCheckoutRejected)
 	}
 	return nil
 }

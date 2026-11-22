@@ -9,6 +9,12 @@ import {
 	type MigrationEntry,
 	type Principal,
 } from "../src/ledger";
+import {
+	ARCHIVE_QUOTA_BYTES,
+	DAILY_EVENT_QUOTA,
+	DAILY_READ_QUOTA,
+	DAILY_REQUEST_QUOTA,
+} from "../src/store";
 
 const admin: Principal = {
 	role: "admin",
@@ -33,6 +39,7 @@ const migration = (
 	],
 });
 beforeEach(reset);
+
 async function call(
 	stub: DurableObjectStub<import("../src/store").LedgerStore>,
 	operation: "snapshot" | "migrate" | "publish" | "triage" | "recover",
@@ -62,6 +69,9 @@ function collected(prior: Ledger, execution = publisher.execution): Ledger {
 		],
 	};
 }
+// Each archived event stores the event and its envelope object.
+const objectsFor = (events: number) => 2 * events;
+
 async function setup(ledger = emptyLedger(source)) {
 	const stub = env.LEDGERS.getByName(source);
 	const snapshot = await call(stub, "migrate", migration(ledger), admin);
@@ -252,7 +262,7 @@ describe("durable ledger", () => {
 				},
 				publisher,
 			),
-		).rejects.toThrow("Execution");
+		).rejects.toThrow("Execution does not match identity");
 		expect((await call(stub, "snapshot", null)).version).toBe(snapshot.version);
 	});
 
@@ -380,7 +390,7 @@ describe("durable ledger", () => {
 			"Archive and ledger disagree",
 		);
 		expect((await stub.history(0)).events).toHaveLength(2);
-		expect((await env.ARCHIVE.list()).objects).toHaveLength(4);
+		expect((await env.ARCHIVE.list()).objects).toHaveLength(objectsFor(2));
 		const recovered = await call(stub, "recover", {});
 		expect(recovered.ledger.receipts).toEqual(
 			collected(snapshot.ledger).receipts,
@@ -408,7 +418,7 @@ describe("durable ledger", () => {
 		const saved = await call(stub, "migrate", migration());
 		expect(saved.version).toBe(1);
 		expect((await stub.history(0)).events).toHaveLength(1);
-		expect((await env.ARCHIVE.list()).objects).toHaveLength(2);
+		expect((await env.ARCHIVE.list()).objects).toHaveLength(objectsFor(1));
 	});
 
 	it("refuses bootstrap over retained history after namespace loss", async () => {
@@ -427,14 +437,17 @@ describe("durable ledger", () => {
 		});
 		expect(await (await env.ARCHIVE.get(key))?.text()).toBe("retained history");
 	});
+
 	it("blocks excess requests before storage access and resets daily counters without dropping retained usage", async () => {
 		const { stub } = await setup();
 		await runInDurableObject(stub, async (_instance, state) => {
 			state.storage.sql.exec(
-				"UPDATE budget SET requests=1000,events=200,archive_bytes=42 WHERE id=1",
+				`UPDATE budget SET requests=${DAILY_REQUEST_QUOTA},events=${DAILY_EVENT_QUOTA},archive_bytes=42 WHERE id=1`,
 			);
 		});
-		await expect(call(stub, "snapshot", null)).rejects.toThrow("request quota");
+		await expect(call(stub, "snapshot", null)).rejects.toThrow(
+			"Daily ledger request quota reached",
+		);
 		await runInDurableObject(stub, async (_instance, state) => {
 			state.storage.sql.exec("UPDATE budget SET day='2000-01-01' WHERE id=1");
 		});
@@ -448,17 +461,89 @@ describe("durable ledger", () => {
 		});
 	});
 
-	it.each(["events", "archive_bytes"])(
+	it("stops reads at their own quota and keeps publication and admin calls available", async () => {
+		const { stub, snapshot } = await setup();
+		const reader: Principal = { ...admin, role: "read", execution: "125:1" };
+		await runInDurableObject(stub, async (_instance, state) => {
+			state.storage.sql.exec(
+				`UPDATE budget SET requests=${DAILY_READ_QUOTA} WHERE id=1`,
+			);
+		});
+		await expect(call(stub, "snapshot", null, reader)).rejects.toThrow(
+			"Daily ledger request quota reached",
+		);
+		await call(stub, "snapshot", null, admin);
+		await call(
+			stub,
+			"publish",
+			{
+				expectedVersion: snapshot.version,
+				previousDigest: snapshot.digest,
+				ledger: collected(snapshot.ledger),
+			},
+			publisher,
+		);
+	});
+
+	it("validates the history cursor before touching the archive", async () => {
+		const { stub } = await setup();
+		await runInDurableObject(stub, async (_instance, state) => {
+			state.storage.sql.exec("INSERT INTO archive_pending VALUES(1)");
+		});
+		for (const cursor of [-1, Number.NaN]) {
+			expect(await stub.request("history", cursor, admin)).toMatchObject({
+				ok: false,
+				status: 400,
+			});
+		}
+		await runInDurableObject(stub, async (_instance, state) => {
+			expect(
+				state.storage.sql
+					.exec<{ n: number }>("SELECT COUNT(*) n FROM archive_pending")
+					.one().n,
+			).toBe(1);
+		});
+	});
+
+	it("refuses a migration chain that repeats a commit", async () => {
+		const m = migration();
+		m.history.push(
+			{ ...m.history[0], commit: "c".repeat(40), parent: m.history[0].commit },
+			{ ...m.history[0], commit: "c".repeat(40), parent: "c".repeat(40) },
+		);
+		const stub = env.LEDGERS.getByName(source);
+		await expect(call(stub, "migrate", m)).rejects.toThrow(
+			"Migration chain repeats a commit",
+		);
+	});
+
+	it("refuses a migration longer than the daily event quota", async () => {
+		const m = migration();
+		for (let i = 1; i <= DAILY_EVENT_QUOTA; i++)
+			m.history.push({ ...m.history[0], commit: String(i), parent: null });
+		const stub = env.LEDGERS.getByName(source);
+		await expect(call(stub, "migrate", m)).rejects.toThrow(
+			"Invalid migration history",
+		);
+	});
+
+	it.each([
+		["events", "Daily ledger event quota reached"],
+		["archive_bytes", "Ledger archive quota reached"],
+	])(
 		"rejects a publication at its %s quota without changing history",
-		async (column) => {
+		async (column, message) => {
 			const { stub, snapshot } = await setup();
 			await runInDurableObject(stub, async (_instance, state) => {
 				if (column === "events")
-					state.storage.sql.exec("UPDATE budget SET events=200 WHERE id=1");
+					state.storage.sql.exec(
+						"UPDATE budget SET events=? WHERE id=1",
+						DAILY_EVENT_QUOTA,
+					);
 				else
 					state.storage.sql.exec(
 						"UPDATE budget SET archive_bytes=? WHERE id=1",
-						100 * 1024 * 1024 - 1,
+						ARCHIVE_QUOTA_BYTES - 1,
 					);
 			});
 			await expect(
@@ -472,9 +557,9 @@ describe("durable ledger", () => {
 					},
 					publisher,
 				),
-			).rejects.toThrow("quota");
+			).rejects.toThrow(message);
 			expect(await call(stub, "snapshot", null)).toEqual(snapshot);
-			expect((await env.ARCHIVE.list()).objects).toHaveLength(2);
+			expect((await env.ARCHIVE.list()).objects).toHaveLength(objectsFor(1));
 			expect((await stub.history(0)).events).toHaveLength(1);
 		},
 	);
@@ -491,7 +576,7 @@ describe("durable ledger", () => {
 		await expect(call(stub, "migrate", m)).rejects.toThrow("Archive backlog");
 		const snapshot = await call(stub, "migrate", m);
 		expect(snapshot.version).toBe(12);
-		expect((await env.ARCHIVE.list()).objects).toHaveLength(24);
+		expect((await env.ARCHIVE.list()).objects).toHaveLength(objectsFor(12));
 		let used = 0;
 		await runInDurableObject(stub, async (_instance, state) => {
 			used = state.storage.sql

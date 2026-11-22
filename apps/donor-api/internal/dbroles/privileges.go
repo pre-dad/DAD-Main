@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -14,7 +15,8 @@ import (
 
 // lock lets a role take row locks on a table it never changes: PostgreSQL
 // allows SELECT … FOR UPDATE only with UPDATE on some column, and no process
-// changes an id.
+// changes an id. Every foreign key to donors(id) is NO ACTION, so only the id of
+// a donor with no dependent rows could be rewritten with this grant.
 const lock = "SELECT, UPDATE (id)"
 
 // grants is what each role may do to each relation, in GRANT syntax, derived
@@ -161,6 +163,7 @@ var grants = map[string]map[Role]string{
 	},
 	"donor_payment_updates": {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE"},
 	"donor_stripe_budgets":  {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, INSERT, UPDATE"},
+	"donor_rate_limits":     {API: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT, DELETE"},
 
 	"donor_metric_projections": {
 		API:              "SELECT, INSERT, UPDATE",
@@ -176,7 +179,7 @@ var grants = map[string]map[Role]string{
 	},
 	"donor_referral_corrections": {API: "SELECT, INSERT", StripeWorker: "SELECT, INSERT", ProjectionWorker: "SELECT, INSERT"},
 	"donor_messages": {
-		API:              "SELECT, INSERT",
+		API:              "SELECT, INSERT, UPDATE (subject, body, context)",
 		StripeWorker:     "SELECT, INSERT",
 		ProjectionWorker: "SELECT, INSERT",
 		MessageWorker:    "SELECT, UPDATE",
@@ -217,7 +220,7 @@ var grants = map[string]map[Role]string{
 		ProjectionWorker: "SELECT (id, name, email, role, disabled, created_at)",
 	},
 	"donor_staff_passkeys":   {API: "SELECT, INSERT, UPDATE, DELETE", StaffCLI: "SELECT, DELETE"},
-	"donor_staff_ceremonies": {API: "SELECT, INSERT, DELETE"},
+	"donor_staff_ceremonies": {API: "SELECT, INSERT, DELETE", ProjectionWorker: "SELECT (token_hash, expires_at), DELETE"},
 	"donor_staff_invites":    {API: "SELECT, INSERT, UPDATE", StaffCLI: "SELECT, INSERT, UPDATE"},
 	"donor_staff_sessions":   {API: "SELECT, INSERT, UPDATE", StaffCLI: "SELECT, UPDATE"},
 	"donor_staff_audit":      {API: "SELECT, INSERT", StaffCLI: "INSERT", ProjectionWorker: "SELECT, INSERT"},
@@ -242,9 +245,10 @@ var grants = map[string]map[Role]string{
 		MessageWorker:    "SELECT",
 		LoginEmailWorker: "SELECT, UPDATE (invite_token_hash, invite_expires_at)",
 	},
-	"donor_partner_sessions": {API: "SELECT, INSERT, UPDATE", PushWorker: "SELECT, UPDATE", ProjectionWorker: "SELECT"},
-	"donor_partner_login_emails": {API: "SELECT, INSERT", LoginEmailWorker: "SELECT, UPDATE",
-		Monitor: "SELECT (attempts, available_at, completed_at)", Rekey: "SELECT (id, encrypted_token), UPDATE (encrypted_token)"},
+	"donor_partner_sessions": {API: "SELECT, INSERT, UPDATE", PushWorker: "SELECT, UPDATE", ProjectionWorker: "SELECT, DELETE"},
+	"donor_partner_login_emails": {API: "SELECT, INSERT, UPDATE (completed_at, encrypted_token)", LoginEmailWorker: "SELECT, UPDATE",
+		ProjectionWorker: "SELECT (id, completed_at), DELETE",
+		Monitor:          "SELECT (attempts, available_at, completed_at)", Rekey: "SELECT (id, encrypted_token), UPDATE (encrypted_token)"},
 	"donor_partner_push_notifications": {
 		API:              "SELECT, INSERT",
 		ProjectionWorker: "INSERT",
@@ -344,6 +348,9 @@ func parsePrivileges(list string) privileges {
 		list = list[end:]
 		if strings.HasPrefix(list, "(") {
 			closing := strings.Index(list, ")")
+			if closing < 0 {
+				panic("dbroles: unbalanced parenthesis in privilege list " + strconv.Quote(list))
+			}
 			for column := range strings.SplitSeq(list[1:closing], ",") {
 				result = append(result, kind+" ("+strings.TrimSpace(column)+")")
 			}
@@ -533,13 +540,13 @@ func align(object, role string, actual, want privileges) []string {
 	if slices.Equal(actual, want) {
 		return nil
 	}
-	grantee := role
+	target := role
 	if role != "PUBLIC" {
-		grantee = pgx.Identifier{role}.Sanitize()
+		target = pgx.Identifier{role}.Sanitize()
 	}
-	statements := []string{"REVOKE ALL ON " + object + " FROM " + grantee}
+	statements := []string{"REVOKE ALL ON " + object + " FROM " + target}
 	if len(want) > 0 {
-		statements = append(statements, "GRANT "+want.sql()+" ON "+object+" TO "+grantee)
+		statements = append(statements, "GRANT "+want.sql()+" ON "+object+" TO "+target)
 	}
 	return statements
 }

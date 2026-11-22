@@ -97,6 +97,10 @@ func validateStaffOrigin(staff, public string, getenv func(string) string) error
 	return nil
 }
 
+// minCheckInSecret is the shortest event check-in signing secret accepted, the
+// size of the HMAC-SHA-256 key it feeds.
+const minCheckInSecret = 32
+
 // configure validates the environment and connects the services it enables.
 // Every configuration error is reported before the database is contacted.
 // The returned function releases the database pool.
@@ -160,6 +164,10 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 			return services, release, fmt.Errorf("DONOR_FOUNDING_CLAIM_KEY %w", err)
 		}
 	}
+	checkInSecret := getenv("DONOR_EVENT_CHECKIN_SECRET")
+	if checkInSecret != "" && len(checkInSecret) < minCheckInSecret {
+		return services, release, fmt.Errorf("DONOR_EVENT_CHECKIN_SECRET must be at least %d bytes", minCheckInSecret)
+	}
 	var contentKeys credentials.Keyring
 	if value := getenv("DONOR_CONTENT_ENCRYPTION_KEY"); value != "" {
 		if contentKeys, err = credentials.ParseKeyring(value); err != nil {
@@ -193,7 +201,10 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		}
 	}
 
-	dsn := dbroles.API.URL(getenv)
+	dsn, err := dbroles.API.URL(getenv)
+	if err != nil {
+		return services, release, err
+	}
 	if dsn == "" {
 		slog.Warn(dbroles.API.Variable() + " is unset; only health and static responses are available")
 		return services, release, nil
@@ -202,10 +213,12 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	defer cancel()
 	pool, err := store.Open(startup, dsn, dbroles.API.Pool)
 	if err != nil {
+		slog.Error("donor database startup failed", "cause", migrations.Cause(err))
 		return services, release, errors.New("donor database startup failed")
 	}
 	if err = migrations.Verify(startup, pool); err != nil {
 		pool.Close()
+		slog.Error("donor schema check failed", "cause", migrations.Cause(err))
 		return services, release, errors.New("donor schema is not current; run migrations before starting the API")
 	}
 	if err = dbroles.API.Check(startup, pool, getenv(dbroles.AllowOwnerVariable) == "true"); err != nil {
@@ -216,11 +229,12 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		stripeGateway.UseBudget(store.StripeBudget{DB: pool, PerSecond: stripeCeiling})
 	}
 	services.Ready = func(ctx context.Context) error { return migrations.Verify(ctx, pool) }
+	services.RateLimit = store.ClientRateLimit{DB: pool}
 	services.InitiativeRead = store.InitiativeReader{DB: pool}
 	services.TodayInitiative = store.DonorInitiativeService{DB: pool}
 	services.EventRead = store.EventReader{DB: pool, SupportEmail: getenv("DONOR_SUPPORT_EMAIL")}
-	services.Reservations = store.ReservationService{DB: pool, CheckInSecret: getenv("DONOR_EVENT_CHECKIN_SECRET")}
-	services.EventCheckInSecret = getenv("DONOR_EVENT_CHECKIN_SECRET")
+	services.Reservations = store.ReservationService{DB: pool, CheckInSecret: checkInSecret}
+	services.EventCheckInSecret = checkInSecret
 	portal := store.PartnerPortalService{DB: pool}
 	services.PartnerPortal = store.PartnerDashboardService{PartnerPortalService: portal}
 	services.PartnerApply = store.PartnerApplicationService{DB: pool}

@@ -15,9 +15,11 @@ func env(m map[string]string) func(string) string { return func(k string) string
 func TestConnectionURLPrecedenceAndParts(t *testing.T) {
 	const secret = "s3cr3t/p@ss:word#1"
 	for name, tc := range map[string]struct {
-		env  map[string]string
-		want func(*testing.T, *pgx.ConnConfig)
-		none bool
+		variable string
+		env      map[string]string
+		want     func(*testing.T, *pgx.ConnConfig)
+		none     bool
+		fail     string
 	}{
 		"full URL alone is unchanged": {
 			env: map[string]string{"DONOR_API_DATABASE_URL": "postgresql://dad_api_login:inline-password-1@db:5432/dad?sslmode=require"},
@@ -39,6 +41,7 @@ func TestConnectionURLPrecedenceAndParts(t *testing.T) {
 			},
 		},
 		"parts build a URL": {
+			variable: "DONOR_WORKER_STRIPE_DATABASE_URL",
 			env: map[string]string{
 				"DONOR_WORKER_STRIPE_DATABASE_HOST":     "db.internal",
 				"DONOR_WORKER_STRIPE_DATABASE_PORT":     "6432",
@@ -72,18 +75,48 @@ func TestConnectionURLPrecedenceAndParts(t *testing.T) {
 				}
 			},
 		},
+		"host alone is refused": {
+			env:  map[string]string{"DONOR_API_DATABASE_HOST": "h"},
+			fail: "DONOR_API_DATABASE_USER and DONOR_API_DATABASE_NAME are required",
+		},
 		"nothing configured": {env: map[string]string{"DONOR_API_DATABASE_PASSWORD": "alone"}, none: true},
+		"password with a URL that has no user": {
+			env:  map[string]string{"DONOR_API_DATABASE_URL": "postgresql://db/dad", "DONOR_API_DATABASE_PASSWORD": secret},
+			fail: "DONOR_API_DATABASE_URL must be a URL with a user",
+		},
+		"password with an unparseable URL": {
+			env:  map[string]string{"DONOR_API_DATABASE_URL": "postgresql://u@db:bad/dad", "DONOR_API_DATABASE_PASSWORD": secret},
+			fail: "DONOR_API_DATABASE_URL must be a URL with a user",
+		},
+		"parts without a user": {
+			env:  map[string]string{"DONOR_API_DATABASE_HOST": "h", "DONOR_API_DATABASE_NAME": "d", "DONOR_API_DATABASE_PASSWORD": secret},
+			fail: "DONOR_API_DATABASE_USER and DONOR_API_DATABASE_NAME are required",
+		},
+		"parts without a database name": {
+			env:  map[string]string{"DONOR_API_DATABASE_HOST": "h", "DONOR_API_DATABASE_USER": "u", "DONOR_API_DATABASE_PASSWORD": secret},
+			fail: "DONOR_API_DATABASE_USER and DONOR_API_DATABASE_NAME are required",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got := ConnectionURL("DONOR_API_DATABASE_URL", env(tc.env))
+			variable := tc.variable
+			if variable == "" {
+				variable = "DONOR_API_DATABASE_URL"
+			}
+			got, err := ConnectionURL(variable, env(tc.env))
+			if tc.fail != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.fail) || strings.Contains(err.Error(), secret) {
+					t.Fatalf("got %q, %v; want error containing %q and no password", got, err, tc.fail)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
 			if tc.none {
 				if got != "" {
 					t.Fatalf("got %q", got)
 				}
 				return
-			}
-			if name == "parts build a URL" {
-				got = ConnectionURL("DONOR_WORKER_STRIPE_DATABASE_URL", env(tc.env))
 			}
 			c, err := pgx.ParseConfig(got)
 			if err != nil {
@@ -98,7 +131,9 @@ func TestRoleURLAssemblesPartsAndOwnerFallback(t *testing.T) {
 	parts := env(map[string]string{
 		"DONOR_API_DATABASE_HOST": "h", "DONOR_API_DATABASE_NAME": "d", "DONOR_API_DATABASE_USER": "u", "DONOR_API_DATABASE_PASSWORD": "pw",
 	})
-	if u, err := url.Parse(API.URL(parts)); err != nil || u.Host != "h:5432" {
+	if got, err := API.URL(parts); err != nil {
+		t.Fatal(err)
+	} else if u, err := url.Parse(got); err != nil || u.Host != "h:5432" {
 		t.Fatalf("API.URL = %v %v", u, err)
 	}
 	owner := env(map[string]string{
@@ -108,11 +143,16 @@ func TestRoleURLAssemblesPartsAndOwnerFallback(t *testing.T) {
 		"DONOR_GO_DATABASE_USER":     "o",
 		"DONOR_GO_DATABASE_PASSWORD": "pw",
 	})
-	if u, err := url.Parse(API.URL(owner)); err != nil || u.Host != "oh:5432" {
+	if got, err := API.URL(owner); err != nil {
+		t.Fatal(err)
+	} else if u, err := url.Parse(got); err != nil || u.Host != "oh:5432" {
 		t.Fatalf("owner fallback = %v %v", u, err)
 	}
-	if API.URL(env(map[string]string{AllowOwnerVariable: "false", "DONOR_GO_DATABASE_HOST": "oh"})) != "" {
-		t.Fatal("owner connection used without opt-in")
+	if got, err := API.URL(env(map[string]string{AllowOwnerVariable: "false", "DONOR_GO_DATABASE_HOST": "oh"})); err != nil || got != "" {
+		t.Fatalf("owner connection used without opt-in: %q, %v", got, err)
+	}
+	if _, err := API.URL(env(map[string]string{"DONOR_API_DATABASE_HOST": "h"})); err == nil {
+		t.Fatal("incomplete role parts were accepted")
 	}
 }
 
@@ -123,7 +163,10 @@ func TestPasswordNeverReachesCheckErrorsOrLogs(t *testing.T) {
 	getenv := env(map[string]string{
 		"DONOR_API_DATABASE_HOST": "h", "DONOR_API_DATABASE_NAME": "d", "DONOR_API_DATABASE_USER": "u", "DONOR_API_DATABASE_PASSWORD": secret,
 	})
-	dsn := API.URL(getenv)
+	dsn, err := API.URL(getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := ParseLogin(API, strings.Replace(dsn, "5432", "bad port", 1)); err != nil {
 		log.Error("parse", "err", err)
 	}

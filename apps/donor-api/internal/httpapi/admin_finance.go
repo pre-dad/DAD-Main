@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/payments"
 	"dad/donor-api/internal/store"
 )
@@ -27,8 +28,10 @@ func financeStatus(err error) (int, string) {
 	return staffStatus(err)
 }
 
+// validReason applies the store's own limit, measured after trimming, so the
+// handler never admits or refuses what the store would decide otherwise.
 func validReason(reason string) bool {
-	n := utf8.RuneCountInString(reason)
+	n := utf8.RuneCountInString(identity.TrimSpace(reason))
 	return n >= 5 && n <= 500
 }
 

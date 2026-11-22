@@ -12,9 +12,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// fullRewriteOracle is the ranking logic from before the refresh was chunked: one
-// window pass over the whole eligible population. The chunked refresh must
-// leave donor_rankings holding exactly what it computes.
+// fullRewriteOracle ranks the whole eligible population in one window pass. The
+// chunked refresh must leave donor_rankings holding exactly what it computes;
+// the literal-value tests in rankings_test.go pin ranks independently.
 const fullRewriteOracle = `
 WITH eligible AS (
   SELECT d.id AS donor_id, d.city AS city,
@@ -165,7 +165,7 @@ func TestChunkedRefreshMatchesFullRewriteAcrossChurn(t *testing.T) {
 	mustExec(t, pool, `INSERT INTO donor_preferences(id,donor_id,version,referral_emails,marketing_emails,rankings_opted_out)
 		VALUES($1,$2,1,false,false,true) ON CONFLICT (donor_id) DO UPDATE SET rankings_opted_out=true`, mustNewID(t), ids[0])
 	mustExec(t, pool, "UPDATE donors SET disabled=true WHERE id=$1", ids[1])
-	t.Cleanup(func() { pool.Exec(ctx, "UPDATE donors SET disabled=false WHERE id=$1", ids[1]) })
+	cleanup(t, "UPDATE donors SET disabled=false WHERE id=$1", ids[1])
 	mustExec(t, pool, "UPDATE donor_metric_projections SET next_refresh_at=$2 WHERE donor_id=$1", ids[2], now.Add(-time.Second))
 	mustExec(t, pool, "UPDATE donor_metric_projections SET streak_since=$2 WHERE donor_id=$1", ids[3], now.Add(-400*24*time.Hour))
 	mustExec(t, pool, "UPDATE donors SET city='Boise' WHERE id=$1", ids[5])
@@ -185,13 +185,11 @@ func TestChunkedRefreshMatchesFullRewriteAcrossChurn(t *testing.T) {
 
 	// Emptying the population clears the table and the population sizes.
 	mustExec(t, pool, "UPDATE donor_metric_projections SET next_refresh_at=$1", now.Add(-time.Second))
-	t.Cleanup(func() {
-		pool.Exec(
-			ctx,
-			"UPDATE donor_metric_projections SET next_refresh_at=now()+interval '1 hour' WHERE next_refresh_at=$1",
-			now.Add(-time.Second),
-		)
-	})
+	cleanup(
+		t,
+		"UPDATE donor_metric_projections SET next_refresh_at=now()+interval '1 hour' WHERE next_refresh_at=$1",
+		now.Add(-time.Second),
+	)
 	if err := svc.Refresh(ctx, now); err != nil {
 		t.Fatal(err)
 	}

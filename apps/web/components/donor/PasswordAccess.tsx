@@ -13,7 +13,8 @@ export function PasswordAccess({ setup = false }: { setup?: boolean }) {
         onSubmit={async (e) => {
           e.preventDefault();
           if (busy) return;
-          const f = new FormData(e.currentTarget);
+          const form = e.currentTarget;
+          const f = new FormData(form);
           setBusy(true);
           setError("");
           setStatus("");
@@ -26,8 +27,10 @@ export function PasswordAccess({ setup = false }: { setup?: boolean }) {
                   : { email: String(f.get("email")), password: String(f.get("password")) },
               ),
             });
-            if (setup) setStatus("Password saved.");
-            else window.location.assign("/account/dashboard");
+            if (setup) {
+              form.reset();
+              setStatus("Password saved.");
+            } else window.location.assign("/account/dashboard");
           } catch (c) {
             // A wrong current password is a 422 with this code (older servers answered 401): the donor stays signed in.
             setError(

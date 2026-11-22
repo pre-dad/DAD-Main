@@ -56,6 +56,9 @@ type liveVerifier struct {
 	mu     sync.Mutex
 	sets   map[Provider]*keySet
 	failed map[Provider]time.Time
+	// fetching holds, for each provider with a key fetch in flight, a channel
+	// closed when it ends.
+	fetching map[Provider]chan struct{}
 }
 
 type keySet struct {
@@ -71,6 +74,7 @@ func newLiveVerifier(clientIDs map[Provider][]string) *liveVerifier {
 		now:       time.Now,
 		sets:      map[Provider]*keySet{},
 		failed:    map[Provider]time.Time{},
+		fetching:  map[Provider]chan struct{}{},
 	}
 }
 
@@ -149,51 +153,77 @@ func authorizedParty(claims liveClaims, audiences []string) bool {
 }
 
 // key returns the provider's signing key kid, refetching the key set when it
-// is stale or does not hold kid (the provider rotated keys).
+// is stale or does not hold kid (the provider rotated keys). One fetch per
+// provider runs at a time, outside the lock, and concurrent callers wait for it
+// instead of fetching again, so a slow provider stalls neither other providers
+// nor callers whose context ends first.
 func (v *liveVerifier) key(ctx context.Context, provider Provider, kid string) (*rsa.PublicKey, error) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	set := v.sets[provider]
-	now := v.now()
-	if set != nil && now.Sub(set.fetchedAt) < keysLifetime {
-		if key, ok := set.keys[kid]; ok {
-			return key, nil
-		}
-		if now.Sub(set.fetchedAt) < keysRefetchGap {
-			return nil, ErrToken
-		}
-	}
-	// A provider outage should not end sign-in while the key is still known,
-	// nor make every sign-in wait out a failing fetch while holding the lock.
-	stale := func(err error) (*rsa.PublicKey, error) {
-		if set != nil {
+	for {
+		v.mu.Lock()
+		set := v.sets[provider]
+		now := v.now()
+		if set != nil && now.Sub(set.fetchedAt) < keysLifetime {
 			if key, ok := set.keys[kid]; ok {
+				v.mu.Unlock()
 				return key, nil
 			}
+			if now.Sub(set.fetchedAt) < keysRefetchGap {
+				v.mu.Unlock()
+				return nil, ErrToken
+			}
 		}
-		return nil, err
-	}
-	if failedAt, ok := v.failed[provider]; ok && now.Sub(failedAt) < keysRefetchGap {
-		return stale(ErrKeys)
-	}
-	keys, err := v.fetch(ctx, provider)
-	if err == nil && len(keys) == 0 {
-		err = fmt.Errorf("%w: no usable signing keys", ErrKeys)
-	}
-	if err != nil {
-		// A caller that gave up says nothing about the provider, and must not
-		// hold every other sign-in off it for a backoff window.
-		if ctx.Err() == nil {
-			v.failed[provider] = now
+		// A provider outage should not end sign-in while the key is still known,
+		// nor make every sign-in wait out a failing fetch.
+		stale := func(err error) (*rsa.PublicKey, error) {
+			if set != nil {
+				if key, ok := set.keys[kid]; ok {
+					return key, nil
+				}
+			}
+			return nil, err
 		}
-		return stale(err)
+		if failedAt, ok := v.failed[provider]; ok && now.Sub(failedAt) < keysRefetchGap {
+			v.mu.Unlock()
+			return stale(ErrKeys)
+		}
+		if running := v.fetching[provider]; running != nil {
+			v.mu.Unlock()
+			select {
+			case <-running:
+				continue
+			case <-ctx.Done():
+				return stale(fmt.Errorf("%w: %v", ErrKeys, ctx.Err()))
+			}
+		}
+		done := make(chan struct{})
+		v.fetching[provider] = done
+		v.mu.Unlock()
+
+		keys, err := v.fetch(ctx, provider)
+		if err == nil && len(keys) == 0 {
+			err = fmt.Errorf("%w: no usable signing keys", ErrKeys)
+		}
+
+		v.mu.Lock()
+		delete(v.fetching, provider)
+		close(done)
+		if err != nil {
+			// A caller that gave up says nothing about the provider, and must not
+			// hold every other sign-in off it for a backoff window.
+			if ctx.Err() == nil {
+				v.failed[provider] = now
+			}
+			v.mu.Unlock()
+			return stale(err)
+		}
+		delete(v.failed, provider)
+		v.sets[provider] = &keySet{keys: keys, fetchedAt: now}
+		v.mu.Unlock()
+		if key, ok := keys[kid]; ok {
+			return key, nil
+		}
+		return nil, ErrToken
 	}
-	delete(v.failed, provider)
-	v.sets[provider] = &keySet{keys: keys, fetchedAt: now}
-	if key, ok := keys[kid]; ok {
-		return key, nil
-	}
-	return nil, ErrToken
 }
 
 // ErrKeys is returned when a provider's signing keys cannot be fetched, so the

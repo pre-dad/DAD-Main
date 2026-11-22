@@ -10,6 +10,7 @@ import (
 
 	"dad/donor-api/internal/dbroles"
 	"dad/donor-api/internal/recognition"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -68,7 +69,12 @@ func TestMatchOwed(t *testing.T) {
 // terms, returning its id.
 func approvedPartner(t *testing.T, pool *pgxpool.Pool, org, code string, rateBP int32, capMinor int64) pgtype.UUID {
 	t.Helper()
-	id, _ := NewID()
+	return approvedPartnerWithID(t, pool, mustNewID(t), org, code, rateBP, capMinor)
+}
+
+// approvedPartnerWithID is approvedPartner for a chosen id, for tests that depend on id order.
+func approvedPartnerWithID(t *testing.T, pool *pgxpool.Pool, id pgtype.UUID, org, code string, rateBP int32, capMinor int64) pgtype.UUID {
+	t.Helper()
 	mustExec(
 		t,
 		pool,
@@ -99,8 +105,7 @@ func linkDonorWithGift(t *testing.T, pool *pgxpool.Pool, partnerID pgtype.UUID, 
 	id, _ := donor(t, pool)
 	mustExec(t, pool, "INSERT INTO donor_partner_employees (donor_id, partner_id, enrolled_at) VALUES ($1,$2,now())", id, partnerID)
 	if amount > 0 {
-		gift, _ := NewID()
-		chk, _ := NewID()
+		gift, chk := mustNewID(t), mustNewID(t)
 		mustExec(t, pool,
 			"INSERT INTO donor_checkouts (id, donor_id, amount_minor, frequency) VALUES ($1,$2,$3,'MONTHLY')", chk, id, amount)
 		mustExec(t, pool,
@@ -112,6 +117,11 @@ func linkDonorWithGift(t *testing.T, pool *pgxpool.Pool, partnerID pgtype.UUID, 
 		`INSERT INTO donor_metric_projections (donor_id, current_streak, best_streak, computed_at, next_refresh_at, id)
 		 VALUES ($1,$2,$2,now(),now()+interval '1 day', $3) ON CONFLICT (donor_id) DO UPDATE SET current_streak=$2`,
 		id, streak, mustNewID(t))
+	version, err := currentRulesVersion(context.Background(), queries.New(pool))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, pool, "UPDATE donor_metric_projections SET rules_version=$2 WHERE donor_id=$1", id, version)
 	t.Cleanup(func() {
 		cleanExec(t, "DELETE FROM donor_gifts WHERE donor_id=$1", id)
 		cleanExec(t, "DELETE FROM donor_checkouts WHERE donor_id=$1", id)
@@ -333,7 +343,7 @@ func TestEmployeeEnrollAndTeams(t *testing.T) {
 				t.Fatal(err)
 			}
 			mustExec(t, pool, `UPDATE donor_metric_projections SET active=$2, current_monthly_minor=$3,
-				streak_since=now()-interval '40 days' WHERE donor_id=$1`, id, amount > 0, amount)
+				streak_since=(now() AT TIME ZONE 'America/New_York' - interval '40 days') AT TIME ZONE 'America/New_York' WHERE donor_id=$1`, id, amount > 0, amount)
 		}
 	}
 	fill("Ops", []int64{9000, 0, 0, 0, 0})
@@ -353,7 +363,7 @@ func TestEmployeeEnrollAndTeams(t *testing.T) {
 }
 
 // approvePartnerAdmin creates a first ADMIN partner user for an approved
-// partner, returning (userID, userID) — the id is reused as the session owner.
+// partner, returning the user id and its string form, used as the session owner.
 func approvePartnerAdmin(t *testing.T, pool *pgxpool.Pool, partnerID pgtype.UUID) (pgtype.UUID, string) {
 	t.Helper()
 	uid := mustNewID(t)
@@ -413,6 +423,28 @@ func TestJoinTeamValidatesReusesAndMovesBetweenTeams(t *testing.T) {
 	}
 }
 
+func TestJoinTeamRefusesNewTeamsBeyondThePartnerCap(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	emp := EmployeeService{DB: pool}
+	partner := approvedPartner(t, pool, "Cap Co", "CAPCO", 0, 0)
+	id, token := signedInDonor(t, pool)
+	mustExec(t, pool, "INSERT INTO donor_partner_employees (donor_id, partner_id, enrolled_at) VALUES ($1,$2,now())", id, partner)
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_partner_teams(id,partner_id,name) SELECT gen_random_uuid(),$1,'Team '||n FROM generate_series(1,$2::int) n",
+		partner,
+		maxTeamsPerPartner,
+	)
+	if _, err := emp.JoinTeam(ctx, token, "One too many"); !errors.Is(err, ErrTeam) {
+		t.Fatalf("created a team past the cap: %v", err)
+	}
+	if _, err := emp.JoinTeam(ctx, token, "Team 7"); err != nil {
+		t.Fatalf("joining an existing team at the cap: %v", err)
+	}
+}
+
 func TestSetWorkforceIsAdminOnlyAndNonNegative(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
@@ -438,6 +470,9 @@ func TestSetWorkforceIsAdminOnlyAndNonNegative(t *testing.T) {
 	}
 	if err := emp.SetWorkforce(ctx, admin, -1); !errors.Is(err, ErrPartnerApplication) || size() != 250 {
 		t.Fatalf("negative workforce: size=%d err=%v", size(), err)
+	}
+	if err := emp.SetWorkforce(ctx, admin, maxWorkforceSize+1); !errors.Is(err, ErrPartnerApplication) || size() != 250 {
+		t.Fatalf("workforce above the cap: %v size %d", err, size())
 	}
 	if err := emp.SetWorkforce(ctx, viewer, 9); !errors.Is(err, ErrPartnerForbidden) || size() != 250 {
 		t.Fatalf("viewer changed the workforce: size=%d err=%v", size(), err)
@@ -507,4 +542,142 @@ func TestMatchYearBoundaryIsNewYorkCalendarYear(t *testing.T) {
 			t.Errorf("year %d: gifts=%d owed=%d err=%v; want gifts=%d owed=%d", y, status.GiftsMinor, status.OwedMinor, err, want, want/10)
 		}
 	}
+}
+
+func TestEmployeeStreaksUseLocalCalendarDays(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	partner := approvedPartner(t, pool, "Calendar Team", "CALENDAR-TEAM", 0, 0)
+	team := mustNewID(t)
+	mustExec(t, pool, "INSERT INTO donor_partner_teams(id,partner_id,name) VALUES($1,$2,'Calendar')", team, partner)
+	for range 5 {
+		id := linkDonorWithGift(t, pool, partner, 3000, time.Now().UTC(), 1)
+		mustExec(t, pool, "UPDATE donor_partner_employees SET team_id=$2 WHERE donor_id=$1", id, team)
+		mustExec(t, pool, "UPDATE donors SET timezone='America/New_York' WHERE id=$1", id)
+	}
+	q := queries.New(as(t, dbroles.API))
+	for _, test := range []struct {
+		name, since, asOf string
+		want              int64
+	}{
+		{"midnight", "2026-03-08T04:59:00Z", "2026-03-08T05:01:00Z", 1},
+		{"spring DST", "2026-03-08T05:01:00Z", "2026-03-09T04:01:00Z", 1},
+		{"future is clamped", "2026-03-10T04:01:00Z", "2026-03-09T04:01:00Z", 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			since, err := time.Parse(time.RFC3339, test.since)
+			if err != nil {
+				t.Fatal(err)
+			}
+			asOf, err := time.Parse(time.RFC3339, test.asOf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mustExec(
+				t,
+				pool,
+				`UPDATE donor_metric_projections SET streak_since=$2,computed_at=$3::timestamptz-interval '1 minute',next_refresh_at=$3::timestamptz+interval '1 day'
+   WHERE donor_id IN (SELECT donor_id FROM donor_partner_employees WHERE partner_id=$1)`,
+				partner,
+				since,
+				asOf,
+			)
+			rows, err := teamLeaderboard(ctx, q, partner, asOf)
+			if err != nil || len(rows) != 1 || rows[0].AvgStreakDays != test.want {
+				t.Fatalf("team calendar days=%+v err=%v, want %d", rows, err, test.want)
+			}
+			row, err := q.PartnerOurPeople(
+				ctx,
+				queries.PartnerOurPeopleParams{
+					PartnerID:    partner,
+					RulesVersion: projectionRules,
+					AsOf:         timestamp(asOf),
+					YearStart:    timestamp(asOf.AddDate(-1, 0, 0)),
+					YearEnd:      timestamp(asOf.AddDate(1, 0, 0)),
+				},
+			)
+			if err != nil || row.AvgStreakDays != test.want {
+				t.Fatalf("organization calendar days=%d err=%v, want %d", row.AvgStreakDays, err, test.want)
+			}
+		})
+	}
+}
+
+func TestEmployeeAggregatesDiscloseProjectionFreshness(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	partner := approvedPartner(t, pool, "Fresh Team", "FRESH-TEAM", 0, 0)
+	team := mustNewID(t)
+	mustExec(t, pool, "INSERT INTO donor_partner_teams(id,partner_id,name) VALUES($1,$2,'Fresh')", team, partner)
+	var first pgtype.UUID
+	for range 5 {
+		id := linkDonorWithGift(t, pool, partner, 3000, time.Now().UTC(), 1)
+		first = id
+		mustExec(t, pool, "UPDATE donor_partner_employees SET team_id=$2 WHERE donor_id=$1", id, team)
+	}
+	q := queries.New(as(t, dbroles.API))
+	version, err := currentRulesVersion(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asOf := time.Now().UTC()
+	mustExec(
+		t,
+		pool,
+		`UPDATE donor_metric_projections SET active=true,current_monthly_minor=3000,streak_since=$2::timestamptz-interval '2 days'
+ WHERE donor_id IN (SELECT donor_id FROM donor_partner_employees WHERE partner_id=$1)`,
+		partner,
+		asOf,
+	)
+	check := func(want bool) {
+		t.Helper()
+		teams, err := teamLeaderboard(ctx, q, partner, asOf)
+		if err != nil || len(teams) != 1 || teams[0].MetricsVerified != want {
+			t.Fatalf("team verification=%+v err=%v want=%v", teams, err, want)
+		}
+		people, err := q.PartnerOurPeople(
+			ctx,
+			queries.PartnerOurPeopleParams{
+				PartnerID:    partner,
+				AsOf:         timestamp(asOf),
+				RulesVersion: version,
+				YearStart:    timestamp(asOf.AddDate(-1, 0, 0)),
+				YearEnd:      timestamp(asOf.AddDate(1, 0, 0)),
+			},
+		)
+		if err != nil || people.StreakVerified != want {
+			t.Fatalf("people verification=%v err=%v want=%v", people.StreakVerified, err, want)
+		}
+	}
+	for _, test := range []struct {
+		name    string
+		next    time.Time
+		rules   int32
+		failure any
+		want    bool
+	}{
+		{"current", asOf.Add(time.Hour), version, nil, true},
+		{"due now", asOf, version, nil, false},
+		{"expired", asOf.Add(-time.Second), version, nil, false},
+		{"old rules", asOf.Add(time.Hour), version - 1, nil, false},
+		{"failed refresh", asOf.Add(time.Hour), version, "InvalidFacts", false},
+		{"newer rules", asOf.Add(time.Hour), version + 1, nil, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			mustExec(
+				t,
+				pool,
+				"UPDATE donor_metric_projections SET next_refresh_at=$2,rules_version=$3,refresh_error=$4 WHERE donor_id=$1",
+				first,
+				test.next,
+				test.rules,
+				test.failure,
+			)
+			check(test.want)
+		})
+	}
+	mustExec(t, pool, "DELETE FROM donor_metric_projections WHERE donor_id=$1", first)
+	check(false)
+	mustExec(t, pool, "DELETE FROM donor_gifts WHERE donor_id=$1", first)
+	check(true)
 }

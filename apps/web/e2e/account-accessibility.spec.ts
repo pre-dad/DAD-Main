@@ -1,5 +1,6 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import type { ResponseBody } from "../lib/api";
+import { axe, expectNoHorizontalScroll } from "./a11y";
 
 const dashboard = {
   mode: "test",
@@ -147,10 +148,10 @@ for (const [path, fixture] of Object.entries(profiles)) {
       // Axe measures targets at the current scroll; the sticky header must not hide the one scrolled under it.
       await page.evaluate(() => scrollTo(0, 0));
     }
-    const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+    const results = await axe(page);
     expect(results.violations).toEqual([]);
     expect(errors).toEqual([]);
-    expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
+    await expectNoHorizontalScroll(page);
   });
 }
 
@@ -171,8 +172,7 @@ test("the profile lists where the donor is signed in and signs out another devic
   await expect(section.getByRole("listitem").nth(1)).toContainText(
     "iOS app · Signed in Sep 20, 2026 · Last active Oct 7, 2026",
   );
-  const accessibility = () =>
-    new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  const accessibility = () => axe(page);
   expect((await accessibility()).violations).toEqual([]);
   const signOut = section.getByRole("button", { name: /^Sign out Alex’s iPhone, last active / });
   await signOut.focus();
@@ -183,7 +183,7 @@ test("the profile lists where the donor is signed in and signs out another devic
   await expect(section.getByText("You’re not signed in anywhere else.")).toBeVisible();
   expect(revoked).toBe(1);
   expect((await accessibility()).violations).toEqual([]);
-  expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
+  await expectNoHorizontalScroll(page);
 });
 
 test("volunteer interests are added, removed, saved and reloaded by keyboard alone", async ({ page }) => {
@@ -201,8 +201,7 @@ test("volunteer interests are added, removed, saved and reloaded by keyboard alo
   await page.goto("/account/profile");
   const interests = page.getByRole("group", { name: "What interests you?" });
   await expect(interests.getByRole("listitem")).toHaveText(["mentoringRemove"]);
-  const accessibility = () =>
-    new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  const accessibility = () => axe(page);
   expect((await accessibility()).violations).toEqual([]);
 
   const box = interests.getByRole("textbox", { name: "Add an interest" });
@@ -234,7 +233,7 @@ test("volunteer interests are added, removed, saved and reloaded by keyboard alo
   await interests.getByRole("button", { name: "Remove Dog walking" }).click();
   await expect(interests.getByText("No interests added yet.")).toBeVisible();
   expect((await accessibility()).violations).toEqual([]);
-  expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
+  await expectNoHorizontalScroll(page);
 });
 
 const subscription = {
@@ -286,7 +285,7 @@ for (const [name, fixture] of Object.entries(recurring)) {
       });
       expect(Math.abs((linkBox?.x ?? 0) - textBox)).toBeLessThan(1);
     }
-    const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+    const results = await axe(page);
     expect(results.violations).toEqual([]);
   });
 }
@@ -307,7 +306,7 @@ test("a new monthly gift shows its confirmation first and the sandbox note last"
     .locator(".callout, .note")
     .evaluateAll((nodes) => nodes.map((node) => node.className));
   expect(order).toEqual(["callout", "note"]);
-  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  const results = await axe(page);
   expect(results.violations).toEqual([]);
 });
 
@@ -345,9 +344,7 @@ test("email proof page requires an explicit keyboard confirmation", async ({ pag
   await page.keyboard.press("Enter");
   await expect(page.getByRole("link", { name: /sign in/i })).toBeVisible();
   expect(confirmed).toBe(1);
-  expect(
-    (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,
-  ).toEqual([]);
+  expect((await axe(page)).violations).toEqual([]);
 });
 
 // Employee giving: the donor links an employer by company code and
@@ -376,14 +373,37 @@ test("authenticated accessible surface: /account/employer", async ({ page }) => 
   // The enrolled state is conveyed in words, not by colour alone.
   await expect(page.getByText("Delta Inc", { exact: true })).toBeVisible();
   await expect(page.getByText("Team A")).toBeVisible();
-  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  const results = await axe(page);
   expect(results.violations).toEqual([]);
   expect(errors).toEqual([]);
-  expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
+  await expectNoHorizontalScroll(page);
 });
 
 // The partner portal dashboard: every section, for an administrator, with
 // an initiative, a team leaderboard, and unsuppressed employee figures.
+const partnerTeams: ResponseBody<"/donor/partner/teams", "get"> = {
+  teams: [
+    {
+      team_id: "t1",
+      name: "Team A",
+      metrics_verified: true,
+      active_givers: 6,
+      annualized_minor: 216000,
+      avg_streak_days: 40,
+      volunteer_minutes: 300,
+    },
+    {
+      team_id: "t2",
+      name: "Team B",
+      metrics_verified: false,
+      active_givers: 5,
+      annualized_minor: 0,
+      avg_streak_days: 0,
+      volunteer_minutes: 0,
+    },
+  ],
+};
+
 const partnerPortal: Record<string, unknown> = {
   "/donor/partner/overview": {
     organization: "Delta Inc",
@@ -421,7 +441,7 @@ const partnerPortal: Record<string, unknown> = {
     ],
   },
   "/donor/partner/spend": { categories: [{ category: "Meals", amount_minor: 50000 }] },
-  "/donor/partner/users": { users: [{ id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN" }] },
+  "/donor/partner/users": { users: [{ id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN", accepted: true }] },
   "/donor/partner/exports": { exports: [] },
   "/donor/partner/our-people": {
     enrolled: 8,
@@ -433,18 +453,7 @@ const partnerPortal: Record<string, unknown> = {
     teams: 1,
     suppressed: false,
   },
-  "/donor/partner/teams": {
-    teams: [
-      {
-        team_id: "t1",
-        name: "Team A",
-        active_givers: 6,
-        annualized_minor: 216000,
-        avg_streak_days: 40,
-        volunteer_minutes: 300,
-      },
-    ],
-  },
+  "/donor/partner/teams": partnerTeams,
 };
 
 test("authenticated accessible surface: /partner", async ({ page }) => {
@@ -456,14 +465,14 @@ test("authenticated accessible surface: /partner", async ({ page }) => {
   await page.goto("/partner");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await expect(page.getByText("$1,500.00")).toBeVisible();
-  // Every portal panel is a laboured region a screen reader can navigate to.
+  // Every portal panel is a labelled region a screen reader can navigate to.
   for (const name of ["Overview", "Initiatives", "Spend", "Our People", "Reports", "Users"]) {
-    await expect(page.getByRole("region", { name })).toBeVisible();
+    await expect(page.getByRole("region", { name, exact: true })).toBeVisible();
   }
-  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  const results = await axe(page);
   expect(results.violations).toEqual([]);
   expect(errors).toEqual([]);
-  expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
+  await expectNoHorizontalScroll(page);
 });
 
 test("partner sign-out stays on the dashboard after failure and navigates only after a successful retry", async ({

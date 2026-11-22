@@ -4,7 +4,7 @@ import Link from "next/link";
 export function SignInPrompt({ children }: { children: string }) {
   return (
     <div className="callout">
-      <p>You’re signed out. We’ll email you a single-use link — no password needed.</p>
+      <p>You’re signed out. Sign in with an emailed single-use link, a passkey, a phone code or a password.</p>
       <Link className="button" href="/account/sign-in">
         {children}
       </Link>

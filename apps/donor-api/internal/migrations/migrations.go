@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -19,6 +20,8 @@ import (
 )
 
 var ErrAdoptionRequired = errors.New("existing donor database requires explicit baseline adoption")
+var ErrHistoryMismatch = errors.New("migration history mismatch")
+var ErrPending = errors.New("database migrations are pending")
 var ErrSchemaMismatch = errors.New("existing donor schema does not match the R1 baseline")
 
 type migration struct{ name, sql, checksum string }
@@ -54,11 +57,14 @@ func manifest(fsys fs.FS) ([]migration, error) {
 	return result, nil
 }
 
+// advisoryLockID serializes concurrent migrators on one database.
+const advisoryLockID = 714728310
+
 // Apply runs every embedded migration the database lacks, then brings the
 // process roles and their privileges to their declaration, in one
 // transaction under an advisory lock. A database that already holds the donor
-// tables but no history is adopted only when adopt is set and its schema
-// matches the baseline exactly.
+// tables but no history is adopted only when adopt is set and its tables,
+// columns, constraints and indexes match the baseline.
 func Apply(ctx context.Context, pool *pgxpool.Pool, adopt bool) error {
 	files, err := embedded()
 	if err != nil {
@@ -66,7 +72,7 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, adopt bool) error {
 	}
 	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		for _, statement := range []string{
-			"SELECT pg_advisory_xact_lock(714728310)",
+			"SELECT pg_advisory_xact_lock(" + strconv.Itoa(advisoryLockID) + ")",
 			"SET LOCAL lock_timeout = '5s'",
 			"SET LOCAL search_path TO public",
 			`CREATE TABLE IF NOT EXISTS donor_schema_migrations(version text PRIMARY KEY,checksum text NOT NULL,applied_at timestamptz NOT NULL DEFAULT now())`,
@@ -94,7 +100,7 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, adopt bool) error {
 // appliedMigrations returns the recorded history, which must be a prefix of
 // files with matching checksums.
 func appliedMigrations(ctx context.Context, tx pgx.Tx, files []migration) (map[string]string, error) {
-	rows, err := tx.Query(ctx, `SELECT version,checksum FROM donor_schema_migrations ORDER BY version COLLATE "C"`)
+	rows, err := tx.Query(ctx, `SELECT version,checksum FROM donor_schema_migrations`)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +174,7 @@ func Verify(ctx context.Context, pool *pgxpool.Pool) error {
 			return err
 		}
 		if index >= len(files) || files[index].name != name || files[index].checksum != checksum {
-			return errors.New("migration history mismatch")
+			return ErrHistoryMismatch
 		}
 		index++
 	}
@@ -176,12 +182,14 @@ func Verify(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	if index != len(files) {
-		return errors.New("database migrations are pending")
+		return fmt.Errorf("%w: first missing is %s", ErrPending, files[index].name)
 	}
 	return nil
 }
 
 func validateBaseline(ctx context.Context, tx pgx.Tx, sql string) error {
+	// Databases created before this service carry the Python-era Alembic
+	// history; this is the revision whose schema the baseline reproduces.
 	var revision string
 	if err := tx.QueryRow(ctx, "SELECT version_num FROM alembic_version").Scan(&revision); err != nil {
 		return ErrSchemaMismatch

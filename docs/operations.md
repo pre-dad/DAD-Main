@@ -114,17 +114,18 @@ Staff passkeys belong to the staff hostname; changing it means every staff membe
 again.
 
 Rate limits are per visitor. nginx sets `X-Real-IP` to the client address, which the API
-trusts only from the `app` network, `172.30.43.0/24`, that the web containers alone share
-with it ([edge](edge.md#client-address)). Setting `DONOR_CLIENT_IP_HEADER` empty makes all
+trusts only from the `app` network, `172.30.43.0/24`, that the web containers and the
+nginx ingress share with it ([edge](edge.md#client-address)). Setting `DONOR_CLIENT_IP_HEADER` empty makes all
 visitors share the proxy's quota. Edit the Compose networks if `172.30.42.0/24` or
 `172.30.43.0/24` clashes on the host.
 
-The API's in-process limiter keeps a token bucket per client and per class, so a burst
-on one surface cannot starve another for visitors sharing an address; the classes and
-the limits at each layer are in [edge](edge.md#rate-limits). Rejections carry an exact
-`Retry-After`. It tracks at most 65,536 buckets and evicts an existing bucket rather than refusing new
-clients when full. It is the per-instance last line behind the nginx and Cloudflare
-limits. Capacity must still be validated against the agreed launch spike.
+The API keeps bounded local token buckets and also enforces each client's shared
+budget in PostgreSQL, so replicas cannot multiply the allowance. Classes have separate
+budgets so activity on one surface cannot starve another for visitors sharing an
+address; [edge](edge.md#rate-limits) lists each layer. Rejections carry `Retry-After`.
+The local limiter tracks at most 65,536 buckets and evicts an existing bucket when full.
+If the shared check cannot complete within two seconds, the API fails closed with 503.
+Capacity must still be validated against the agreed launch spike.
 
 `/health/live` checks process availability. `/health/ready` checks the migration history
 through PostgreSQL with a deadline. It can be ready while Stripe or SMTP is intentionally
@@ -419,8 +420,10 @@ Monitor the oldest unprocessed `donor_stripe_events`, attempt counts, and worker
 A failed event waits before its next attempt, doubling from one minute up to an hour (an event whose worker crashed instead waits out the six-minute lease),
 so a provider outage or an event that arrives before its gift is retried later rather
 than immediately. Events park after ten failed attempts. Investigate the error class
-(`PaymentUnavailable`, `MissingRecord`, `InvalidFacts`, or `ProcessingError`) and current
-Stripe state before explicitly retrying:
+(`PaymentUnavailable`, `PaymentRejected`, `MissingRecord`, `InvalidFacts`, or `ProcessingError`) and current
+Stripe state before explicitly retrying. `PaymentUnavailable` is an outage or throttle worth retrying;
+`PaymentRejected` is a Stripe 4xx or an unusable checkout response, which another attempt will not change,
+so fix the cause first:
 
 ```sh
 cd apps/donor-api
@@ -562,9 +565,9 @@ cancellation, start time, and notification choices; delivery rechecks the recipi
 Apply migration `0054_projection_schedules_and_event_fanout.sql` before these binaries.
 
 History: migration `0017_referral_corrections.sql` had to be applied before binaries
-using projection rules version 6 (the current version is 12, `projectionRules` in
-`internal/store/financial.go`). Older projections then converge on the earliest verified successful payment
-through the normal refresh worker. Corrections, transferred referral totals, and new
+using projection rules version 6 (see `projectionRules` in `internal/store/financial.go`
+for the current version). Older projections then converge on the earliest verified
+successful payment through the normal refresh worker. Corrections, transferred referral totals, and new
 notification intents commit together. Monitor projection errors during convergence and
 use the staff `referral-corrections` export to inspect changed attribution. The migration
 does not rewrite gift facts or reconstruct corrections from before this release.
@@ -1253,7 +1256,6 @@ Branch protection should require the CI and mobile checks and ATM acceptance.
 A green application test suite alone does not authorize deployment. All
 workflows run on GitHub-hosted runners.
 
-
 ## One email, one role
 
 New identities are refused for an address held by another role (see
@@ -1295,8 +1297,10 @@ image checks. Direct API deployments retain the original key-loading configurati
 
 The web application form uses `POST /donor/partner/applications` with a
 client-generated 32-byte random base64url receipt and a stable idempotency key. The
-receipt and application commit together. Application submission remains browser-only. A retry must retain both values and the same
-form. The browser receives an HttpOnly, SameSite=Lax cookie lasting 30 days. `GET /donor/partner/application-status` also accepts the receipt
+receipt and application commit together. Browser and native clients may submit the application.
+A retry must retain both values and the same form. The browser receives an HttpOnly,
+SameSite=Lax cookie lasting 30 days; a native client securely retains its receipt without
+a cookie. `GET /donor/partner/application-status` also accepts the receipt
 as a native bearer credential; native clients must obtain and securely retain that
 separate receipt through an explicit application-submission integration. No receipt is
 implicitly shared from the browser to an app.
@@ -1320,7 +1324,7 @@ Payment history remains authoritative; permanent earned badges and historical be
 are preserved. This operation repairs derived state after facts or code have been
 corrected. It does not provide an arbitrary manual continuity override.
 
-### Web signup and identity providers
+## Web signup and identity providers
 
 Donor signup collects a private name, email, ZIP, and city before emailing a
 single-use verification link. Existing donor profiles are not overwritten by an
@@ -1349,7 +1353,7 @@ expiry before issuing the normal HttpOnly donor session. Provider errors return 
 sign-in failure without logging codes, tokens, or response bodies. These flows need
 real-provider acceptance with the deployment's registered credentials.
 
-### Initiative co-funders and verified spending
+## Initiative co-funders and verified spending
 
 An initiative may have several approved co-funders, each with its own committed
 amount. Partnerships staff set the initiative ID and that partner's commitment in
@@ -1365,7 +1369,7 @@ visible until the verified replacement is published. Verification evidence is ke
 with the published total. Existing published totals are preserved on migration;
 the migration does not manufacture historical verification evidence.
 
-### Recognition controls
+## Recognition controls
 
 Super administrators can reset a donor's current streak with a reason. The reset is
 stored separately from gift facts and survives projection recomputation; giving
@@ -1378,3 +1382,78 @@ remain fixed; staff cannot supply executable rules. Changes are audited and sche
 projection refreshes. Past awards remain permanent. Company month winners use combined
 active giving, matching the displayed leaderboard. Qualifying website-waitlist claims
 have no redemption expiry; only their keyed address hashes are retained.
+
+## Container revision identity
+
+The API health responses report the commit linked into the executable. The deploy
+workflow passes its immutable image SHA as `BUILD_REVISION`; `scripts/deploy.sh build`
+uses the checkout's current commit, and `make check-images` does the same. A direct
+Docker or Compose build must supply `BUILD_REVISION` to identify its source revision.
+An unstamped build reports `unknown`; image tags alone do not stamp Go binaries.
+
+## Partner report storage
+
+An unchanged organization snapshot reuses its immutable PDF for the same UTC day,
+including concurrent requests and requests by different admins. A changed published
+figure, branding or new UTC day creates a new snapshot. Only a new artifact records
+an export analytics event. Retained history is never rewritten or deleted by this
+policy.
+
+Each organization can create 20 new artifacts per UTC day and retain at most 1,000
+reports or 128 MiB. Daily exhaustion returns 429 `PARTNER_REPORT_DAILY_LIMIT` with
+`Retry-After` until midnight UTC; storage exhaustion returns 409
+`PARTNER_REPORT_STORAGE_LIMIT`. Downloads of existing snapshots continue to work.
+Organizations already beyond a limit retain their history but cannot add artifacts.
+Review capacity with the owner before increasing these limits; never purge financial
+report history automatically. Quota checks and artifact creation share a serializable
+transaction, with bounded retries for concurrent exports.
+
+Report rendering embeds Unicode font subsets, including CJK and complex-script
+shaping. Each API process renders one report at a time; report text is capped at 128 KiB and queued requests honor
+cancellation. An export exceeding 1,000 spend categories or a 2 MiB PDF returns
+413 `PARTNER_REPORT_TOO_LARGE` without storing a partial artifact. Previously
+exported reports remain immutable and downloadable. Renderer changes use a new
+snapshot version, so older lossy PDFs are not reused for new exports.
+
+## Employee projection freshness
+
+Employee streak averages use calendar-date differences in each donor's IANA time
+zone, clamped at zero. A team’s giving and streak figures are verified only when
+every member's projection has not reached its refresh boundary, has no refresh
+error, and meets the active recognition-rules version. A missing projection is
+known zero only for a donor with no recorded gifts. Partners receive the same
+freshness boundary for the employee streak average. Clients show unavailable
+figures as awaiting verification and withhold giving/streak ranks when any team
+is pending; recorded volunteer hours remain available.
+
+The monthly winner job leaves a month open while any eligible team's figures are
+unverified. A subsequent worker pass can close it after projections recover;
+checks, standings and badge awards share one consistent transaction snapshot.
+
+## Donor time zone corrections
+
+A ZIP suggests the donor's IANA time zone using the bundled region table; border
+ZIPs can be approximate. A donor may choose a supported US civil time zone in
+Profile. This choice controls local streak-day boundaries. It can be saved without
+publishing a ZIP. Profile updates that omit `timezone_override` preserve the saved
+correction, including updates from older clients; an empty string explicitly resets
+to the ZIP suggestion. Clearing the ZIP keeps an explicit correction. Unsupported
+zones and JSON null are rejected, and account deletion clears the correction.
+
+An effective zone change marks the donor's financial projection due in the same
+transaction so midnight schedules and recognition refresh under the new zone.
+
+## R1 native contract rollout
+
+Foundation 2.13.0 adds verification fields to employee responses and an optional
+profile time-zone correction. The current iOS and Android sources adopt that exact
+released snapshot. Older Swift clients generated from 2.12.0 reject unknown object
+properties (`additionalProperties: false`), so schema-additive response fields are
+not runtime-compatible with those installed builds. A profile read is also affected
+once a manual correction adds `timezone_override` to its response.
+
+Do not roll this API revision out to a mixed fleet of older iOS builds. Before R1,
+coordinate the native update with the backend and confirm every supported installed
+build against the deployed contract. If old installed builds must remain supported,
+first design and test explicit response-version negotiation or a versioned API;
+a foundation snapshot tag alone does not negotiate the server's response format.

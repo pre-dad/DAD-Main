@@ -75,20 +75,11 @@ func lockStaffUser(ctx context.Context, q *queries.Queries, id pgtype.UUID) (sta
 		}
 		user.passkeys = append(user.passkeys, webauthn.Credential{
 			ID: row.CredentialID, PublicKey: row.PublicKey, AttestationFormat: row.AttestationFormat, Transport: transports,
-			Flags: webauthn.NewCredentialFlags(
-				flags,
-			), Authenticator: webauthn.Authenticator{AAGUID: row.Aaguid, SignCount: uint32(row.SignCount)},
+			Flags:         webauthn.NewCredentialFlags(flags),
+			Authenticator: webauthn.Authenticator{AAGUID: row.Aaguid, SignCount: uint32(row.SignCount)},
 		})
 	}
 	return user, nil
-}
-
-// sweepCeremonies deletes abandoned ceremonies, so anonymous sign-in attempts
-// cannot pile up. It runs on its own: a ceremony being answered stays locked
-// until its transaction has locked the account, so sweeping while holding an
-// account lock could deadlock with it.
-func (s *StaffService) sweepCeremonies(ctx context.Context) error {
-	return queries.New(s.DB).DeleteExpiredStaffCeremonies(ctx, timestamp(time.Now()))
 }
 
 // saveCeremony keeps a challenge until it expires and returns its ID.
@@ -150,9 +141,6 @@ func startStaffSession(ctx context.Context, q *queries.Queries, staff pgtype.UUI
 // BeginSignIn issues a usernameless challenge: any of the browser's passkeys
 // for the staff host may answer it, so nothing reveals which accounts exist.
 func (s *StaffService) BeginSignIn(ctx context.Context) (Ceremony, error) {
-	if err := s.sweepCeremonies(ctx); err != nil {
-		return Ceremony{}, err
-	}
 	assertion, session, err := s.WebAuthn.BeginDiscoverableLogin()
 	if err != nil {
 		return Ceremony{}, err
@@ -207,8 +195,14 @@ func (s *StaffService) SignIn(ctx context.Context, ceremony string, response []b
 		if reason != "" {
 			return auditStaff(ctx, q, pgtype.UUID{}, "staff.sign_in_failed", owner.String(), map[string]string{"reason": reason}, now)
 		}
-		if err = q.RecordStaffPasskeyUse(ctx, queries.RecordStaffPasskeyUseParams{CredentialID: passkey.ID, SignCount: int64(passkey.Authenticator.SignCount),
-			UserVerified: passkey.Flags.UserVerified, BackupState: passkey.Flags.BackupState, LastUsedAt: timestamp(now)}); err != nil {
+		err = q.RecordStaffPasskeyUse(ctx, queries.RecordStaffPasskeyUseParams{
+			CredentialID: passkey.ID,
+			SignCount:    int64(passkey.Authenticator.SignCount),
+			UserVerified: passkey.Flags.UserVerified,
+			BackupState:  passkey.Flags.BackupState,
+			LastUsedAt:   timestamp(now),
+		})
+		if err != nil {
 			return err
 		}
 		if token, err = startStaffSession(ctx, q, owner, now); err != nil {
@@ -268,9 +262,6 @@ func staffInvitation(ctx context.Context, q *queries.Queries, token string) (que
 // without an email address.
 func (s *StaffService) BeginActivation(ctx context.Context, token string) (Invitation, error) {
 	var result Invitation
-	if err := s.sweepCeremonies(ctx); err != nil {
-		return result, err
-	}
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
 		invite, user, err := staffInvitation(ctx, q, token)
@@ -393,9 +384,20 @@ func (s *StaffService) register(
 			transports = append(transports, string(transport))
 		}
 	}
-	if err = q.InsertStaffPasskey(ctx, queries.InsertStaffPasskeyParams{ID: id, StaffID: user.staff.ID, CredentialID: passkey.ID, PublicKey: passkey.PublicKey,
-		SignCount: int64(passkey.Authenticator.SignCount), Transports: transports, Aaguid: passkey.Authenticator.AAGUID, AttestationFormat: passkey.AttestationFormat,
-		UserVerified: passkey.Flags.UserVerified, BackupEligible: passkey.Flags.BackupEligible, BackupState: passkey.Flags.BackupState}); err != nil {
+	err = q.InsertStaffPasskey(ctx, queries.InsertStaffPasskeyParams{
+		ID:                id,
+		StaffID:           user.staff.ID,
+		CredentialID:      passkey.ID,
+		PublicKey:         passkey.PublicKey,
+		SignCount:         int64(passkey.Authenticator.SignCount),
+		Transports:        transports,
+		Aaguid:            passkey.Authenticator.AAGUID,
+		AttestationFormat: passkey.AttestationFormat,
+		UserVerified:      passkey.Flags.UserVerified,
+		BackupEligible:    passkey.Flags.BackupEligible,
+		BackupState:       passkey.Flags.BackupState,
+	})
+	if err != nil {
 		return "", err
 	}
 	if err = auditStaff(ctx, q, user.staff.ID, "staff.activated", user.staff.ID.String(), nil, now); err != nil {

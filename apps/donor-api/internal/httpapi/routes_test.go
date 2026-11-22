@@ -23,8 +23,6 @@ func routeRequest(pattern, body string) *http.Request {
 		switch name {
 		case "{year}":
 			return "2026"
-		case "{file}":
-			return "gifts.csv"
 		case "{code}":
 			return "code"
 		}
@@ -84,18 +82,17 @@ func TestEveryMutationRequiresItsSurfaceOrigin(t *testing.T) {
 }
 
 func TestSignedInRoutesRejectAnonymousRequestsBeforeStorage(t *testing.T) {
-	server := NewServer("", Services{})
 	for _, route := range allRoutes() {
-		if route.auth != donorAuth && route.auth != staffAuth {
+		if route.auth != donorAuth && route.auth != staffAuth && route.auth != partnerAuth {
 			continue
 		}
 		r := routeRequest(route.pattern, "{}")
 		r.Header.Set("Origin", originFor(route.pattern))
 		response := httptest.NewRecorder()
-		server.Handler.ServeHTTP(response, r)
+		NewServer("", Services{}).Handler.ServeHTTP(response, r)
 		want := http.StatusUnauthorized
-		if strings.HasSuffix(route.pattern, "/logout") || strings.HasSuffix(route.pattern, "/sign-out") {
-			// Signing out never requires a valid session; with no service it is unavailable.
+		if route.auth != partnerAuth && (strings.HasSuffix(route.pattern, "/logout") || strings.HasSuffix(route.pattern, "/sign-out")) {
+			// Donor and staff sign-out never require a valid session; with no service it is unavailable.
 			want = http.StatusServiceUnavailable
 		}
 		if response.Code != want {

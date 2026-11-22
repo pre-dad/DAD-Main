@@ -56,7 +56,9 @@ func TestAnchorBackfillSyncsSubscriptionsSavedWithoutOne(t *testing.T) {
 	if worked, err := backfill.SyncNext(ctx, now.Add(anchorBackfillInterval-time.Second)); worked || err != nil {
 		t.Fatal("pass started before the interval elapsed", err)
 	}
-	runAnchorPass(t, backfill, now.Add(anchorBackfillInterval))
+	if failures := runAnchorPass(t, backfill, now.Add(anchorBackfillInterval)); len(failures) != 0 {
+		t.Fatal(failures)
+	}
 	if r.sub.retrievals != reads {
 		t.Fatal("a synced subscription was read again")
 	}

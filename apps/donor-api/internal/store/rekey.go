@@ -87,7 +87,8 @@ func (r Rekeyer) Survey(ctx context.Context, columns []EncryptedColumn) ([]KeyUs
 				return true, nil
 			}
 			u.Undecryptable++
-			if bad.Count++; bad.Count <= undecryptableListed {
+			bad.Count++
+			if bad.Count <= undecryptableListed {
 				bad.Rows = append(bad.Rows, column.Table+" "+id.String())
 			}
 			return true, nil
@@ -157,6 +158,9 @@ type storedToken struct {
 // time, each page read in its own short statement. When visit reports that
 // the row changed under it, scan reads again from that row.
 func (r Rekeyer) scan(ctx context.Context, column EncryptedColumn, visit func(pgtype.UUID, []byte) (bool, error)) error {
+	if r.Batch < 1 {
+		return fmt.Errorf("rekey batch size is %d, want at least 1", r.Batch)
+	}
 	table, value := column.identifiers()
 	page := "SELECT id, " + value + " FROM (SELECT id, " + value + ", sum(octet_length(" + value + ")) OVER (ORDER BY id) AS through FROM " + table +
 		" WHERE " + value + " IS NOT NULL AND id > $1 ORDER BY id LIMIT $2) page WHERE through - octet_length(" + value + ") < $3 ORDER BY id"

@@ -2,7 +2,13 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, expect, it, vi } from "vitest";
 import { Passkeys } from "./Passkeys";
 
+const confirmRemoval = async (name: RegExp) => {
+  fireEvent.click(await screen.findByRole("button", { name }));
+  fireEvent.click(screen.getByRole("button", { name: /^Confirm removal/ }));
+};
+
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   Reflect.deleteProperty(navigator, "credentials");
 });
@@ -148,14 +154,14 @@ it("removes a passkey and keeps keyboard focus in the list", async () => {
     "POST /api/donor/me/passkeys/k2/delete": () => json({ passkeys: [] }),
   });
   render(<Passkeys onSignedOut={vi.fn()} />);
-  fireEvent.click(await screen.findByRole("button", { name: /^Remove Work laptop/ }));
+  await confirmRemoval(/^Remove Work laptop/);
   await waitFor(() =>
     expect(screen.getByRole("status")).toHaveTextContent(
       "Removed Work laptop. It can no longer sign in to your account.",
     ),
   );
   await waitFor(() => expect(screen.getByRole("button", { name: /^Remove Passkey/ })).toHaveFocus());
-  fireEvent.click(screen.getByRole("button", { name: /^Remove Passkey/ }));
+  await confirmRemoval(/^Remove Passkey/);
   await waitFor(() => expect(screen.getByRole("heading", { name: "Passkeys" })).toHaveFocus());
   expect(screen.getByText("You haven’t added a passkey yet.")).toBeVisible();
 });
@@ -171,7 +177,7 @@ it("shows what is left when a passkey was already removed elsewhere", async () =
     "POST /api/donor/me/passkeys/k1/delete": () => json({ detail: "Passkey not found" }, 404),
   });
   render(<Passkeys onSignedOut={vi.fn()} />);
-  fireEvent.click(await screen.findByRole("button", { name: /^Remove Work laptop/ }));
+  await confirmRemoval(/^Remove Work laptop/);
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Removed Work laptop."));
   expect(screen.getAllByRole("listitem")).toHaveLength(1);
   expect(screen.getByRole("alert")).toBeEmptyDOMElement();
@@ -184,7 +190,7 @@ it("keeps the list and offers a refresh when a removal is not confirmed", async 
     "POST /api/donor/me/passkeys/k1/delete": () => json({ detail: "Passkey sign-in is temporarily unavailable" }, 503),
   });
   render(<Passkeys onSignedOut={vi.fn()} />);
-  fireEvent.click(await screen.findByRole("button", { name: /^Remove Work laptop/ }));
+  await confirmRemoval(/^Remove Work laptop/);
   await waitFor(() =>
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Removal was not confirmed. Refresh the list to check before retrying.",
@@ -200,4 +206,29 @@ it("lists and removes passkeys in a browser that cannot add one", async () => {
   expect(await screen.findByText(/This browser can’t use passkeys/)).toBeVisible();
   expect(screen.queryByRole("button", { name: "Add a passkey" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: /^Remove Work laptop/ })).toBeVisible();
+});
+
+it("leaves the passkey alone when removal is kept, and returns focus to Remove", async () => {
+  browser();
+  const confirm = vi.spyOn(window, "confirm");
+  const fetch = serve({ "GET /api/donor/me/passkeys": () => json({ passkeys: [laptop] }) });
+  render(<Passkeys onSignedOut={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^Remove Work laptop/ }));
+  const confirmButton = screen.getByRole("button", { name: /^Confirm removal Work laptop/ });
+  expect(confirmButton).toHaveFocus();
+  expect(confirmButton).toHaveAccessibleDescription("It will no longer be able to sign in to your account.");
+  fireEvent.click(screen.getByRole("button", { name: /^Keep Work laptop/ }));
+  expect(screen.getByRole("button", { name: /^Remove Work laptop/ })).toHaveFocus();
+  expect(confirm).not.toHaveBeenCalled();
+  expect(fetch.mock.calls.some(([url]) => String(url).endsWith("/delete"))).toBe(false);
+  expect(screen.getByText("Work laptop")).toBeVisible();
+});
+
+it("neither requests nor shows passkeys on an origin the API cannot serve them for", async () => {
+  browser();
+  const fetch = serve({ "GET /api/donor/me/passkeys": () => json({ passkeys: [laptop] }) });
+  vi.stubGlobal("location", { ...window.location, hostname: "127.0.0.1" });
+  const { container } = render(<Passkeys onSignedOut={vi.fn()} />);
+  await waitFor(() => expect(container).toBeEmptyDOMElement());
+  expect(fetch).not.toHaveBeenCalled();
 });

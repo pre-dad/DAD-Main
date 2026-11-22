@@ -48,11 +48,11 @@ func latestSubscription(ctx context.Context, q *queries.Queries, donor pgtype.UU
 func (s RecurringService) AmountOptions(ctx context.Context, token string) (AmountOptions, error) {
 	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (AmountOptions, error) {
 		unavailable := AmountOptions{State: "unavailable"}
-		attempt, schedule, err := syncedSubscription(ctx, q, d.ID)
-		if err != nil || schedule == nil {
+		attempt, sub, err := syncedSubscription(ctx, q, d.ID)
+		if err != nil || sub == nil {
 			return unavailable, err
 		}
-		if schedule.Status != "active" || schedule.StopsAt.Valid || schedule.ExternalChange {
+		if sub.Status != "active" || sub.StopsAt.Valid || sub.ExternalChange {
 			return unavailable, nil
 		}
 		draft, err := q.CheckoutDraft(ctx, attempt.CheckoutID)
@@ -63,7 +63,7 @@ func (s RecurringService) AmountOptions(ctx context.Context, token string) (Amou
 		if err != nil {
 			return AmountOptions{}, err
 		}
-		out := AmountOptions{State: "ready", SubscriptionID: attempt.ID.String(), AmountMinor: amount, EffectiveAt: schedule.PeriodEnd.Time}
+		out := AmountOptions{State: "ready", SubscriptionID: attempt.ID.String(), AmountMinor: amount, EffectiveAt: sub.PeriodEnd.Time}
 		change, err := q.LatestAmountChange(ctx, draft.ID)
 		switch {
 		case err == nil:

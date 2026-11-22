@@ -57,8 +57,9 @@ export default function ReferralLanding({
   }, [code, kind, retry]);
   // A tap before the referral is saved waits for it (briefly), so the gift is still attributed.
   async function give(event: React.MouseEvent<HTMLAnchorElement>) {
-    if (result || error || event.metaKey || event.ctrlKey || event.shiftKey) return;
+    if (result || error || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
+    if (leaving) return;
     setLeaving(true);
     await Promise.race([capture.current, new Promise((resolve) => setTimeout(resolve, 4000))]);
     window.location.assign("/donate");

@@ -189,7 +189,8 @@ the staff host and donor paths only on the public host, and marks the staff host
 client-chosen address headers; behind Cloudflare it takes the address from
 `CF-Connecting-IP` only from Cloudflare's published ranges and serves only connections
 with an Authenticated Origin Pulls certificate. Rate limits are layered: Cloudflare's
-distributed rules, nginx's per-client limits, and the API's per-instance buckets
+distributed rules, nginx's per-client limits, and the API's per-client limits, which every
+API task shares through PostgreSQL
 ([edge](edge.md#rate-limits)). nginx's access log records the time, client address, host,
 method, path, status, response bytes, durations, and Cloudflare's `CF-Ray`, never query
 strings, cookies, or referral codes. Client addresses are personal data, so keep logs no

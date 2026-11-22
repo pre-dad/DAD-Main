@@ -114,6 +114,13 @@ func (s CheckoutService) begin(ctx context.Context, request payments.CheckoutReq
 		return empty, payments.ErrCheckoutInput
 	}
 	request.Email = email
+	request.Name, request.Zip, request.City = identity.TrimSpace(
+		request.Name,
+	), identity.TrimSpace(
+		request.Zip,
+	), identity.TrimSpace(
+		request.City,
+	)
 	preimage, err := credentials.CheckoutPreimage(email, request.Amount, request.Frequency, request.Visitor)
 	if err != nil {
 		return empty, payments.ErrCheckoutInput
@@ -133,7 +140,7 @@ func (s CheckoutService) begin(ctx context.Context, request payments.CheckoutReq
 	}
 	remote, err := s.Gateway.CreateCheckout(ctx, attempt.RequestParams, "dad-checkout-"+request.RequestID.String())
 	if err != nil {
-		return empty, payments.ErrProcessorUnavailable
+		return empty, processorFailure(err)
 	}
 	if err = payments.ValidateRemoteCheckout(remote); err != nil {
 		return empty, err
@@ -237,6 +244,9 @@ func heldCheckout(
 	now time.Time,
 ) error {
 	held, err := q.ReservedAttempt(ctx, donor.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
 	if err != nil || held.Status != "OPEN" || !held.HostedUrl.Valid || !held.StripeSessionID.Valid {
 		return payments.ErrCheckoutConflict
 	}
@@ -276,6 +286,16 @@ func heldCheckout(
 	return staleCheckout{held}
 }
 
+// processorFailure keeps a processor's refusal distinguishable from an outage
+// and reports every other gateway failure as an outage, whose request may be
+// retried under the same idempotency key.
+func processorFailure(err error) error {
+	if errors.Is(err, payments.ErrProcessorRejected) || errors.Is(err, payments.ErrCheckoutRejected) {
+		return err
+	}
+	return payments.ErrProcessorUnavailable
+}
+
 // retire expires an unpaid checkout at the processor, then frees its
 // reservation. No database lock is held across the processor call, so a
 // failure leaves the reservation untouched and a retry finds it again. If the
@@ -283,7 +303,7 @@ func heldCheckout(
 func (s CheckoutService) retire(ctx context.Context, stale queries.DonorStripeCheckout) error {
 	status, err := s.Gateway.ExpireCheckout(ctx, stale.StripeSessionID.String, "dad-checkout-expire-"+stale.ID.String())
 	if err != nil {
-		return payments.ErrProcessorUnavailable
+		return processorFailure(err)
 	}
 	if status != "expired" {
 		return payments.ErrCheckoutConflict
@@ -405,40 +425,6 @@ func prepareAttempt(
 		}
 	}
 	return q.StripeCheckout(ctx, request.RequestID)
-}
-
-// lockGuest returns the donor for email, created as an unclaimed guest if
-// new, locked, granted any waitlist claim on the address, and with a
-// projection row for the refresh worker to find.
-func lockGuest(ctx context.Context, q *queries.Queries, claims FoundingClaimKey, email string, now time.Time) (queries.Donor, error) {
-	id, err := NewID()
-	if err != nil {
-		return queries.Donor{}, err
-	}
-	if err = reserveEmailIdentity(ctx, q, email, identityDonor, pgtype.UUID{}); err != nil {
-		return queries.Donor{}, err
-	}
-	if err = q.InsertGuest(ctx, queries.InsertGuestParams{ID: id, Email: email}); err != nil {
-		return queries.Donor{}, err
-	}
-	donor, err := q.DonorByEmail(ctx, email)
-	if err != nil {
-		return queries.Donor{}, err
-	}
-	if donor, err = q.LockDonor(ctx, donor.ID); err != nil {
-		return queries.Donor{}, err
-	}
-	if donor.Disabled {
-		return queries.Donor{}, ErrDenied
-	}
-	if err = claims.grant(ctx, q, donor.ID, email, now); err != nil {
-		return queries.Donor{}, err
-	}
-	projection, err := NewID()
-	if err != nil {
-		return queries.Donor{}, err
-	}
-	return donor, q.SeedProjection(ctx, queries.SeedProjectionParams{ID: projection, DonorID: donor.ID, ComputedAt: timestamp(now)})
 }
 
 // checkoutDraft is a new checkout carrying the visitor's referral, if its

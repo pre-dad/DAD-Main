@@ -75,6 +75,21 @@ it.each([
   expect(screen.queryByText("$150.00")).not.toBeInTheDocument();
 });
 
+it.each([
+  ["an unreachable API", () => vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")))],
+  ["a server error", () => respond({ detail: "boom" }, 503)],
+])("shows the unavailable alert, not an empty list, on the initiative pages for %s", async (_label, fail) => {
+  fail();
+  const list = render(await InitiativesPage());
+  expect(screen.getByRole("alert")).toHaveTextContent("Published records are unavailable");
+  expect(screen.getByRole("button", { name: "Retry records" })).toBeVisible();
+  expect(screen.queryByText(/No initiatives/)).not.toBeInTheDocument();
+  list.unmount();
+  fail();
+  render(await InitiativePage({ params: Promise.resolve({ slug: "water" }), searchParams: Promise.resolve({}) }));
+  expect(screen.getByRole("alert")).toHaveTextContent("Published records are unavailable");
+});
+
 it("shows an empty-state message when no spend has been published", async () => {
   respond({ total_minor: 0, categories: [] });
   render(await SpendPage());
@@ -105,5 +120,21 @@ it("shows a running initiative without its partner when none is linked", async (
   render(await InitiativesPage());
   expect(screen.queryByText(/Partner:/)).toBeNull();
   expect(screen.getByText(/Started/)).toBeInTheDocument();
-  expect(screen.queryByText(/not a recipient enrolment form/)).toBeNull();
+  expect(screen.queryByText(/not a recipient enrollment form/)).toBeNull();
+});
+
+it("switches from planned to started at the UTC midnight of the start date", async () => {
+  vi.useFakeTimers();
+  try {
+    respond([{ ...initiative, started_on: "2026-03-01" }]);
+    vi.setSystemTime(new Date("2026-02-28T23:59:59Z"));
+    const before = render(await InitiativesPage());
+    expect(screen.getByText(/Partner: Partner Org/)).toHaveTextContent("Planned start");
+    before.unmount();
+    vi.setSystemTime(new Date("2026-03-01T00:00:00Z"));
+    render(await InitiativesPage());
+    expect(screen.getByText(/Partner: Partner Org/)).toHaveTextContent("Started");
+  } finally {
+    vi.useRealTimers();
+  }
 });

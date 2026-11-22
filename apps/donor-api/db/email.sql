@@ -1,5 +1,5 @@
 -- name: NextLoginEmail :one
-SELECT * FROM donor_login_emails WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+SELECT * FROM donor_login_emails WHERE completed_at IS NULL AND attempts<sqlc.arg(max_attempts)::int AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
 
 -- name: LoginEmailByID :one
@@ -37,7 +37,7 @@ AND g.paid_at<sqlc.arg(ends_at) AND g.paid_at<=sqlc.arg(as_of)
 ORDER BY r.gift_id,r.observed_at,r.id;
 
 -- name: NextMessage :one
-SELECT * FROM donor_messages WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+SELECT * FROM donor_messages WHERE completed_at IS NULL AND attempts<sqlc.arg(max_attempts)::int AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
 
 -- name: MessageByID :one

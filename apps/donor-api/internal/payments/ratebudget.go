@@ -70,6 +70,9 @@ type bucket struct {
 }
 
 func newBucket(rate, burst float64) *bucket {
+	if rate <= 0 {
+		panic("payments: bucket needs a positive refill rate")
+	}
 	return &bucket{rate: rate, burst: burst, tokens: burst, last: time.Now()}
 }
 
@@ -84,9 +87,6 @@ func (b *bucket) reserve(now time.Time) time.Duration {
 	}
 	if b.tokens >= 1 {
 		b.tokens--
-		return 0
-	}
-	if b.rate <= 0 {
 		return 0
 	}
 	return time.Duration((1 - b.tokens) / b.rate * float64(time.Second))

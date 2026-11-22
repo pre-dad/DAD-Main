@@ -39,16 +39,31 @@ SELECT r.donor_id, r.status, r.reserved_at, r.checked_in_at, d.email, d.public_n
 FROM donor_event_reservations r
 JOIN donors d ON d.id = r.donor_id
 WHERE r.event_id = $1 AND r.status IN ('RESERVED', 'WAITLISTED')
-ORDER BY r.status = 'WAITLISTED', r.reserved_at, r.id;
+ORDER BY r.status = 'WAITLISTED', r.reserved_at, r.id
+LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
 
 -- name: CancelEvent :execrows
 UPDATE donor_events SET cancelled_at=$2, updated_at=$2 WHERE id=$1 AND cancelled_at IS NULL;
 
--- name: ReleaseEventReservations :many
--- Cancels every live reservation of a cancelled event, returning who held one.
-UPDATE donor_event_reservations SET status='CANCELLED', updated_at=$2
-WHERE event_id=$1 AND status IN ('RESERVED', 'WAITLISTED')
-RETURNING donor_id;
+-- name: CancelEventReservationsAndNotify :one
+WITH released AS (
+  UPDATE donor_event_reservations SET status='CANCELLED', updated_at=sqlc.arg(as_of)::timestamptz
+  WHERE event_id=sqlc.arg(event_id)::uuid AND status IN ('RESERVED', 'WAITLISTED')
+  RETURNING donor_id
+), pushes AS (
+  INSERT INTO donor_push_notifications (id,donor_id,category,dedup_key,context,available_at,expires_at)
+  SELECT gen_random_uuid(),donor_id,'EVENT_CANCELLED',
+    'push:event-cancelled:'||sqlc.arg(event_id)::text||':'||donor_id::text,
+    json_build_object('event_id',sqlc.arg(event_id)::text),sqlc.arg(as_of)::timestamptz,sqlc.arg(expires_at)::timestamptz
+  FROM released ON CONFLICT (dedup_key) DO NOTHING
+), messages AS (
+  INSERT INTO donor_messages (id,donor_id,kind,dedup_key,context,available_at)
+  SELECT gen_random_uuid(),donor_id,'EVENT_CANCELLED',
+    'message:event-cancelled:'||sqlc.arg(event_id)::text||':'||donor_id::text,
+    json_build_object('event_id',sqlc.arg(event_id)::text),sqlc.arg(as_of)::timestamptz
+  FROM released ON CONFLICT (dedup_key) DO NOTHING
+)
+SELECT count(*)::bigint FROM released;
 
 -- name: UpcomingEventsNearDonor :many
 -- E-2: published events in and near the donor's city (same city label OR same
@@ -161,11 +176,11 @@ LIMIT 100;
 
 -- name: CheckInReservation :exec
 -- Stamps the donor's reservation as checked in (E-8). Only sets it when a
--- reservation exists and is not already checked in; cancelled reservations do
--- not qualify.
+-- confirmed reservation exists and is not already checked in; cancelled and
+-- waitlisted reservations do not qualify.
 UPDATE donor_event_reservations
 SET checked_in_at=$3, updated_at=$3
-WHERE event_id=$1 AND donor_id=$2 AND status<>'CANCELLED' AND checked_in_at IS NULL;
+WHERE event_id=$1 AND donor_id=$2 AND status='RESERVED' AND checked_in_at IS NULL;
 
 -- name: DonorVolunteerStats :one
 -- "Events volunteered" and volunteer hours (EM-8): the count of a donor's
@@ -176,7 +191,7 @@ SELECT
   coalesce(sum(EXTRACT(EPOCH FROM (e.ends_at - e.starts_at)) / 60), 0)::bigint AS minutes
 FROM donor_event_reservations r
 JOIN donor_events e ON e.id = r.event_id
-WHERE r.donor_id=$1 AND r.checked_in_at IS NOT NULL;
+WHERE r.donor_id=$1 AND r.status='RESERVED' AND r.checked_in_at IS NOT NULL;
 
 -- name: QueueEventReminders :execrows
 -- E-7: queue an EVENT_REMINDER push for every reserved (non-cancelled) donor of
@@ -193,11 +208,11 @@ SELECT gen_random_uuid(), r.donor_id, 'EVENT_REMINDER',
 FROM donor_events e
 JOIN donor_event_reservations r ON r.event_id = e.id
 WHERE e.publish_state = 'PUBLISHED'
+  AND e.cancelled_at IS NULL
   AND r.status = 'RESERVED'
   AND e.starts_at > sqlc.arg(as_of)::timestamptz
   AND e.starts_at <= sqlc.arg(until)::timestamptz
 ON CONFLICT (dedup_key) DO NOTHING;
-
 
 -- name: QueueEventAlertJob :execrows
 INSERT INTO donor_event_alert_jobs(event_id,updated_at)

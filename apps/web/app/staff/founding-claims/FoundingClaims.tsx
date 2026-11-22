@@ -4,6 +4,9 @@ import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { ApiError, api, type FieldError, failureMessage } from "@/lib/api";
 
+// The server rejects bodies over 5 MiB; the CSV travels as a JSON string, so leave 1 MiB for escaping.
+const MAX_CSV_BYTES = 4 * 1024 * 1024;
+
 export default function FoundingClaims() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -14,7 +17,7 @@ export default function FoundingClaims() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!file || busy) return;
-    if (file.size > 4 * 1024 * 1024) {
+    if (file.size > MAX_CSV_BYTES) {
       setError("The CSV must be at most 4 MB.");
       return;
     }

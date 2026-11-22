@@ -1,8 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { taxYear } from "@/lib/taxYear";
 import PartnerDetail from "./PartnerDetail";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   sessionStorage.clear();
 });
@@ -27,7 +29,7 @@ const detail = {
 };
 
 const match = {
-  year: new Date().getFullYear(),
+  year: taxYear(new Date()),
   match_rate_bp: 5000,
   match_cap_minor: 0,
   gifts_minor: 100_000,
@@ -69,6 +71,18 @@ it("shows the partner's match position, initiatives, and users", async () => {
   expect(screen.getByText(/Invitation not yet used/)).toBeInTheDocument();
 });
 
+it("resends an unused invitation for a partner user", async () => {
+  const fetch = stubApi();
+  render(<PartnerDetail partner="p-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Resend invitation to dana@delta.example" }));
+  await waitFor(() =>
+    expect(screen.getByRole("status")).toHaveTextContent("Resent the invitation to dana@delta.example."),
+  );
+  expect(fetch.mock.calls.some(([u, i]) => String(u).endsWith("/p-1/users/u-1/reinvite") && i?.method === "POST")).toBe(
+    true,
+  );
+});
+
 it("saves match terms in basis points and cents", async () => {
   const fetch = stubApi();
   render(<PartnerDetail partner="p-1" />);
@@ -92,6 +106,14 @@ it("records a match payment and removes a user", async () => {
   expect(posted(fetch, "/p-1/match-payment")).toEqual({ year: match.year, amount_minor: 25_000 });
   await reloaded(fetch, 2);
   fireEvent.click(await screen.findByRole("button", { name: "Remove dana@delta.example" }));
+  expect(screen.getByRole("button", { name: "Confirm removal of dana@delta.example" })).toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: "Keep dana@delta.example" }));
+  expect(fetch.mock.calls.some(([u]) => String(u).endsWith("/remove"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Remove dana@delta.example" }));
+  expect(screen.getByRole("button", { name: "Confirm removal of dana@delta.example" })).toHaveAccessibleDescription(
+    "Remove dana@delta.example from Delta Inc's portal?",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Confirm removal of dana@delta.example" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Removed dana@delta.example."));
   expect(fetch.mock.calls.some(([u, i]) => String(u).endsWith("/p-1/users/u-1/remove") && i?.method === "POST")).toBe(
     true,
@@ -111,7 +133,7 @@ it("restores an uncertain match payment after navigation and retries the identic
   const page = render(<PartnerDetail partner="p-1" />);
   fireEvent.change(await screen.findByLabelText(/Match payment received/), { target: { value: "250" } });
   fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("The recording is not confirmed");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("The recording is not confirmed"));
   page.unmount();
   render(<PartnerDetail partner="p-1" />);
   expect(await screen.findByLabelText(/Match payment received/)).toHaveValue("250.00");
@@ -137,4 +159,125 @@ it("uploads the partner's logo while enrolling it", async () => {
   fireEvent.submit(input.closest("form") as HTMLFormElement);
   expect(await screen.findByText("Organization logo saved.")).toBeInTheDocument();
   expect(posted(fetch, "/donor/staff/partners/p-1/logo").data_url).toMatch(/^data:image\/png;base64,/);
+});
+
+function refusePayments(fetch: ReturnType<typeof stubApi>, response: () => Response) {
+  const base = fetch.getMockImplementation();
+  fetch.mockImplementation((input, init) => {
+    if (String(input).endsWith("/match-payment") && init?.method === "POST") return Promise.resolve(response());
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+}
+
+it("frees a refused payment so a different amount can be recorded", async () => {
+  const fetch = stubApi();
+  refusePayments(fetch, () => Response.json({ detail: "Amount exceeds the yearly cap" }, { status: 422 }));
+  render(<PartnerDetail partner="p-1" />);
+  fireEvent.change(await screen.findByLabelText(/Match payment received/), { target: { value: "250" } });
+  fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Amount exceeds the yearly cap");
+  expect(sessionStorage.getItem("dad:match-payment:p-1")).toBeNull();
+  expect(screen.getByLabelText(/Match payment received/)).not.toHaveAttribute("readonly");
+  fireEvent.change(screen.getByLabelText(/Match payment received/), { target: { value: "100" } });
+  fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
+  await waitFor(() => {
+    const bodies = fetch.mock.calls
+      .filter(([u, i]) => String(u).endsWith("/match-payment") && i?.method === "POST")
+      .map(([, i]) => JSON.parse(String(i?.body)).amount_minor);
+    expect(bodies).toEqual([25_000, 10_000]);
+  });
+});
+
+it("keeps an unconfirmed payment locked after a server error", async () => {
+  const fetch = stubApi();
+  refusePayments(fetch, () => Response.json({ detail: "Down" }, { status: 500 }));
+  render(<PartnerDetail partner="p-1" />);
+  fireEvent.change(await screen.findByLabelText(/Match payment received/), { target: { value: "250" } });
+  fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
+  expect(await screen.findByRole("alert")).toBeVisible();
+  expect(sessionStorage.getItem("dad:match-payment:p-1")).not.toBeNull();
+  expect(screen.getByLabelText(/Match payment received/)).toHaveAttribute("readonly");
+});
+
+it("buckets the match year in America/New_York, not the browser clock", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2028-01-01T03:30:00Z"));
+  try {
+    const fetch = stubApi();
+    render(<PartnerDetail partner="p-1" />);
+    await screen.findByLabelText(/Match payment received/);
+    expect(fetch.mock.calls.some(([u]) => String(u).endsWith("/p-1/match-status?year=2027"))).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("blocks recording a payment when the saved retry details are unreadable", async () => {
+  const fetch = stubApi();
+  sessionStorage.setItem("dad:match-payment:p-1", "{not json");
+  render(<PartnerDetail partner="p-1" />);
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent("Saved payment retry details could not be read"),
+  );
+  expect(screen.getByRole("button", { name: "Record payment" })).toBeDisabled();
+  expect(posted(fetch, "/p-1/match-payment")).toBeUndefined();
+});
+
+it("blocks recording a payment when the saved retry key is not a valid request key", async () => {
+  stubApi();
+  sessionStorage.setItem("dad:match-payment:p-1", JSON.stringify({ key: "nope", year: 2026, amount_minor: 100 }));
+  render(<PartnerDetail partner="p-1" />);
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent("Saved payment retry details could not be read"),
+  );
+  expect(screen.getByRole("button", { name: "Record payment" })).toBeDisabled();
+});
+
+it("invites a portal user with a role", async () => {
+  const fetch = stubApi();
+  render(<PartnerDetail partner="p-1" />);
+  fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "new@delta.example" } });
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Nia" } });
+  fireEvent.change(screen.getByLabelText("Role"), { target: { value: "ADMIN" } });
+  fireEvent.click(screen.getByRole("button", { name: "Invite user" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Invited new@delta.example."));
+  expect(posted(fetch, "/p-1/users")).toEqual({ email: "new@delta.example", name: "Nia", role: "ADMIN" });
+});
+
+it("links an initiative with the partner's commitment in cents", async () => {
+  const fetch = stubApi();
+  render(<PartnerDetail partner="p-1" />);
+  const id = "8f9e0d1c-2b3a-4c5d-8e6f-7a8b9c0d1e2f";
+  fireEvent.change(await screen.findByLabelText("Initiative ID"), { target: { value: id } });
+  fireEvent.change(screen.getByLabelText("Partner commitment in USD"), { target: { value: "1,250.50" } });
+  fireEvent.click(screen.getByRole("button", { name: "Link initiative" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Initiative linked."));
+  expect(posted(fetch, "/p-1/link")).toEqual({ initiative_id: id, committed_minor: 125_050 });
+});
+
+it.each([
+  ["Link initiative", "Partner commitment in USD", "lots", "Enter this partner’s commitment in dollars."],
+  [
+    "Save match terms",
+    "Workforce size",
+    "many",
+    "Enter a match rate, a yearly cap in dollars, and a whole-number workforce size.",
+  ],
+])("explains invalid input for %s and sends nothing", async (button, field, value, message) => {
+  const fetch = stubApi();
+  render(<PartnerDetail partner="p-1" />);
+  fireEvent.change(await screen.findByLabelText(field), { target: { value } });
+  fireEvent.submit(screen.getByRole("button", { name: button }).closest("form") as HTMLFormElement);
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(message));
+  expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+});
+
+it("asks for a payment amount before recording", async () => {
+  const fetch = stubApi();
+  render(<PartnerDetail partner="p-1" />);
+  await screen.findByLabelText(/Match payment received/);
+  fireEvent.submit(screen.getByRole("button", { name: "Record payment" }).closest("form") as HTMLFormElement);
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Enter the payment received in dollars."));
+  expect(posted(fetch, "/p-1/match-payment")).toBeUndefined();
 });

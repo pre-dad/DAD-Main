@@ -89,6 +89,42 @@ it("backs off while a long export makes no visible progress", async () => {
   expect(polls).toBeLessThan(20);
 });
 
+it("polls after 1s, then at intervals growing by half", async () => {
+  const calls = backend(() => [job("queued", 0)]);
+  render(<Exports />);
+  await screen.findByText("Waiting to start");
+  const listed = () => calls.filter((call) => call === "GET /api/donor/staff/exports/jobs").length;
+  const initial = listed();
+  const advance = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  await advance(900);
+  expect(listed() - initial).toBe(0);
+  await advance(200);
+  expect(listed() - initial).toBe(1);
+  await advance(1_300);
+  expect(listed() - initial).toBe(1);
+  await advance(300);
+  expect(listed() - initial).toBe(2);
+  await advance(2_000);
+  expect(listed() - initial).toBe(2);
+  await advance(400);
+  expect(listed() - initial).toBe(3);
+});
+
+it("offers a retry when the job list cannot be loaded at all", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      url === "/api/donor/staff/exports" ? reply(200, { datasets: ["gifts"] }) : reply(500, { detail: "boom" }),
+    ),
+  );
+  render(<Exports />);
+  expect(await screen.findByText("Your exports could not be refreshed. They will keep building.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Request gifts CSV" })).toBeEnabled();
+});
+
 it.each([
   ["too_large", "The export is larger than the 50 MB limit. Nothing was kept."],
   ["forbidden", "Your access changed before the export was built. Nothing was kept."],
@@ -124,4 +160,59 @@ it("says so when the role permits no exports", async () => {
   render(<Exports />);
   expect(await screen.findByText("Your role does not permit exports.")).toBeVisible();
   expect(screen.queryByRole("button", { name: /Request/ })).toBeNull();
+});
+
+it("keeps the last exports on screen and keeps polling after one refresh fails", async () => {
+  let polls = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (url === "/api/donor/staff/exports") return reply(200, { datasets: ["gifts"] });
+      polls += 1;
+      if (polls === 2) return reply(500, { detail: "boom" });
+      return reply(200, { jobs: [polls > 2 ? job("complete", 9) : job("running", 5)] });
+    }),
+  );
+  render(<Exports />);
+  expect(await screen.findByText("Building · 5 rows so far")).toBeVisible();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_500);
+  });
+  expect(await screen.findByText("Your exports could not be refreshed. They will keep building.")).toBeVisible();
+  expect(screen.getByText("Building · 5 rows so far")).toBeVisible();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5_000);
+  });
+  expect(await screen.findByRole("link", { name: "Download gifts CSV" })).toBeVisible();
+  expect(screen.queryByText("Your exports could not be refreshed. They will keep building.")).toBeNull();
+});
+
+it("announces every export that finished in one poll and clears the other channel", async () => {
+  let current: unknown[] = [job("running", 1, { id: "a", dataset: "donors" }), job("running", 1, { id: "b" })];
+  backend(() => current);
+  render(<Exports />);
+  await screen.findAllByText("Building · 1 rows so far");
+  current = [job("complete", 2, { id: "a", dataset: "donors" }), job("complete", 2, { id: "b" })];
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_500);
+  });
+  expect(await screen.findByText("The donors and gifts exports are ready.")).toBeVisible();
+});
+
+it("shows the enrollment note and jobs table in a scroll region only once permitted", async () => {
+  backend(() => [job("complete", 3)]);
+  render(<Exports />);
+  expect(await screen.findByRole("region", { name: "Exports table" })).toHaveAttribute("tabindex", "0");
+  expect(screen.getByText(/enrollments export contains column headers only/)).toBeVisible();
+  expect(screen.queryByText(/R1|R2/)).toBeNull();
+});
+
+it("hides the enrollment note when the role permits no exports", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => reply(403, { detail: "Permission denied" })),
+  );
+  render(<Exports />);
+  await screen.findByText("Your role does not permit exports.");
+  expect(screen.queryByText(/enrollments export/)).toBeNull();
 });

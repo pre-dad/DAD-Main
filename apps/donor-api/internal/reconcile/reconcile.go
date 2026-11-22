@@ -86,7 +86,6 @@ type Gift struct {
 	StripePaymentIntentID string
 	AmountMinor           int64
 	Currency              string
-	PaidAt                time.Time
 }
 
 type InvoicePayment struct {
@@ -120,7 +119,6 @@ type Refund struct {
 	AmountMinor    int64
 	Currency       string
 	Status         string
-	ObservedAt     time.Time
 }
 
 // Report is the aggregate verdict. Counts drive the alarm; the id lists name
@@ -237,6 +235,9 @@ func CollectedCharge(o payments.Object) (int64, bool, error) {
 }
 
 // refundStatus maps a Stripe lowercase refund status to the uppercase DB enum.
+// refundStatuses are the values donor_refunds.status may hold.
+var refundStatuses = []string{"PENDING", "REQUIRES_ACTION", "SUCCEEDED", "FAILED", "CANCELED"}
+
 func refundStatus(stripe string) string {
 	switch stripe {
 	case "pending":
@@ -291,7 +292,7 @@ func Diff(window Window, stripeCharges, stripeRefunds []payments.Object, dbGifts
 	refundByID := map[string]Refund{}
 	for _, r := range dbRefunds {
 		if !processorID(r.StripeRefundID, "re_") || r.AmountMinor <= 0 || r.Currency != "USD" ||
-			refundStatus(strings.ToLower(r.Status)) == "" {
+			!slices.Contains(refundStatuses, r.Status) {
 			report.InvalidObjects++
 		}
 		if r.StripeRefundID != "" {

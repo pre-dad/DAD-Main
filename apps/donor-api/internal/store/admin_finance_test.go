@@ -134,34 +134,11 @@ func TestStaffRefundLostAcknowledgementPermissionsAndAudit(t *testing.T) {
 
 func TestStaffRefundCallsProcessorOutsideDonorLock(t *testing.T) {
 	pool := database(t)
-	api := as(t, dbroles.API)
 	ctx := context.Background()
 	_, finance := staffFixture(t, pool, "SUPER_ADMIN")
-	f := newWorkerFixture(t, "MONTHLY")
-	checkout := f.checkout(t)
-	f.receive(
-		t,
-		"invoice.payment_succeeded",
-		invoice(checkout.CheckoutID, "in_lock_"+f.donorID.String(), time.Now().Add(-48*time.Hour), true),
-	)
-	f.process(t)
-	var giftID pgtype.UUID
-	if err := pool.QueryRow(ctx, "SELECT id FROM donor_gifts WHERE donor_id=$1", f.donorID).Scan(&giftID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		for _, sql := range []string{
-			"DELETE FROM donor_refund_observations WHERE source_action_id IN (SELECT id FROM donor_staff_actions WHERE donor_id=$1)",
-			"DELETE FROM donor_staff_actions WHERE donor_id=$1",
-		} {
-			if _, err := pool.Exec(context.Background(), sql, f.donorID); err != nil {
-				t.Error(err)
-			}
-		}
-	})
+	s, gateway, f, giftID := refundFixture(t)
 	stalled := newGate(t)
-	gateway := &refundGateway{t: t, beforeCreate: stalled.wait}
-	s := StaffFinanceService{Staff: &StaffService{DB: api}, Gateway: gateway, Origin: "https://example.org"}
+	gateway.beforeCreate = stalled.wait
 	r := StaffFinancialRequest{
 		RequestID: testID(t),
 		DonorID:   f.donorID,

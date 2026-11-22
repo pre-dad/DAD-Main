@@ -30,6 +30,17 @@ func (q *Queries) CloseTeamMonth(ctx context.Context, arg CloseTeamMonthParams) 
 	return result.RowsAffected(), nil
 }
 
+const countPartnerTeams = `-- name: CountPartnerTeams :one
+SELECT count(*) FROM donor_partner_teams WHERE partner_id = $1
+`
+
+func (q *Queries) CountPartnerTeams(ctx context.Context, partnerID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countPartnerTeams, partnerID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const employeeLink = `-- name: EmployeeLink :one
 SELECT donor_id, partner_id, team_id, enrolled_at FROM donor_partner_employees WHERE donor_id = $1
 `
@@ -213,7 +224,7 @@ func (q *Queries) PartnerOrganizationByID(ctx context.Context, id pgtype.UUID) (
 
 const partnerOurPeople = `-- name: PartnerOurPeople :one
 WITH linked AS (
-  SELECT e.donor_id FROM donor_partner_employees e WHERE e.partner_id = $4::uuid
+  SELECT e.donor_id FROM donor_partner_employees e WHERE e.partner_id = $5::uuid
 ), gifts AS (
   SELECT g.paid_at,
     g.amount_minor - coalesce((SELECT sum(r.amount_minor) FROM donor_refunds r
@@ -225,24 +236,32 @@ SELECT
   coalesce((SELECT sum(net_minor) FROM gifts), 0)::bigint AS given_minor,
   coalesce((SELECT sum(net_minor) FROM gifts
             WHERE paid_at >= $1::timestamptz AND paid_at < $2::timestamptz), 0)::bigint AS year_given_minor,
-  coalesce((SELECT round(avg(extract(epoch FROM $3::timestamptz - m.streak_since) / 86400))
-            FROM donor_metric_projections m
-            WHERE m.donor_id IN (SELECT donor_id FROM linked) AND m.streak_since IS NOT NULL), 0)::bigint AS avg_streak_days,
+  coalesce((SELECT round(avg(greatest(0,
+              ($3::timestamptz AT TIME ZONE coalesce(d.timezone,'America/New_York'))::date
+              - (m.streak_since AT TIME ZONE coalesce(d.timezone,'America/New_York'))::date)))
+            FROM linked l JOIN donors d ON d.id=l.donor_id
+            JOIN donor_metric_projections m ON m.donor_id=l.donor_id
+            WHERE m.streak_since IS NOT NULL),0)::bigint AS avg_streak_days,
+  coalesce(NOT EXISTS(SELECT 1 FROM linked l LEFT JOIN donor_metric_projections m ON m.donor_id=l.donor_id
+    WHERE CASE WHEN m.donor_id IS NULL THEN EXISTS(SELECT 1 FROM donor_gifts g WHERE g.donor_id=l.donor_id)
+      ELSE m.next_refresh_at<=$3::timestamptz OR m.refresh_error IS NOT NULL
+        OR m.rules_version<$4::integer END),false)::boolean AS streak_verified,
   coalesce((SELECT sum(extract(epoch FROM ev.ends_at - ev.starts_at) / 60)
             FROM donor_event_reservations r JOIN donor_events ev ON ev.id = r.event_id
             WHERE r.donor_id IN (SELECT donor_id FROM linked) AND r.checked_in_at IS NOT NULL), 0)::bigint AS volunteer_minutes,
   (SELECT count(DISTINCT e.team_id) FROM donor_partner_employees e
-   WHERE e.partner_id = $4::uuid AND e.team_id IS NOT NULL)::bigint AS teams,
+   WHERE e.partner_id = $5::uuid AND e.team_id IS NOT NULL)::bigint AS teams,
   p.workforce_size, p.match_rate_bp, p.match_cap_minor
 FROM donor_partner_signups p
-WHERE p.id = $4::uuid
+WHERE p.id = $5::uuid
 `
 
 type PartnerOurPeopleParams struct {
-	YearStart pgtype.Timestamptz `json:"year_start"`
-	YearEnd   pgtype.Timestamptz `json:"year_end"`
-	AsOf      pgtype.Timestamptz `json:"as_of"`
-	PartnerID pgtype.UUID        `json:"partner_id"`
+	YearStart    pgtype.Timestamptz `json:"year_start"`
+	YearEnd      pgtype.Timestamptz `json:"year_end"`
+	AsOf         pgtype.Timestamptz `json:"as_of"`
+	RulesVersion int32              `json:"rules_version"`
+	PartnerID    pgtype.UUID        `json:"partner_id"`
 }
 
 type PartnerOurPeopleRow struct {
@@ -250,6 +269,7 @@ type PartnerOurPeopleRow struct {
 	GivenMinor       int64 `json:"given_minor"`
 	YearGivenMinor   int64 `json:"year_given_minor"`
 	AvgStreakDays    int64 `json:"avg_streak_days"`
+	StreakVerified   bool  `json:"streak_verified"`
 	VolunteerMinutes int64 `json:"volunteer_minutes"`
 	Teams            int64 `json:"teams"`
 	WorkforceSize    int32 `json:"workforce_size"`
@@ -266,6 +286,7 @@ func (q *Queries) PartnerOurPeople(ctx context.Context, arg PartnerOurPeoplePara
 		arg.YearStart,
 		arg.YearEnd,
 		arg.AsOf,
+		arg.RulesVersion,
 		arg.PartnerID,
 	)
 	var i PartnerOurPeopleRow
@@ -274,6 +295,7 @@ func (q *Queries) PartnerOurPeople(ctx context.Context, arg PartnerOurPeoplePara
 		&i.GivenMinor,
 		&i.YearGivenMinor,
 		&i.AvgStreakDays,
+		&i.StreakVerified,
 		&i.VolunteerMinutes,
 		&i.Teams,
 		&i.WorkforceSize,
@@ -283,23 +305,58 @@ func (q *Queries) PartnerOurPeople(ctx context.Context, arg PartnerOurPeoplePara
 	return i, err
 }
 
+const partnerTeamMetricsVerified = `-- name: PartnerTeamMetricsVerified :one
+WITH eligible AS (
+ SELECT team_id FROM donor_partner_employees
+ WHERE partner_id=$3::uuid AND team_id IS NOT NULL
+ GROUP BY team_id HAVING count(*)>=$4::integer
+)
+SELECT coalesce(bool_and(CASE WHEN m.donor_id IS NULL
+  THEN NOT EXISTS(SELECT 1 FROM donor_gifts g WHERE g.donor_id=e.donor_id)
+  ELSE m.next_refresh_at>$1::timestamptz AND m.refresh_error IS NULL
+    AND m.rules_version>=$2::integer END),true)::boolean
+FROM donor_partner_employees e JOIN eligible t ON t.team_id=e.team_id
+LEFT JOIN donor_metric_projections m ON m.donor_id=e.donor_id
+`
+
+type PartnerTeamMetricsVerifiedParams struct {
+	AsOf         pgtype.Timestamptz `json:"as_of"`
+	RulesVersion int32              `json:"rules_version"`
+	PartnerID    pgtype.UUID        `json:"partner_id"`
+	Minimum      int32              `json:"minimum"`
+}
+
+func (q *Queries) PartnerTeamMetricsVerified(ctx context.Context, arg PartnerTeamMetricsVerifiedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, partnerTeamMetricsVerified,
+		arg.AsOf,
+		arg.RulesVersion,
+		arg.PartnerID,
+		arg.Minimum,
+	)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const partnersDueTeamMonth = `-- name: PartnersDueTeamMonth :many
 SELECT s.id FROM donor_partner_signups s
 WHERE s.approved_at IS NOT NULL
 AND EXISTS(SELECT 1 FROM donor_partner_employees e WHERE e.partner_id = s.id AND e.team_id IS NOT NULL)
 AND NOT EXISTS(SELECT 1 FROM donor_team_months m WHERE m.partner_id = s.id AND m.month = $1::date)
+AND ($2::uuid IS NULL OR s.id > $2::uuid)
 ORDER BY s.id
-LIMIT $2::int
+LIMIT $3::int
 `
 
 type PartnersDueTeamMonthParams struct {
 	Month pgtype.Date `json:"month"`
+	After pgtype.UUID `json:"after"`
 	Batch int32       `json:"batch"`
 }
 
 // Approved partners with a team whose standings for the month are not yet recorded.
 func (q *Queries) PartnersDueTeamMonth(ctx context.Context, arg PartnersDueTeamMonthParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, partnersDueTeamMonth, arg.Month, arg.Batch)
+	rows, err := q.db.Query(ctx, partnersDueTeamMonth, arg.Month, arg.After, arg.Batch)
 	if err != nil {
 		return nil, err
 	}
@@ -456,7 +513,7 @@ const teamLeaderboard = `-- name: TeamLeaderboard :many
 WITH members AS (
   SELECT e.team_id, e.donor_id
   FROM donor_partner_employees e
-  WHERE e.partner_id = $3::uuid AND e.team_id IS NOT NULL
+  WHERE e.partner_id = $4::uuid AND e.team_id IS NOT NULL
 ), volunteer AS (
   SELECT r.donor_id, sum(extract(epoch FROM ev.ends_at - ev.starts_at) / 60) AS minutes
   FROM donor_event_reservations r JOIN donor_events ev ON ev.id = r.event_id
@@ -466,22 +523,29 @@ WITH members AS (
 SELECT t.id AS team_id, t.name,
   (count(*) FILTER (WHERE m.active))::bigint AS active_givers,
   (coalesce(sum(m.current_monthly_minor) FILTER (WHERE m.active), 0) * 12)::bigint AS annualized_minor,
-  coalesce(round(avg(extract(epoch FROM $1::timestamptz - m.streak_since) / 86400)
-                 FILTER (WHERE m.streak_since IS NOT NULL)), 0)::bigint AS avg_streak_days,
+  coalesce(round(avg(greatest(0,
+    ($1::timestamptz AT TIME ZONE coalesce(d.timezone,'America/New_York'))::date
+    - (m.streak_since AT TIME ZONE coalesce(d.timezone,'America/New_York'))::date))
+    FILTER (WHERE m.streak_since IS NOT NULL)),0)::bigint AS avg_streak_days,
+  bool_and(CASE WHEN m.donor_id IS NULL THEN NOT EXISTS(SELECT 1 FROM donor_gifts g WHERE g.donor_id=mem.donor_id)
+    ELSE m.next_refresh_at>$1::timestamptz AND m.refresh_error IS NULL
+      AND m.rules_version>=$2::integer END)::boolean AS metrics_verified,
   coalesce(sum(v.minutes), 0)::bigint AS volunteer_minutes
 FROM members mem
+JOIN donors d ON d.id=mem.donor_id
 JOIN donor_partner_teams t ON t.id = mem.team_id
 LEFT JOIN donor_metric_projections m ON m.donor_id = mem.donor_id
 LEFT JOIN volunteer v ON v.donor_id = mem.donor_id
 GROUP BY t.id, t.name
-HAVING count(*) >= $2::int
-ORDER BY annualized_minor DESC, active_givers DESC, t.name
+HAVING count(*) >= $3::int
+ORDER BY metrics_verified DESC, annualized_minor DESC, active_givers DESC, t.name, t.id
 `
 
 type TeamLeaderboardParams struct {
-	AsOf      pgtype.Timestamptz `json:"as_of"`
-	Minimum   int32              `json:"minimum"`
-	PartnerID pgtype.UUID        `json:"partner_id"`
+	AsOf         pgtype.Timestamptz `json:"as_of"`
+	RulesVersion int32              `json:"rules_version"`
+	Minimum      int32              `json:"minimum"`
+	PartnerID    pgtype.UUID        `json:"partner_id"`
 }
 
 type TeamLeaderboardRow struct {
@@ -490,6 +554,7 @@ type TeamLeaderboardRow struct {
 	ActiveGivers     int64       `json:"active_givers"`
 	AnnualizedMinor  int64       `json:"annualized_minor"`
 	AvgStreakDays    int64       `json:"avg_streak_days"`
+	MetricsVerified  bool        `json:"metrics_verified"`
 	VolunteerMinutes int64       `json:"volunteer_minutes"`
 }
 
@@ -498,7 +563,12 @@ type TeamLeaderboardRow struct {
 // volunteer minutes as the secondary views. Teams smaller than the minimum are
 // left out.
 func (q *Queries) TeamLeaderboard(ctx context.Context, arg TeamLeaderboardParams) ([]TeamLeaderboardRow, error) {
-	rows, err := q.db.Query(ctx, teamLeaderboard, arg.AsOf, arg.Minimum, arg.PartnerID)
+	rows, err := q.db.Query(ctx, teamLeaderboard,
+		arg.AsOf,
+		arg.RulesVersion,
+		arg.Minimum,
+		arg.PartnerID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -512,6 +582,7 @@ func (q *Queries) TeamLeaderboard(ctx context.Context, arg TeamLeaderboardParams
 			&i.ActiveGivers,
 			&i.AnnualizedMinor,
 			&i.AvgStreakDays,
+			&i.MetricsVerified,
 			&i.VolunteerMinutes,
 		); err != nil {
 			return nil, err

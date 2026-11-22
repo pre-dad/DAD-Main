@@ -3,7 +3,7 @@ import { webTokenVariables } from "@/design/web";
 
 function token(name: string): string {
   const value = (webTokenVariables as Record<string, unknown>)[`--${name}`];
-  if (typeof value !== "string" || !/^#[0-9a-fA-F]{3,6}$/.test(value))
+  if (typeof value !== "string" || !/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value))
     throw new Error(`--${name} is not defined as a hex colour`);
   return value;
 }
@@ -28,11 +28,11 @@ describe("the palette meets accessible text contrast thresholds", () => {
   const paper = token("paper");
 
   it.each([
-    ["--ink, body text", "ink", 4.5],
-    ["--ink-soft, the 9-11px labels that carry the detail", "ink-soft", 4.5],
-    ["--brand-ink, the brand hue taken to AA for small text", "brand-ink", 4.5],
-  ])("%s reaches %s:1 on paper", (_label, name, minimum) => {
-    expect(contrast(token(name), paper)).toBeGreaterThanOrEqual(minimum as number);
+    ["--ink, body text", 4.5, "ink"],
+    ["--ink-soft, the 9-11px labels that carry the detail", 4.5, "ink-soft"],
+    ["--brand-ink, the brand hue taken to AA for small text", 4.5, "brand-ink"],
+  ])("%s: reaches %s:1 on paper (--%s)", (_label, minimum, name) => {
+    expect(contrast(token(name), paper)).toBeGreaterThanOrEqual(minimum);
   });
 
   it("--brand reaches large-text AA on paper, which is what it is reserved for", () => {

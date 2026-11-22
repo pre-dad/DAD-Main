@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ func referredDonor(
 			t.Fatal(err)
 		}
 	}
-	pid, _ := NewID()
+	pid := mustNewID(t)
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO donor_metric_projections
 		 (id,donor_id,referrer_id,referral_kind,first_gift_id,best_streak,current_streak,
@@ -42,7 +43,7 @@ func referredDonor(
 		monthlyMinor, active); err != nil {
 		t.Fatal(err)
 	}
-	prefID, _ := NewID()
+	prefID := mustNewID(t)
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO donor_preferences (id,donor_id,version,referral_emails,marketing_emails,network_visible)
 		 VALUES ($1,$2,1,true,true,$3)`, prefID, id, visible); err != nil {
@@ -57,7 +58,7 @@ func TestNetworkTotalsActiveOnlyAnnualizedAndInviteeVisibility(t *testing.T) {
 
 	referrer, _ := donor(t, pool)
 	// The referrer needs a projection so the converted-referral count (N-2) reads.
-	rpid, _ := NewID()
+	rpid := mustNewID(t)
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO donor_metric_projections
 		 (id,donor_id,best_streak,current_streak,computed_at,next_refresh_at,referred_link_count)
@@ -74,6 +75,9 @@ func TestNetworkTotalsActiveOnlyAnnualizedAndInviteeVisibility(t *testing.T) {
 	// Visibility is opt-out: a referral who never saved a choice is listed.
 	unset := referredDonor(t, pool, referrer, true, 1000, "Una S.", false)
 	mustExec(t, pool, "DELETE FROM donor_preferences WHERE donor_id=$1", unset)
+	// A full name on record is listed as first name and last initial, not as
+	// the public first name.
+	mustExec(t, pool, "UPDATE donors SET full_name='Una Margaret Smith', public_name='Unicorn' WHERE id=$1", unset)
 
 	// buildNetwork is the engine behind NetworkService.Network; drive it
 	// directly against the referrer id (Network() only adds session auth).
@@ -89,10 +93,8 @@ func TestNetworkTotalsActiveOnlyAnnualizedAndInviteeVisibility(t *testing.T) {
 	if got.AnnualizedMinor != 72000 {
 		t.Fatalf("annualized_minor: got %d want 72000", got.AnnualizedMinor)
 	}
-	// N-3: only the opted-in active donor is listed by name; the other active
-	// donor (not visible) is counted anonymously. The lapsed donor, though
-	// visible, is inactive so it is neither listed as active nor in the anon
-	// active tail.
+	// N-3: every visible donor is listed by name, lapsed or not; an active donor
+	// who is not visible is not listed and is counted only in the anonymous tail.
 	if len(got.Invitees) != 3 {
 		t.Fatalf("invitees: got %d want 3 (every visible donor, regardless of active)", len(got.Invitees))
 	}
@@ -105,17 +107,21 @@ func TestNetworkTotalsActiveOnlyAnnualizedAndInviteeVisibility(t *testing.T) {
 			namedActive++
 		}
 	}
+	if !slices.Contains(got.Invitees, NetworkInvitee{Name: "Una S.", Active: true}) ||
+		!slices.Contains(got.Invitees, NetworkInvitee{Name: "Ada L.", Active: true}) {
+		t.Fatalf("invitees: got %+v, want Una S. from her full name and Ada L. from her public name", got.Invitees)
+	}
 	if named != 3 || namedActive != 2 {
 		t.Fatalf("invitee names: got named=%d active=%d want named=3 active=2", named, namedActive)
 	}
-	// 3 active total - 2 visible-active = 1 anonymous active.
+	// 3 active donors - 2 listed active donors = 1 anonymous active donor.
 	if got.AnonymousActive != 1 {
 		t.Fatalf("anonymous_active: got %d want 1", got.AnonymousActive)
 	}
 
 	// N-2: 3 converted referrals -> next milestone is the 12 tier, 9 remaining.
-	if got.NextMilestone == nil || got.NextMilestone.Target != 12 || got.NextMilestone.Remaining != 9 {
-		t.Fatalf("next_milestone: got %+v want target=12 remaining=9", got.NextMilestone)
+	if got.NextMilestone == nil || *got.NextMilestone != (NetworkMilestone{Label: "Brought 12 In", Target: 12, Remaining: 9}) {
+		t.Fatalf("next_milestone: got %+v want Brought 12 In, target=12 remaining=9", got.NextMilestone)
 	}
 }
 
@@ -150,5 +156,30 @@ func TestNetworkMilestoneLadderEndsAtTheLastTier(t *testing.T) {
 	}
 	if got.Invitees == nil || len(got.Invitees) != 0 || got.ActiveCount != 0 || got.AnonymousActive != 0 {
 		t.Fatalf("a donor with no referrals: %+v", got)
+	}
+}
+
+func TestListedNameIsFirstNameAndLastInitial(t *testing.T) {
+	for _, tt := range []struct{ full, public, want string }{
+		{"Ada Lovelace", "Countess", "Ada L."},
+		{"  grace   brewster  hopper ", "", "grace H."},
+		{"Zoë ångström", "", "Zoë Å."},
+		{"Cher", "", "Cher"},
+		{"", " Ada ", "Ada"},
+		{"   ", "", ""},
+	} {
+		if got := listedName(tt.full, tt.public); got != tt.want {
+			t.Errorf("listedName(%q, %q) = %q, want %q", tt.full, tt.public, got, tt.want)
+		}
+	}
+}
+
+func TestNetworkWithoutProjectionStillShowsTheFirstMilestone(t *testing.T) {
+	pool := database(t)
+	referrer, _ := donor(t, pool)
+	mustExec(t, pool, "DELETE FROM donor_metric_projections WHERE donor_id=$1", referrer)
+	got, err := buildNetwork(context.Background(), queries.New(pool), referrer)
+	if err != nil || got.NextMilestone == nil || got.NextMilestone.Remaining != got.NextMilestone.Target || got.NextMilestone.Target <= 0 {
+		t.Fatalf("donor with no projection: %+v %v", got.NextMilestone, err)
 	}
 }

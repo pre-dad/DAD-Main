@@ -46,7 +46,7 @@ func (s StaffFinanceService) RefundQuote(ctx context.Context, token string, dono
 			AmountMinor:    gift.AmountMinor,
 			AvailableMinor: gift.AmountMinor,
 			Currency:       "USD",
-			Mode:           "test",
+			Mode:           processorMode,
 		}
 		for _, r := range refunds {
 			if r.Status != "FAILED" && r.Status != "CANCELED" {
@@ -77,8 +77,11 @@ func (s StaffFinanceService) CancellationQuote(ctx context.Context, token string
 				return RecurringDetails{}, err
 			}
 			view, err := storedDetails(ctx, q, donorID)
-			if err != nil || view.Subscription == nil {
-				return RecurringDetails{Mode: "test"}, err
+			if err != nil {
+				return RecurringDetails{Mode: processorMode}, err
+			}
+			if view.Subscription == nil {
+				return view, nil
 			}
 			return view, auditStaff(ctx, q, actor.ID, "gift.cancel_preview", view.Subscription.ID, nil, now)
 		},

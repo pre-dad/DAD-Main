@@ -45,6 +45,10 @@ services=("$@")
 timeout="${ROLLOUT_TIMEOUT_SECONDS:-1200}"
 interval="${ROLLOUT_POLL_SECONDS:-15}"
 taskdefs_file="${DAD_TASKDEFS_FILE:-}"
+if [ -n "$taskdefs_file" ] && [ ! -r "$taskdefs_file" ]; then
+  echo "::error::cannot read $taskdefs_file" >&2
+  exit 1
+fi
 
 # Drop services that are switched off (desired count 0) when asked to. They are not
 # deployed: when DAD-infra switches them on, CloudFormation starts them at the image tag
@@ -117,6 +121,7 @@ for i in "${!services[@]}"; do
   svc="${services[$i]}"
   id="${deployment_ids[$i]}"
   deadline=$(($(date +%s) + timeout))
+  seen=false
   while :; do
     state="$(aws ecs describe-services \
       --cluster "$cluster" \
@@ -138,8 +143,21 @@ for i in "${!services[@]}"; do
         failed=1
         break
         ;;
+      None)
+        if [ "$seen" = true ]; then
+          echo "::error::$svc: deployment $id is no longer listed; another deployment superseded it" >&2
+          failed=1
+          break
+        fi
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+          echo "::error::$svc: deployment $id still '$state' after ${timeout}s" >&2
+          failed=1
+          break
+        fi
+        sleep "$interval"
+        ;;
       *)
-        # IN_PROGRESS, or not listed yet ("None").
+        seen=true
         if [ "$(date +%s)" -ge "$deadline" ]; then
           echo "::error::$svc: deployment $id still '$state' after ${timeout}s" >&2
           failed=1

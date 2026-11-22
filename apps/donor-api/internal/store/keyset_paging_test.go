@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"dad/donor-api/internal/dbroles"
@@ -289,6 +290,22 @@ VALUES($1,$2,$3,'REFUND',$4,100,'Duplicate gift reported',$5)`, a, actor, id, te
 			t.Fatalf("action cursor %.20q accepted: %v", bad, err)
 		}
 	}
+	cleanExec(t, "DELETE FROM donor_staff_audit WHERE actor_id=$1 AND action='action.list'", actor)
+	if _, err := s.DonorActions(ctx, token, testID(t), ""); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatal("actions of an unknown donor", err)
+	}
+	var listed int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE actor_id=$1 AND action='action.list'", actor).Scan(&listed); err != nil ||
+		listed != 0 {
+		t.Fatalf("unknown donor read was audited: %d %v", listed, err)
+	}
+	if _, err := s.DonorActions(ctx, token, id, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE actor_id=$1 AND action='action.list' AND target=$2", actor, id.String()).Scan(&listed); err != nil ||
+		listed != 1 {
+		t.Fatalf("action history read audited %d times: %v", listed, err)
+	}
 	if _, err := s.DonorMessages(ctx, growth, id, ""); !errors.Is(err, ErrStaffForbidden) {
 		t.Fatal("messages without donor.read", err)
 	}
@@ -322,7 +339,7 @@ VALUES($1,$2,'Dana',$3,$4,$4)`, id, fmt.Sprintf("Org %03d", i), fmt.Sprintf("%s@
 		return page.Applications, page.NextCursor, err
 	}, func(a PartnerApplication) string { return a.ID })
 	got := flatten(pages)
-	if !slices.Equal(got[:len(want)], want) || len(pages[0]) != pageSize || len(pages) < 3 {
+	if len(got) < len(want) || !slices.Equal(got[:len(want)], want) || len(pages[0]) != pageSize || len(pages) < 3 {
 		t.Fatalf("pending queue is not paged oldest first past %d: %d pages", pageSize, len(pages))
 	}
 

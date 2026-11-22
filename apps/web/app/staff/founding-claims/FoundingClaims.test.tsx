@@ -45,3 +45,16 @@ it("lists each problem when the import is refused", async () => {
   expect(problems.textContent).toContain("Row 2, column signed_up_on");
   expect(problems.textContent).toContain("invalid_date");
 });
+
+it("rejects a file over 4 MB without sending it", () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  render(<FoundingClaims />);
+  const big = new File(["x"], "big.csv", { type: "text/csv" });
+  Object.defineProperty(big, "size", { value: 4 * 1024 * 1024 + 1 });
+  fireEvent.change(screen.getByLabelText("Sign-ups CSV"), { target: { files: [big] } });
+  const form = screen.getByRole("button", { name: "Import sign-ups" }).closest("form") as HTMLFormElement;
+  fireEvent.submit(form);
+  expect(screen.getByRole("alert")).toHaveTextContent("The CSV must be at most 4 MB.");
+  expect(fetch).not.toHaveBeenCalled();
+});

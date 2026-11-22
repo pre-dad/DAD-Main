@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { analyticsChoice, observe, observeAPI } from "./analytics";
+import { analyticsAllowed, analyticsChoice, observe, observeAPI } from "./analytics";
 
 afterEach(() => {
   localStorage.clear();
@@ -36,4 +36,36 @@ it("never treats checkout navigation as financial completion or copies personal 
   expect(payload).toContain("gift_started");
   expect(payload).not.toContain("gift_completed");
   expect(payload).not.toContain("private@example.org");
+});
+it("counts a single event page as event_viewed but not the invite-only list", () => {
+  const fetch = vi.fn().mockResolvedValue(new Response("{}"));
+  vi.stubGlobal("fetch", fetch);
+  analyticsChoice(true);
+  observeAPI("/donor/me/events/invite-only", "GET", {}, undefined);
+  expect(fetch).not.toHaveBeenCalled();
+  observeAPI("/donor/me/events/e1", "GET", {}, undefined);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(String(fetch.mock.calls[0][1].body)).toContain("event_viewed");
+});
+it("stays off when the browser says do not track or global privacy control, even with stored consent", () => {
+  analyticsChoice(true);
+  expect(analyticsAllowed()).toBe(true);
+  vi.stubGlobal("navigator", { ...navigator, doNotTrack: "1" });
+  expect(analyticsAllowed()).toBe(false);
+  vi.stubGlobal("navigator", { ...navigator, doNotTrack: null, globalPrivacyControl: true });
+  expect(analyticsAllowed()).toBe(false);
+});
+it("treats unreadable storage as no consent", () => {
+  vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+    throw new Error("denied");
+  });
+  expect(analyticsAllowed()).toBe(false);
+  vi.restoreAllMocks();
+});
+it("never throws when an API response has no body to inspect", () => {
+  const fetch = vi.fn().mockResolvedValue(new Response("{}"));
+  vi.stubGlobal("fetch", fetch);
+  analyticsChoice(true);
+  expect(() => observeAPI("/donor/events/e1/reserve", "POST", null)).not.toThrow();
+  expect(String(fetch.mock.calls[0][1].body)).toContain("event_reserved");
 });

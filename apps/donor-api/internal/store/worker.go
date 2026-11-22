@@ -14,6 +14,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// EventWorker applies queued Stripe events: it reads the processor state an
+// event needs with no transaction open, then applies the effects under the
+// donor lock.
 type EventWorker struct {
 	DB      *pgxpool.Pool
 	Gateway payments.FinancialGateway
@@ -45,7 +48,7 @@ type eventApply func(ctx context.Context, q *queries.Queries) (pgtype.UUID, erro
 // retried with backoff, rather than returned: only a failure to record the
 // outcome stops the worker. It reports whether it found an event.
 func (w EventWorker) ProcessNext(ctx context.Context) (bool, error) {
-	event, found, err := w.claim(ctx, time.Now().UTC())
+	event, found, err := w.claim(ctx)
 	if err != nil || !found {
 		return false, err
 	}
@@ -55,10 +58,8 @@ func (w EventWorker) ProcessNext(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-func (w EventWorker) claim(ctx context.Context, now time.Time) (queries.DonorStripeEvent, bool, error) {
-	event, err := queries.New(w.DB).ClaimStripeEvent(ctx, queries.ClaimStripeEventParams{
-		LeaseUntil: timestamp(now.Add(eventLease)), AsOf: timestamp(now),
-	})
+func (w EventWorker) claim(ctx context.Context) (queries.DonorStripeEvent, bool, error) {
+	event, err := queries.New(w.DB).ClaimStripeEvent(ctx, int32(eventLease/time.Second))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return event, false, nil
 	}
@@ -166,6 +167,8 @@ func eventFailure(err error) string {
 	switch {
 	case errors.Is(err, payments.ErrProcessorUnavailable), errors.Is(err, payments.ErrUnconfigured):
 		return "PaymentUnavailable"
+	case errors.Is(err, payments.ErrProcessorRejected), errors.Is(err, payments.ErrCheckoutRejected):
+		return "PaymentRejected"
 	case errors.Is(err, pgx.ErrNoRows):
 		return "MissingRecord"
 	case errors.Is(err, payments.ErrFacts), errors.Is(err, recognition.ErrInvalid):
@@ -590,37 +593,43 @@ func paymentFacts(
 	expected int64,
 ) (paidGift, error) {
 	out := paidGift{objectID: data.Text("id")}
-	var err error
-	switch event.EventType {
-	case "invoice.payment_succeeded":
-		before, e1 := data.IntDefault("starting_balance")
-		after, e2 := data.IntDefault("ending_balance")
-		total, e3 := data.Int("total")
-		due, e4 := data.Int("amount_due")
-		out.amount, err = data.Int("amount_paid")
-		if draft.Frequency != "MONTHLY" || data.Text("status") != "paid" || !billingReason(data) || e1 != nil || e2 != nil || e3 != nil ||
-			e4 != nil ||
-			err != nil ||
-			before != 0 ||
-			after != 0 ||
-			out.amount != total ||
-			out.amount != due {
-			return out, payments.ErrFacts
-		}
-		if err = bindSubscription(ctx, q, attempt, data.Text("subscription")); err != nil {
-			return out, err
-		}
-		if out.paid, err = data.Unix("paid_at"); err != nil {
-			return out, err
-		}
-		if out.paymentIntent, err = invoicePaymentIntent(data, out.amount); err != nil {
-			return out, err
-		}
-		if out.period, err = recordPeriod(ctx, q, draft, data, expected, true); err != nil {
-			return out, err
-		}
-	default:
+	if event.EventType != "invoice.payment_succeeded" {
 		return out, payments.ErrFacts
+	}
+	before, err := data.IntDefault("starting_balance")
+	if err != nil {
+		return out, payments.ErrFacts
+	}
+	after, err := data.IntDefault("ending_balance")
+	if err != nil {
+		return out, payments.ErrFacts
+	}
+	total, err := data.Int("total")
+	if err != nil {
+		return out, payments.ErrFacts
+	}
+	due, err := data.Int("amount_due")
+	if err != nil {
+		return out, payments.ErrFacts
+	}
+	if out.amount, err = data.Int("amount_paid"); err != nil {
+		return out, payments.ErrFacts
+	}
+	if draft.Frequency != "MONTHLY" || data.Text("status") != "paid" || !billingReason(data) ||
+		before != 0 || after != 0 || out.amount != total || out.amount != due {
+		return out, payments.ErrFacts
+	}
+	if err = bindSubscription(ctx, q, attempt, data.Text("subscription")); err != nil {
+		return out, err
+	}
+	if out.paid, err = data.Unix("paid_at"); err != nil {
+		return out, err
+	}
+	if out.paymentIntent, err = invoicePaymentIntent(data, out.amount); err != nil {
+		return out, err
+	}
+	if out.period, err = recordPeriod(ctx, q, draft, data, expected, true); err != nil {
+		return out, err
 	}
 	if out.amount != expected || out.amount <= 0 || data.Text("currency") != "usd" {
 		return out, payments.ErrFacts
@@ -649,7 +658,20 @@ func recordGift(ctx context.Context, q *queries.Queries, draft queries.DonorChec
 		referrer, kind = draft.ReferrerID, draft.ReferralKind
 	}
 	pi := text(p.paymentIntent)
-	if err = q.InsertGift(ctx, queries.InsertGiftParams{ID: id, DonorID: donor.ID, CheckoutID: draft.ID, StripeObjectID: p.objectID, AmountMinor: p.amount, Frequency: draft.Frequency, PaidAt: timestamp(p.paid), StripePaymentIntentID: pi, PeriodID: p.period, ReferrerID: referrer, ReferralKind: kind}); err != nil {
+	err = q.InsertGift(ctx, queries.InsertGiftParams{
+		ID:                    id,
+		DonorID:               donor.ID,
+		CheckoutID:            draft.ID,
+		StripeObjectID:        p.objectID,
+		AmountMinor:           p.amount,
+		Frequency:             draft.Frequency,
+		PaidAt:                timestamp(p.paid),
+		StripePaymentIntentID: pi,
+		PeriodID:              p.period,
+		ReferrerID:            referrer,
+		ReferralKind:          kind,
+	})
+	if err != nil {
 		return err
 	}
 	gift, err := q.GiftByStripeObject(ctx, p.objectID)
@@ -717,7 +739,15 @@ func recordPeriod(
 	if err != nil {
 		return empty, err
 	}
-	if err = q.InsertBillingPeriod(ctx, queries.InsertBillingPeriodParams{ID: id, DonorID: draft.DonorID, CheckoutID: draft.ID, StripeInvoiceID: data.Text("id"), StripeSubscriptionID: data.Text("subscription"), DueAt: timestamp(start), EndsAt: timestamp(end)}); err != nil {
+	if err = q.InsertBillingPeriod(ctx, queries.InsertBillingPeriodParams{
+		ID:                   id,
+		DonorID:              draft.DonorID,
+		CheckoutID:           draft.ID,
+		StripeInvoiceID:      data.Text("id"),
+		StripeSubscriptionID: data.Text("subscription"),
+		DueAt:                timestamp(start),
+		EndsAt:               timestamp(end),
+	}); err != nil {
 		return empty, err
 	}
 	p, err := q.BillingPeriodByInvoice(ctx, data.Text("id"))

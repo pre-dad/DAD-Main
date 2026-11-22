@@ -46,7 +46,7 @@ func TestFromEnvironmentInvalid(t *testing.T) {
 }
 
 func TestStubSenderRecords(t *testing.T) {
-	s := &StubSender{from: "DAD"}
+	s := &StubSender{}
 	if err := s.Send(context.Background(), "+14155550123", "code 123456"); err != nil {
 		t.Fatal(err)
 	}

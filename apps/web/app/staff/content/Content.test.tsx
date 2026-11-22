@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import Content from "./Content";
 
@@ -55,5 +55,43 @@ it("explains a rejected upload for a role without permission", async () => {
     target: { files: [new File(["signed"], "approval.pdf")] },
   });
   submitUpload();
-  expect(await screen.findByRole("alert")).toHaveTextContent("does not permit storing source documents");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("does not permit storing source documents"));
+});
+
+it("clears the previous success message when the next file is too large", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ sources: [] }))
+    .mockResolvedValueOnce(Response.json(source))
+    .mockResolvedValueOnce(Response.json({ sources: [source] }));
+  vi.stubGlobal("fetch", fetch);
+  render(<Content />);
+  const input = await screen.findByLabelText("Source file");
+  fireEvent.change(input, { target: { files: [new File(["signed"], "approval.pdf")] } });
+  submitUpload();
+  await screen.findByText(/Source stored:/);
+  const large = new File(["x"], "big.pdf");
+  Object.defineProperty(large, "size", { value: 10 * 1024 * 1024 + 1 });
+  fireEvent.change(input, { target: { files: [large] } });
+  submitUpload();
+  expect(await screen.findByText("Source documents must be at most 10 MB.")).toBeVisible();
+  expect(screen.queryByText(/Source stored:/)).not.toBeInTheDocument();
+});
+
+it("empties the file chooser after a successful upload so the same file is not resent", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ sources: [] }))
+    .mockResolvedValueOnce(Response.json(source))
+    .mockResolvedValueOnce(Response.json({ sources: [source] }));
+  vi.stubGlobal("fetch", fetch);
+  render(<Content />);
+  fireEvent.change(await screen.findByLabelText("Source file"), {
+    target: { files: [new File(["signed"], "approval.pdf")] },
+  });
+  submitUpload();
+  await screen.findByText(/Source stored:/);
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+  submitUpload();
+  expect(fetch).toHaveBeenCalledTimes(3);
 });

@@ -48,7 +48,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	if err != nil {
 		return fmt.Errorf("%s %w", target.variable, err)
 	}
-	dsn := dbroles.Rekey.URL(getenv)
+	dsn, err := dbroles.Rekey.URL(getenv)
+	if err != nil {
+		return err
+	}
 	if dsn == "" {
 		return errors.New(dbroles.Rekey.Variable() + " is required")
 	}

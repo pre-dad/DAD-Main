@@ -84,7 +84,7 @@ func (s StaffFinanceService) currentRefunds(
 	}
 	if observations != snapshot.observations || gift.ID != snapshot.gift.ID ||
 		gift.StripePaymentIntentID != snapshot.gift.StripePaymentIntentID {
-		return s.refunds(ctx, gift)
+		return nil, 0, errRefetch
 	}
 	return refundBalance(gift, snapshot.rows)
 }
@@ -242,81 +242,82 @@ func (s StaffFinanceService) Refund(ctx context.Context, token string, r StaffFi
 // submitRefund creates the authorized refund with the processor without
 // holding the donor lock, then records it under the lock.
 func (s StaffFinanceService) submitRefund(ctx context.Context, token string, r StaffFinancialRequest) (StaffRefund, error) {
-	snapshot, err := s.createRefund(ctx, r)
-	if err != nil {
-		return StaffRefund{}, err
-	}
-	return staffDonorWrite(
-		ctx,
-		s.Staff,
-		token,
-		"gift.refund",
-		r.DonorID,
-		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (StaffRefund, error) {
-			q := queries.New(tx)
-			command, err := q.StaffActionByID(ctx, r.RequestID)
-			if err != nil {
-				return StaffRefund{}, err
-			}
-			gift, err := staffGift(ctx, q, r.DonorID, r.TargetID)
-			if err != nil {
-				return StaffRefund{}, err
-			}
-			notSubmitted := StaffRefund{RequestID: command.ID, Status: "NOT_SUBMITTED", Mode: "test"}
-			if command.Status == "ABANDONED" {
-				return notSubmitted, nil
-			}
-			rows, remaining, err := s.currentRefunds(ctx, q, gift, snapshot)
-			if err != nil {
-				return StaffRefund{}, err
-			}
-			current, err := commandRefund(rows, command.ID)
-			if err != nil {
-				return StaffRefund{}, err
-			}
-			if current == nil {
-				if command.StripeRefundID.Valid || now.Sub(command.CreatedAt.Time) >= commandRetryWindow || r.Amount <= remaining {
-					return StaffRefund{}, ErrStaffConflict
-				}
-				if err = q.SaveStaffAction(ctx, queries.SaveStaffActionParams{ID: command.ID, Status: "ABANDONED", CompletedAt: timestamp(now)}); err != nil {
-					return StaffRefund{}, err
-				}
-				if err = auditStaff(ctx, q, actor.ID, "gift.refund_not_submitted", command.ID.String(), map[string]string{"reason": "available_amount_changed"}, now); err != nil {
-					return StaffRefund{}, err
-				}
-				return notSubmitted, nil
-			}
-			amount, err := current.Int("amount")
-			metadata, metaErr := current.Object("metadata")
-			if err != nil || metaErr != nil || amount != r.Amount || metadata.Text("dad_staff_action") != command.ID.String() ||
-				(command.StripeRefundID.Valid && command.StripeRefundID.String != current.Text("id")) {
-				return StaffRefund{}, payments.ErrFacts
-			}
-			if err = recordRefund(ctx, q, gift, current, pgtype.UUID{}, command.ID, now); err != nil {
-				return StaffRefund{}, err
-			}
-			refund, err := q.RefundByStripeID(ctx, current.Text("id"))
-			if err != nil {
-				return StaffRefund{}, err
-			}
-			if err = q.SaveStaffAction(ctx, queries.SaveStaffActionParams{ID: command.ID, StripeRefundID: text(refund.StripeRefundID), Status: "OBSERVED", CompletedAt: timestamp(now)}); err != nil {
-				return StaffRefund{}, err
-			}
-			if err = auditStaff(ctx, q, actor.ID, "gift.refund_observed", command.ID.String(), map[string]any{"status": refund.Status, "amount_minor": refund.AmountMinor, "reason": command.Reason}, now); err != nil {
-				return StaffRefund{}, err
-			}
-			if _, err = refreshProjection(ctx, tx, r.DonorID, now); err != nil {
-				return StaffRefund{}, err
-			}
-			return StaffRefund{
-				RequestID:   command.ID,
-				RefundID:    &refund.ID,
-				Status:      refund.Status,
-				AmountMinor: refund.AmountMinor,
-				Currency:    "USD",
-				Mode:        "test",
-			}, nil
-		},
+	return withFreshSnapshot(
+		func() (refundSnapshot, error) { return s.createRefund(ctx, r) },
+		func(snapshot refundSnapshot) (StaffRefund, error) {
+			return staffDonorWrite(
+				ctx,
+				s.Staff,
+				token,
+				"gift.refund",
+				r.DonorID,
+				func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (StaffRefund, error) {
+					q := queries.New(tx)
+					command, err := q.StaffActionByID(ctx, r.RequestID)
+					if err != nil {
+						return StaffRefund{}, err
+					}
+					gift, err := staffGift(ctx, q, r.DonorID, r.TargetID)
+					if err != nil {
+						return StaffRefund{}, err
+					}
+					notSubmitted := StaffRefund{RequestID: command.ID, Status: "NOT_SUBMITTED", Mode: processorMode}
+					if command.Status == "ABANDONED" {
+						return notSubmitted, nil
+					}
+					rows, remaining, err := s.currentRefunds(ctx, q, gift, snapshot)
+					if err != nil {
+						return StaffRefund{}, err
+					}
+					current, err := commandRefund(rows, command.ID)
+					if err != nil {
+						return StaffRefund{}, err
+					}
+					if current == nil {
+						if command.StripeRefundID.Valid || now.Sub(command.CreatedAt.Time) >= commandRetryWindow || r.Amount <= remaining {
+							return StaffRefund{}, ErrStaffConflict
+						}
+						if err = q.SaveStaffAction(ctx, queries.SaveStaffActionParams{ID: command.ID, Status: "ABANDONED", CompletedAt: timestamp(now)}); err != nil {
+							return StaffRefund{}, err
+						}
+						if err = auditStaff(ctx, q, actor.ID, "gift.refund_not_submitted", command.ID.String(), map[string]string{"reason": "available_amount_changed"}, now); err != nil {
+							return StaffRefund{}, err
+						}
+						return notSubmitted, nil
+					}
+					amount, err := current.Int("amount")
+					metadata, metaErr := current.Object("metadata")
+					if err != nil || metaErr != nil || amount != r.Amount || metadata.Text("dad_staff_action") != command.ID.String() ||
+						(command.StripeRefundID.Valid && command.StripeRefundID.String != current.Text("id")) {
+						return StaffRefund{}, payments.ErrFacts
+					}
+					if err = recordRefund(ctx, q, gift, current, pgtype.UUID{}, command.ID, now); err != nil {
+						return StaffRefund{}, err
+					}
+					refund, err := q.RefundByStripeID(ctx, current.Text("id"))
+					if err != nil {
+						return StaffRefund{}, err
+					}
+					if err = q.SaveStaffAction(ctx, queries.SaveStaffActionParams{ID: command.ID, StripeRefundID: text(refund.StripeRefundID), Status: "OBSERVED", CompletedAt: timestamp(now)}); err != nil {
+						return StaffRefund{}, err
+					}
+					if err = auditStaff(ctx, q, actor.ID, "gift.refund_observed", command.ID.String(), map[string]any{"status": refund.Status, "amount_minor": refund.AmountMinor, "reason": command.Reason}, now); err != nil {
+						return StaffRefund{}, err
+					}
+					if _, err = refreshProjection(ctx, tx, r.DonorID, now); err != nil {
+						return StaffRefund{}, err
+					}
+					return StaffRefund{
+						RequestID:   command.ID,
+						RefundID:    &refund.ID,
+						Status:      refund.Status,
+						AmountMinor: refund.AmountMinor,
+						Currency:    "USD",
+						Mode:        processorMode,
+					}, nil
+				},
+			)
+		}, ErrStaffConflict,
 	)
 }
 
@@ -461,6 +462,8 @@ func (s StaffFinanceService) auditFailure(
 	switch {
 	case errors.Is(cause, payments.ErrProcessorUnavailable), errors.Is(cause, payments.ErrUnconfigured):
 		outcome = "processor_unavailable"
+	case errors.Is(cause, payments.ErrProcessorRejected), errors.Is(cause, payments.ErrCheckoutRejected):
+		outcome = "processor_rejected"
 	case errors.Is(cause, payments.ErrFacts):
 		outcome = "invalid_processor_facts"
 	case errors.Is(cause, ErrStaffConflict), errors.Is(cause, ErrSubscriptionConflict):

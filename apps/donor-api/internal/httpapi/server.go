@@ -16,6 +16,10 @@ import (
 	"dad/donor-api/internal/wallet"
 )
 
+type RateLimitSource interface {
+	Admit(ctx context.Context, class, client string, perMinute int) (time.Duration, error)
+}
+
 type WebhookReceiver interface {
 	Receive(context.Context, []byte, string) error
 }
@@ -27,6 +31,9 @@ type Services struct {
 	StaffOrigin    string // the exact back-office Origin admitted on staff mutations
 	TrustedProxies []netip.Prefix
 	Ready          func(context.Context) error
+	// RateLimit shares each client's limits across replicas; nil leaves only
+	// this process's buckets.
+	RateLimit RateLimitSource
 
 	Checkout CheckoutSource
 	Webhook  WebhookReceiver
@@ -84,7 +91,7 @@ type api struct {
 	staffCookie string
 }
 
-// WriteTimeout exceeds providerTimeout so a slow processor call can still answer.
+// writeTimeout exceeds providerTimeout so a slow processor call can still answer.
 const writeTimeout = 30 * time.Second
 
 func NewServer(address string, services Services) *http.Server {
@@ -98,7 +105,7 @@ func NewServer(address string, services Services) *http.Server {
 		staffCookie: staffCookie,
 	}
 	if a.staffSecure {
-		a.staffCookie = "__Host-" + staffCookie
+		a.staffCookie = hostPrefix + staffCookie
 	}
 	mux := http.NewServeMux()
 	for _, route := range a.routes() {
@@ -166,7 +173,7 @@ func (a *api) ready(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusServiceUnavailable, unavailable, nil)
 		return
 	}
-	ctx, cancel := withTimeout(r, 3*time.Second)
+	ctx, cancel := withTimeout(r, probeTimeout)
 	defer cancel()
 	if err := a.Ready(ctx); err != nil {
 		writeError(w, r, http.StatusServiceUnavailable, unavailable, err)

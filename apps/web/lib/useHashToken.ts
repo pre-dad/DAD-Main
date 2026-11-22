@@ -20,7 +20,9 @@ export function useHashToken(keep?: string) {
     try {
       if (keep && token) sessionStorage.setItem(keep, token);
       else if (keep) token = sessionStorage.getItem(keep);
-    } catch {}
+    } catch {
+      /* Storage may be disabled; the link still works for this load. */
+    }
     // StrictMode replays this effect after the hash is gone; keep what the first run found.
     setLink((current) => (current.token ? current : { token: token ?? "", next: params.get("next") ?? undefined }));
   }, [keep]);
@@ -28,7 +30,9 @@ export function useHashToken(keep?: string) {
     setLink({ token: "" });
     try {
       if (keep) sessionStorage.removeItem(keep);
-    } catch {}
+    } catch {
+      /* Storage may be disabled; nothing was kept. */
+    }
   }, [keep]);
   return { token: link.token, next: link.next, clear };
 }

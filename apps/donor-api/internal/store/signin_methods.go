@@ -3,11 +3,11 @@ package store
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
-	"regexp"
 	"sync"
 	"time"
 
@@ -16,6 +16,7 @@ import (
 	"dad/donor-api/internal/sms"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -29,9 +30,6 @@ var ErrSignInUnavailable = errors.New("this sign-in method is not available")
 // a caller cannot tell "no account" from "wrong code" — neither reveals whether
 // an account exists.
 var ErrSignInCode = errors.New("that code is incorrect or has expired")
-
-// phonePatternStore mirrors the ck_donor_phone constraint (E.164).
-var phonePatternStore = regexp.MustCompile(`^\+[1-9][0-9]{1,14}$`)
 
 const (
 	phoneCodeTTL      = 10 * time.Minute
@@ -64,7 +62,7 @@ func (s PhoneService) BeginSignIn(ctx context.Context, phone string) error {
 	if s.Sender == nil {
 		return ErrSignInUnavailable
 	}
-	if !phonePatternStore.MatchString(phone) {
+	if !phonePattern.MatchString(phone) {
 		return nil
 	}
 	code, err := numericCode(6)
@@ -87,16 +85,17 @@ func (s PhoneService) BeginSignIn(ctx context.Context, phone string) error {
 		if donor.Disabled || donor.Phone.String != phone {
 			return nil
 		}
+		now := time.Now().UTC()
 		pending, err := q.PhoneCode(ctx, phone)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if err == nil && (time.Since(pending.CreatedAt.Time) < time.Minute || windowSpent(pending, time.Now())) {
+		if err == nil && (now.Sub(pending.CreatedAt.Time) < time.Minute || windowSpent(pending, now)) {
 			return nil
 		}
 		sent = true
 		return q.UpsertPhoneCode(ctx, queries.UpsertPhoneCodeParams{
-			Phone: phone, CodeHash: HashToken(code), ExpiresAt: timestamp(time.Now().UTC().Add(phoneCodeTTL)),
+			Phone: phone, CodeHash: HashToken(code), ExpiresAt: timestamp(now.Add(phoneCodeTTL)),
 		})
 	}); err != nil {
 		return err
@@ -105,7 +104,9 @@ func (s PhoneService) BeginSignIn(ctx context.Context, phone string) error {
 		return nil
 	}
 	// The send runs after the response so that neither its outcome nor its
-	// latency tells the caller whether the number has an account.
+	// duration tells the caller whether the number has an account. The
+	// lookup and store before it still differ for an unknown number; the
+	// endpoint's rate limits bound how much that can reveal.
 	message := fmt.Sprintf("Your DAD sign-in code is %s. It expires in 10 minutes.", code)
 	send, cancel := context.WithTimeout(context.WithoutCancel(ctx), phoneSendTimeout)
 	if s.sends != nil {
@@ -129,7 +130,7 @@ func (s PhoneService) FinishSignIn(ctx context.Context, phone, code string, clie
 	if s.Sender == nil {
 		return Tokens{}, ErrSignInUnavailable
 	}
-	if !phonePatternStore.MatchString(phone) {
+	if !phonePattern.MatchString(phone) {
 		return Tokens{}, ErrSignInCode
 	}
 	rejected := false
@@ -159,7 +160,7 @@ func (s PhoneService) FinishSignIn(ctx context.Context, phone, code string, clie
 		now := time.Now().UTC()
 		expired := !now.Before(pending.ExpiresAt.Time)
 		overTried := pending.Attempts >= phoneCodeMaxTries || windowSpent(pending, now)
-		matched := HashToken(code) == pending.CodeHash
+		matched := subtle.ConstantTimeCompare([]byte(HashToken(code)), []byte(pending.CodeHash)) == 1
 		if expired || overTried || !matched {
 			if !expired && !overTried {
 				// Commit the guess while holding the code lock, then reject it.
@@ -205,6 +206,16 @@ func (s OIDCService) SignIn(ctx context.Context, provider oidc.Provider, idToken
 	if !s.Settings.NonceAccepted(ident, nonce) {
 		return Tokens{}, ErrSignInCode
 	}
+	tokens, err := s.signIn(ctx, ident, client)
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation {
+		// A concurrent first sign-in for this identity linked it after our lookup;
+		// the retry finds the link.
+		return s.signIn(ctx, ident, client)
+	}
+	return tokens, err
+}
+
+func (s OIDCService) signIn(ctx context.Context, ident oidc.Identity, client Client) (Tokens, error) {
 	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (Tokens, error) {
 		q := queries.New(tx)
 		now := time.Now().UTC()

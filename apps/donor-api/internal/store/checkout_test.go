@@ -23,11 +23,12 @@ type checkoutCall struct {
 }
 
 type checkoutGateway struct {
-	mu     sync.Mutex
-	calls  []checkoutCall
-	fail   bool
-	remote *payments.RemoteCheckout
-	pool   *pgxpool.Pool
+	mu      sync.Mutex
+	calls   []checkoutCall
+	fail    bool
+	failErr error
+	remote  *payments.RemoteCheckout
+	pool    *pgxpool.Pool
 	// expired lists the sessions ExpireCheckout was asked to close. It reports
 	// expireStatus, "expired" when unset, or expireErr if that is set. Each
 	// beforeExpire hook runs first, once, as the processor call begins.
@@ -64,6 +65,9 @@ func (g *checkoutGateway) CreateCheckout(ctx context.Context, params []byte, key
 		!exists {
 		return payments.RemoteCheckout{}, errors.New("uncommitted checkout")
 	}
+	if g.failErr != nil {
+		return payments.RemoteCheckout{}, g.failErr
+	}
 	if g.fail {
 		g.fail = false
 		return payments.RemoteCheckout{}, errors.New("lost provider acknowledgement")
@@ -85,7 +89,6 @@ func checkoutFixture(t *testing.T) (CheckoutService, payments.CheckoutRequest, p
 			"DELETE FROM donor_recurring_reservations WHERE donor_id=$1",
 			"DELETE FROM donor_stripe_checkouts WHERE checkout_id IN (SELECT id FROM donor_checkouts WHERE donor_id=$1)",
 			"DELETE FROM donor_checkouts WHERE donor_id=$1",
-			"DELETE FROM donor_referral_touches WHERE referrer_id=$1",
 		} {
 			if _, err := pool.Exec(ctx, sql, id); err != nil {
 				t.Error(err)
@@ -215,22 +218,36 @@ func TestCheckoutUncertainWindowAndDisabledDonor(t *testing.T) {
 	}
 }
 
+// cleanReferralCheckout removes the checkout rows of id and the referral touches
+// credited to id or referrer (a self-referral test re-points a touch at id). It
+// must be called after the referrer fixture so those dependent rows are
+// deleted first.
+func cleanReferralCheckout(t *testing.T, pool *pgxpool.Pool, id, referrer pgtype.UUID) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx := context.Background()
+		for _, step := range []struct {
+			sql string
+			arg any
+		}{
+			{"DELETE FROM donor_recurring_reservations WHERE donor_id=$1", id},
+			{"DELETE FROM donor_stripe_checkouts WHERE checkout_id IN (SELECT id FROM donor_checkouts WHERE donor_id=$1)", id},
+			{"DELETE FROM donor_checkouts WHERE donor_id=$1", id},
+			{"DELETE FROM donor_referral_touches WHERE referrer_id=ANY($1)", []pgtype.UUID{id, referrer}},
+		} {
+			if _, err := pool.Exec(ctx, step.sql, step.arg); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+}
+
 func TestCheckoutAttributionSnapshotAndSelfReferral(t *testing.T) {
 	service, request, id, gateway := checkoutFixture(t)
 	pool := database(t)
 	ctx := context.Background()
 	referrer, _ := donor(t, pool)
-	// Registered after referrer cleanup so dependent rows disappear first.
-	t.Cleanup(func() {
-		for _, sql := range []string{"DELETE FROM donor_recurring_reservations WHERE donor_id=$1", "DELETE FROM donor_stripe_checkouts WHERE checkout_id IN (SELECT id FROM donor_checkouts WHERE donor_id=$1)", "DELETE FROM donor_checkouts WHERE donor_id=$1"} {
-			if _, err := pool.Exec(ctx, sql, id); err != nil {
-				t.Error(err)
-			}
-		}
-		if _, err := pool.Exec(ctx, "DELETE FROM donor_referral_touches WHERE referrer_id=$1", referrer); err != nil {
-			t.Error(err)
-		}
-	})
+	cleanReferralCheckout(t, pool, id, referrer)
 	token := "test-visitor"
 	touch := testID(t)
 	if _, err := pool.Exec(ctx, `INSERT INTO donor_referral_touches (id,token_hash,referrer_id,kind,touched_at,expires_at) VALUES ($1,$2,$3,'IRL',$4,$5)`, touch, HashToken(token), referrer, time.Now(), time.Now().Add(time.Hour)); err != nil {
@@ -281,8 +298,9 @@ func TestUnexpectedProviderCheckoutIsNotAcknowledged(t *testing.T) {
 	ctx := context.Background()
 	live := true
 	gateway.remote = &payments.RemoteCheckout{ID: "cs_live_invalid", URL: "https://checkout.stripe.com/c/test", Livemode: &live}
-	if _, err := service.BeginCheckout(ctx, request); !errors.Is(err, payments.ErrProcessorUnavailable) {
-		t.Fatal("live response accepted")
+	if _, err := service.BeginCheckout(ctx, request); !errors.Is(err, payments.ErrCheckoutRejected) ||
+		errors.Is(err, payments.ErrProcessorUnavailable) {
+		t.Fatalf("live response: %v", err)
 	}
 	attempt, err := queries.New(pool).StripeCheckout(ctx, request.RequestID)
 	if err != nil || attempt.HostedUrl.Valid || attempt.StripeSessionID.Valid || attempt.Status != "PENDING" {
@@ -391,5 +409,51 @@ func TestCheckoutRetryBelongsToTheDonorNotAReusedEmail(t *testing.T) {
 	}
 	if len(gateway.calls) != 1 {
 		t.Fatal("unauthorized retry reached the processor")
+	}
+}
+
+func TestHeldCheckoutReportsDatabaseFailureNotConflict(t *testing.T) {
+	pool := database(t)
+	id, _ := donor(t, pool)
+	accountCleanup(t, pool, id)
+	q := queries.New(pool)
+	held := queries.Donor{ID: id}
+	if err := heldCheckout(context.Background(), q, held, payments.CheckoutRequest{}, pgtype.UUID{}, time.Now()); !errors.Is(
+		err,
+		payments.ErrCheckoutConflict,
+	) {
+		t.Fatalf("no holder: %v, want a conflict", err)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := heldCheckout(cancelled, q, held, payments.CheckoutRequest{}, pgtype.UUID{}, time.Now())
+	if err == nil || errors.Is(err, payments.ErrCheckoutConflict) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("database failure reported as %v", err)
+	}
+}
+
+func TestCheckoutKeepsProcessorRefusalDistinctFromOutage(t *testing.T) {
+	service, request, _, gateway := checkoutFixture(t)
+	ctx := context.Background()
+	refusal := &payments.ProcessorError{Status: 401, Code: "api_key_invalid", RequestID: "req_fixture"}
+	gateway.failErr = refusal
+	_, err := service.BeginCheckout(ctx, request)
+	if !errors.Is(err, payments.ErrProcessorRejected) || errors.Is(err, payments.ErrProcessorUnavailable) {
+		t.Fatalf("refusal reported as %v", err)
+	}
+	if eventFailure(err) != "PaymentRejected" {
+		t.Fatalf("refusal classified as %q", eventFailure(err))
+	}
+	gateway.failErr = errors.New("connection reset")
+	if _, err = service.BeginCheckout(ctx, request); !errors.Is(err, payments.ErrProcessorUnavailable) ||
+		eventFailure(err) != "PaymentUnavailable" {
+		t.Fatalf("outage reported as %v", err)
+	}
+	gateway.failErr = nil
+	if _, err = service.BeginCheckout(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	if len(gateway.calls) != 3 || gateway.calls[0].key != gateway.calls[2].key {
+		t.Fatal("attempts did not share one idempotency key")
 	}
 }

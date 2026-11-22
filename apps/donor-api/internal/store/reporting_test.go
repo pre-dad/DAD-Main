@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -199,6 +201,12 @@ func TestReportNumbersMatchSeededFacts(t *testing.T) {
 		cleanExec(t, "DELETE FROM donor_refunds WHERE gift_id IN (SELECT id FROM donor_gifts WHERE stripe_object_id=$1)", bFirst)
 	})
 
+	// Referred donor C: the gift row still names the referrer, but recognition
+	// withheld the referral, so the projection is DIRECT and C counts for no one.
+	withheld, _ := donor(t, pool)
+	cFirst := seedGift(t, pool, withheld, "pi_rep_c_first", 1500, "MONTHLY", repAt, &referrer, "LINK")
+	repSeedProjection(t, pool, withheld, nil, "", cFirst, 1500, nil, 1, 1, &repAt)
+
 	// A DIRECT donor (no referrer), MONTHLY first gift 4000, reached m3 but lapsed.
 	direct, _ := donor(t, pool)
 	directFirst := seedGift(t, pool, direct, "pi_rep_direct_first", 4000, "MONTHLY", repAt, nil, "")
@@ -210,7 +218,7 @@ func TestReportNumbersMatchSeededFacts(t *testing.T) {
 
 	// Involuntary churn: one failed period past deadline NOT recovered (lost),
 	// one failed period recovered (recovered), both due inside the window and
-	// past due_at+14d by repWinEnd.
+	// past due_at+7d by repWinEnd.
 	churnDonor, _ := donor(t, pool)
 	seedFailedPeriod(t, pool, churnDonor, 3000, repWinStart.Add(24*time.Hour), false)
 	seedFailedPeriod(t, pool, churnDonor, 2500, repWinStart.Add(48*time.Hour), true)
@@ -226,14 +234,14 @@ func TestReportNumbersMatchSeededFacts(t *testing.T) {
 		t.Errorf("founding donors: got %d, want 1", report.FoundingDonors)
 	}
 
-	// First-gift by source (all MONTHLY in R1): DIRECT=2 (referrer + direct),
-	// LINK=1 (A), IRL=1 (B). gross_minor: DIRECT/MONTHLY=9000 (5000+4000).
+	// First-gift by source (all MONTHLY in R1): DIRECT=3 (referrer, withheld C,
+	// direct), LINK=1 (A), IRL=1 (B). gross_minor: DIRECT/MONTHLY=10500.
 	bySource := map[string]SourceConversions{}
 	for _, s := range report.FirstGiftBySource {
 		bySource[s.Source+"/"+s.Frequency] = s
 	}
-	if got := bySource["DIRECT/MONTHLY"]; got.Donors != 2 || got.GrossMinor != 9000 {
-		t.Errorf("DIRECT/MONTHLY: got donors=%d gross=%d, want 2/9000", got.Donors, got.GrossMinor)
+	if got := bySource["DIRECT/MONTHLY"]; got.Donors != 3 || got.GrossMinor != 10500 {
+		t.Errorf("DIRECT/MONTHLY: got donors=%d gross=%d, want 3/10500", got.Donors, got.GrossMinor)
 	}
 	if got := bySource["LINK/MONTHLY"]; got.Donors != 1 || got.GrossMinor != 3000 {
 		t.Errorf("LINK/MONTHLY: got donors=%d gross=%d, want 1/3000", got.Donors, got.GrossMinor)
@@ -243,24 +251,24 @@ func TestReportNumbersMatchSeededFacts(t *testing.T) {
 	}
 
 	// Gift mix (R1 is MONTHLY-only). In-window MONTHLY gifts: referrer 5000,
-	// A 3000, B 2000, direct-first 4000, direct-second 4000, plus the churn
-	// recovery gift 2500 = 6 gifts / 20500. No ONE_TIME exists.
+	// A 3000, B 2000, C 1500, direct-first 4000, direct-second 4000, plus the
+	// churn recovery gift 2500 = 7 gifts / 22000. No ONE_TIME exists.
 	mix := map[string]GiftMix{}
 	for _, m := range report.GiftMix {
 		mix[m.Frequency] = m
 	}
-	if got := mix["MONTHLY"]; got.Gifts != 6 || got.CollectedMinor != 20500 {
-		t.Errorf("MONTHLY mix: got gifts=%d collected=%d, want 6/20500", got.Gifts, got.CollectedMinor)
+	if got := mix["MONTHLY"]; got.Gifts != 7 || got.CollectedMinor != 22000 {
+		t.Errorf("MONTHLY mix: got gifts=%d collected=%d, want 7/22000", got.Gifts, got.CollectedMinor)
 	}
 	if _, ok := mix["ONE_TIME"]; ok {
 		t.Errorf("ONE_TIME must not appear in R1 gift mix, got %+v", mix["ONE_TIME"])
 	}
 
-	// Viral: cohort = 1 referrer; gross = 2 (A + B have first_gift_id);
-	// qualified = 1 (only A has net>0).
+	// Viral: cohort = the 6 donors whose first gift falls in the window; gross = 2 (A + B have first_gift_id);
+	// qualified = 1 (only A has net>0); withheld C is not a conversion.
 	v := report.ViralCoefficient
-	if v.Cohort != 5 || v.GrossConversions != 2 || v.QualifiedConversions != 1 {
-		t.Errorf("viral: got cohort=%d gross=%d qualified=%d, want 5/2/1", v.Cohort, v.GrossConversions, v.QualifiedConversions)
+	if v.Cohort != 6 || v.GrossConversions != 2 || v.QualifiedConversions != 1 {
+		t.Errorf("viral: got cohort=%d gross=%d qualified=%d, want 6/2/1", v.Cohort, v.GrossConversions, v.QualifiedConversions)
 	}
 
 	// Referral dollars: LINK = 3000 (A), IRL = 0 (B refunded to net 0).
@@ -295,27 +303,24 @@ func TestReportNumbersMatchSeededFacts(t *testing.T) {
 	}
 }
 
-func TestReportRequiresPermissionAndValidWindow(t *testing.T) {
+func TestReportRejectsInvalidWindowAndBadToken(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	svc := &ReportingService{Staff: &StaffService{DB: api}}
 	ctx := context.Background()
 
-	// A role without report.read is forbidden. OP_PARTNERSHIPS has it; use a
-	// fabricated unknown by signing in as a role then checking a role lacking it
-	// is impossible here, so assert the happy roles pass and an empty window fails.
-	_, token := staffFixture(t, pool, "OP_IMPACT") // has report.read
-	if _, err := svc.Report(ctx, token, repWinEnd, repWinStart); err != ErrStaffInput {
+	_, token := staffFixture(t, pool, "OP_IMPACT")
+	if _, err := svc.Report(ctx, token, repWinEnd, repWinStart); !errors.Is(err, ErrStaffInput) {
 		t.Errorf("reversed window: got %v, want ErrStaffInput", err)
 	}
-	if _, err := svc.Report(ctx, token, repWinStart, repWinStart); err != ErrStaffInput {
+	if _, err := svc.Report(ctx, token, repWinStart, repWinStart); !errors.Is(err, ErrStaffInput) {
 		t.Errorf("empty window: got %v, want ErrStaffInput", err)
 	}
 	// A valid window with a permitted role succeeds.
 	if _, err := svc.Report(ctx, token, repWinStart, repWinEnd); err != nil {
 		t.Errorf("valid report: %v", err)
 	}
-	if _, err := svc.Report(ctx, "not-a-real-token", repWinStart, repWinEnd); err != ErrStaffDenied {
+	if _, err := svc.Report(ctx, "not-a-real-token", repWinStart, repWinEnd); !errors.Is(err, ErrStaffDenied) {
 		t.Errorf("bad token: got %v, want ErrStaffDenied", err)
 	}
 }
@@ -335,9 +340,11 @@ func TestReportWindowIsHalfOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mix := range report.GiftMix {
-		if mix.Frequency == "MONTHLY" && (mix.Gifts != 2 || mix.CollectedMinor != 3000) {
-			t.Fatalf("window [start,end) counted %d gifts / %d, want the two inside / 3000", mix.Gifts, mix.CollectedMinor)
-		}
+	i := slices.IndexFunc(report.GiftMix, func(m GiftMix) bool { return m.Frequency == "MONTHLY" })
+	if i < 0 {
+		t.Fatalf("no MONTHLY gift mix in the window: %+v", report.GiftMix)
+	}
+	if mix := report.GiftMix[i]; mix.Gifts != 2 || mix.CollectedMinor != 3000 {
+		t.Fatalf("window [start,end) counted %d gifts / %d, want the two inside / 3000", mix.Gifts, mix.CollectedMinor)
 	}
 }

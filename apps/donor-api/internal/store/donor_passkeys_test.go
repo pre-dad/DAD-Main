@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/store/queries"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -108,7 +109,7 @@ func TestDonorPasskeySignsTheAppInWithARefreshToken(t *testing.T) {
 	if err := registerPasskey(t, s, session, key, ""); err != nil {
 		t.Fatal(err)
 	}
-	tokens, err := donorSignIn(t, s, key, app)
+	tokens, err := donorSignIn(t, s, key, appClient)
 	if err != nil || tokens.Refresh == "" || !signedInAs(t, pool, tokens.Access) {
 		t.Fatal("passkey did not sign the app in", tokens, err)
 	}
@@ -539,5 +540,33 @@ func TestDonorPasskeyDisabledDonorCannotRegister(t *testing.T) {
 	mustExec(t, pool, "UPDATE donors SET disabled=true WHERE id=$1", id)
 	if _, err := s.BeginRegister(ctx, session); !errors.Is(err, ErrDenied) {
 		t.Fatal("registration offered to a disabled donor", err)
+	}
+}
+
+func TestDuplicateCredentialInsertIsADenial(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	id, _ := donor(t, pool)
+	accountCleanup(t, pool, id)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_passkeys WHERE donor_id=$1", id) })
+	q := queries.New(pool)
+	insert := func() error {
+		row, err := NewID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return q.InsertDonorPasskey(ctx, queries.InsertDonorPasskeyParams{
+			ID: row, DonorID: id, CredentialID: []byte("duplicate-credential-" + id.String()), PublicKey: []byte("key"),
+			Transports: []string{}, Aaguid: make([]byte, 16), AttestationFormat: "none",
+		})
+	}
+	if err := duplicateCredential(insert()); err != nil {
+		t.Fatal(err)
+	}
+	if err := duplicateCredential(insert()); !errors.Is(err, ErrPasskeyDenied) {
+		t.Fatalf("second insert of one credential id: %v", err)
+	}
+	if err := duplicateCredential(context.Canceled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("other errors must pass through: %v", err)
 	}
 }

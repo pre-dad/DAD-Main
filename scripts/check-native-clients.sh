@@ -2,8 +2,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${TEST_DATABASE_URL:?set the migrated synthetic donor_go test database}"
-ios="${DAD_IOS_DIR:-../dad-ios}"
-android="${DAD_ANDROID_DIR:-../dad-android}"
+ios="${DAD_IOS_DIR:-../DAD-iOS}"
+android="${DAD_ANDROID_DIR:-../DAD-Android}"
+[ -d "$ios" ] || { echo "set DAD_IOS_DIR to the DAD-iOS checkout" >&2; exit 1; }
+[ -d "$android" ] || { echo "set DAD_ANDROID_DIR to the DAD-Android checkout" >&2; exit 1; }
 ios="$(cd "$ios" && pwd)"
 android="$(cd "$android" && pwd)"
 work="$(mktemp -d "${TMPDIR:-/tmp}/dad-native-acceptance.XXXXXX")"
@@ -29,7 +31,7 @@ if [ "$ready" != true ]; then echo "Native test API did not start" >&2; exit 1; 
 (
   cd "$ios"
   node scripts/prepare-client.mjs
-  DONOR_NATIVE_FIXTURE="$work/ios.json" swift test --scratch-path "${DAD_SWIFT_BUILD:-/tmp/dad-ios-native-acceptance}" \
+  DONOR_NATIVE_FIXTURE="$work/ios.json" swift test --scratch-path "${DAD_SWIFT_BUILD:-$work/swift-build}" \
     --force-resolved-versions -Xswiftc -DDAD_LIVE_API_TEST --filter LiveAPIIntegrationTests
 )
 (

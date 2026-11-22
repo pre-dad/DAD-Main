@@ -32,7 +32,7 @@ func TestCofundersKeepIndependentCommitmentsAndVerifiedSpend(t *testing.T) {
 		id     pgtype.UUID
 		amount int64
 	}{{a, 10000}, {b, 20000}} {
-		if err := partners.LinkInitiative(ctx, admin, p.id, id, p.amount); err != nil {
+		if err := partners.LinkInitiative(ctx, admin, p.id, id, &p.amount); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -144,6 +144,24 @@ func TestRecognitionRulesAndArtwork(t *testing.T) {
 	if err != nil || saved.Milestones[0] != 5 {
 		t.Fatalf("rules not saved: %+v %v", saved, err)
 	}
+	var audited int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM donor_staff_audit
+		WHERE action='content.recognition_rules_changed' AND details->>'milestones'='[5,30,100,365]'
+		AND jsonb_array_length((details->'badges')::jsonb)=$1
+		AND EXISTS (SELECT 1 FROM json_array_elements(details->'badges') b
+			WHERE b->>'code'='V' AND length(b->>'artwork_sha256')=64 AND b->>'signal'='volunteer')`, len(badges.Catalog)).
+		Scan(&audited); err != nil || audited != 1 {
+		t.Fatalf("badge rule changes not audited in full: %d %v", audited, err)
+	}
+	untunable := slices.Clone(saved.Badges)
+	for i := range untunable {
+		if untunable[i].Code == "V" {
+			untunable[i].Threshold = 2
+		}
+	}
+	if err := s.SetRules(ctx, admin, RecognitionRules{Badges: untunable, Milestones: saved.Milestones}); !errors.Is(err, ErrStaffInput) {
+		t.Fatalf("threshold accepted on a badge that is earned or not: %v", err)
+	}
 	for _, b := range saved.Badges {
 		ranked := b.Code == "NAT2" || b.Code == "CITY50"
 		if ranked != (b.MinPopulation == badges.MinRankPopulation) || (!ranked && b.MinPopulation != 1) {
@@ -208,6 +226,15 @@ func TestPasswordRequiresProofAndCurrentSecret(t *testing.T) {
 	}
 	if err := s.Set(ctx, tokens.Access, password, "new long replacement password"); err != nil {
 		t.Fatal(err)
+	}
+	var live int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_sessions WHERE donor_id=$1 AND revoked_at IS NULL AND token_hash=$2", id, HashToken(token)).Scan(&live); err != nil ||
+		live != 0 {
+		t.Fatalf("another session survived the password change: %d %v", live, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_sessions WHERE donor_id=$1 AND revoked_at IS NULL AND token_hash=$2", id, HashToken(tokens.Access)).Scan(&live); err != nil ||
+		live != 1 {
+		t.Fatalf("the changing session was revoked: %d %v", live, err)
 	}
 	if _, err := s.SignIn(ctx, email, password, Client{}); !errors.Is(err, ErrSignInCode) {
 		t.Fatalf("old password survived: %v", err)

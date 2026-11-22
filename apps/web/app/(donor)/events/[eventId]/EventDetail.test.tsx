@@ -103,3 +103,38 @@ it("waits for booking to open, except for a Team Captain's early window", async 
   expect(await screen.findByText(/As a Team Captain, you can reserve now/)).toBeVisible();
   expect(screen.getByRole("button", { name: "Reserve a spot" })).toBeEnabled();
 });
+
+it("recovers from a failed event read without repeating a reservation", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ detail: "Unavailable" }, { status: 503 }))
+    .mockResolvedValueOnce(Response.json(event));
+  vi.stubGlobal("fetch", fetch);
+  render(<EventDetail event="e-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Retry event" }));
+  expect(await screen.findByRole("button", { name: "Join the waitlist" })).toBeVisible();
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch.mock.calls.every(([, init]) => !init?.method)).toBe(true);
+});
+
+it.each([
+  ["RESERVED", "Cancel my spot", "Confirm cancellation", "Keep my spot"],
+  ["WAITLISTED", "Leave the waitlist", "Confirm leaving", "Stay on the waitlist"],
+])("asks before a %s donor gives up their place", async (status, trigger, confirmLabel, keepLabel) => {
+  const fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST") return Promise.resolve(Response.json({ status: "CANCELLED" }));
+    return Promise.resolve(Response.json({ ...event, reservation_status: status }));
+  });
+  vi.stubGlobal("fetch", fetch);
+  const cancelled = () => fetch.mock.calls.some(([u, i]) => String(u).endsWith("/cancel") && i?.method === "POST");
+  render(<EventDetail event="e-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: trigger }));
+  expect(screen.getByRole("button", { name: confirmLabel })).toHaveFocus();
+  expect(cancelled()).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: keepLabel }));
+  expect(screen.getByRole("button", { name: trigger })).toHaveFocus();
+  expect(cancelled()).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: trigger }));
+  fireEvent.click(screen.getByRole("button", { name: confirmLabel }));
+  await waitFor(() => expect(cancelled()).toBe(true));
+});

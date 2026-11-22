@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -421,5 +423,89 @@ SELECT $1,$2,$3::varchar,$4,CASE WHEN $5::timestamptz IS NULL THEN 'BROWSER' ELS
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_session_events WHERE donor_id=$1 AND session_id IS NULL", id).Scan(&kept); err != nil ||
 		kept != 1 {
 		t.Fatalf("session audit rows kept without their session = %d, want 1: %v", kept, err)
+	}
+}
+
+func TestTouchRetentionPurgesLapsedPartnerCredentials(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	partner := approvedPartner(t, pool, "Retention Partner", "RET-"+mustNewID(t).String()[:8], 0, 0)
+	user := testID(t)
+	mustExec(t, pool, `INSERT INTO donor_partner_users (id, partner_id, email, name, role, accepted_at, created_at)
+		VALUES ($1,$2,$3,'Admin','ADMIN',now(),now())`, user, partner, "retention-"+user.String()+"@x.test")
+	t.Cleanup(func() {
+		cleanExec(t, "DELETE FROM donor_partner_login_emails WHERE partner_user_id=$1", user)
+		cleanExec(t, "DELETE FROM donor_partner_sessions WHERE partner_user_id=$1", user)
+		cleanExec(t, "DELETE FROM donor_partner_users WHERE id=$1", user)
+	})
+	now := time.Now().UTC()
+	recent := now.Add(-time.Hour)
+	session := func(expires time.Time) pgtype.UUID {
+		id := testID(t)
+		mustExec(t, pool, `INSERT INTO donor_partner_sessions(id,partner_user_id,token_hash,expires_at) VALUES ($1,$2,$3,$4)`,
+			id, user, HashToken(id.String()), expires)
+		return id
+	}
+	oldSession, freshSession := session(now.Add(-sessionRetention-time.Hour)), session(recent)
+	email := func(completed *time.Time) pgtype.UUID {
+		id := testID(t)
+		mustExec(
+			t,
+			pool,
+			`INSERT INTO donor_partner_login_emails(id,partner_user_id,kind,available_at,completed_at) VALUES ($1,$2,'SIGN_IN',$3,$4)`,
+			id,
+			user,
+			now,
+			completed,
+		)
+		return id
+	}
+	oldEmail, freshEmail, openEmail := email(new(now.Add(-loginRetention-time.Hour))), email(&recent), email(nil)
+
+	retention := &TouchRetention{DB: as(t, dbroles.ProjectionWorker)}
+	if _, err := retention.PurgeNext(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]struct {
+		table string
+		id    pgtype.UUID
+		kept  bool
+	}{
+		"lapsed partner session":     {"donor_partner_sessions", oldSession, false},
+		"live partner session":       {"donor_partner_sessions", freshSession, true},
+		"old partner login email":    {"donor_partner_login_emails", oldEmail, false},
+		"fresh partner login email":  {"donor_partner_login_emails", freshEmail, true},
+		"unsent partner login email": {"donor_partner_login_emails", openEmail, true},
+	} {
+		var found bool
+		if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM "+want.table+" WHERE id=$1)", want.id).Scan(&found); err != nil {
+			t.Fatal(err)
+		}
+		if found != want.kept {
+			t.Errorf("%s present = %t, want %t", name, found, want.kept)
+		}
+	}
+}
+
+func TestPurgeStagesRunPastAFailingStage(t *testing.T) {
+	boom := errors.New("grant missing")
+	var ran []string
+	stage := func(name string, size int32, deleted int64, err error) purgeStage {
+		return purgeStage{size, func(batch int32) (int64, error) {
+			if batch != size {
+				t.Errorf("%s ran with batch %d, want its size %d", name, batch, size)
+			}
+			ran = append(ran, name)
+			return deleted, err
+		}}
+	}
+	full, err := runPurgeStages([]purgeStage{stage("a", 10, 0, boom), stage("b", 10, 3, nil), stage("c", 10, 0, nil)})
+	if full || !errors.Is(err, boom) || !slices.Equal(ran, []string{"a", "b", "c"}) {
+		t.Fatalf("full=%v err=%v ran=%v, want every stage run and the failure reported", full, err, ran)
+	}
+	ran = nil
+	full, err = runPurgeStages([]purgeStage{stage("a", 10, 0, boom), stage("b", 10, 10, nil), stage("c", 10, 0, nil)})
+	if !full || !errors.Is(err, boom) || !slices.Equal(ran, []string{"a", "b"}) {
+		t.Fatalf("full=%v err=%v ran=%v, want a full batch to end the run and keep the earlier failure", full, err, ran)
 	}
 }

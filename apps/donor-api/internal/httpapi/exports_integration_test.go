@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -137,9 +138,30 @@ func TestStaffExportsRunInTheBackgroundAndDownloadOnlyForTheirRequester(t *testi
 			t.Errorf("status for %s: %d, want %d", c.name, got, c.want)
 		}
 	}
+	if !abortsMidDownload(server.Handler, path+"/file", staffOrigin, admin) {
+		t.Error("a download that fails after it started was not aborted")
+	}
 	listed := call("GET", "/donor/staff/exports/jobs", "", admin)
 	var jobs store.ExportJobs
 	if err = json.Unmarshal(listed.Body.Bytes(), &jobs); err != nil || len(jobs.Jobs) != 1 || jobs.Jobs[0].ID != job.ID {
 		t.Fatalf("list: %d %s", listed.Code, listed.Body)
 	}
+}
+
+// brokenResponse accepts headers but fails every body write, like a client that
+// disconnects mid-download.
+type brokenResponse struct{ *httptest.ResponseRecorder }
+
+func (brokenResponse) Write([]byte) (int, error) { return 0, errors.New("client disconnected") }
+
+// abortsMidDownload reports whether serving the file to a disconnecting client
+// aborts the response instead of ending it as a complete, truncated download.
+func abortsMidDownload(handler http.Handler, path, origin, session string) (aborted bool) {
+	defer func() { aborted = recover() == http.ErrAbortHandler }()
+	r := httptest.NewRequest("GET", path, nil)
+	r.Header.Set("Origin", origin)
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	r.AddCookie(&http.Cookie{Name: "__Host-dad_staff_session", Value: session})
+	handler.ServeHTTP(brokenResponse{httptest.NewRecorder()}, r)
+	return false
 }

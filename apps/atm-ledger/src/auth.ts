@@ -1,5 +1,6 @@
 import {
 	createRemoteJWKSet,
+	errors,
 	type JWTPayload,
 	type JWTVerifyGetKey,
 	jwtVerify,
@@ -81,6 +82,16 @@ export function authorize(claims: JWTPayload, env: Trust): Principal {
 	};
 }
 
+// Key retrieval failures (timeout, bad HTTP status, network) are outages, not
+// evidence about the caller; every other failure rejects the credential.
+function unavailable(error: unknown) {
+	if (error instanceof LedgerError) return false;
+	if (error instanceof errors.JWKSTimeout) return true;
+	if (error instanceof errors.JOSEError)
+		return error.code === "ERR_JOSE_GENERIC";
+	return true;
+}
+
 export async function authenticate(
 	token: string,
 	env: Trust,
@@ -97,7 +108,17 @@ export async function authenticate(
 			clockTolerance: 10,
 		});
 		return authorize(payload, env);
-	} catch {
+	} catch (error) {
+		if (error instanceof LedgerError && error.status !== 403) throw error;
+		if (unavailable(error)) {
+			console.error(
+				JSON.stringify({
+					event: "ledger_identity_keys_unavailable",
+					type: error instanceof Error ? error.name : "Unknown",
+				}),
+			);
+			throw new LedgerError("Identity provider unavailable", 503);
+		}
 		throw new LedgerError("Identity is not authorized", 403);
 	}
 }

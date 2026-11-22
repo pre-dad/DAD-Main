@@ -63,6 +63,8 @@ func TestAnalyticsRecord(t *testing.T) {
 		{"oversize batch", "WEB", make([]Event, MaxAnalyticsBatch+1)},
 		{"missing time", "WEB", []Event{{Name: "app_opened"}}},
 		{"future time", "WEB", []Event{{Name: "app_opened", OccurredAt: now.Add(time.Hour)}}},
+		{"year one", "WEB", []Event{{Name: "app_opened", OccurredAt: time.Date(1, 1, 1, 0, 1, 0, 0, time.UTC)}}},
+		{"too old", "WEB", []Event{{Name: "app_opened", OccurredAt: now.Add(-maxEventAge - time.Hour)}}},
 		{"bad event id", "WEB", []Event{{ID: "nope", Name: "app_opened", OccurredAt: now}}},
 		{"bad journey id", "WEB", []Event{{JourneyID: "nope", Name: "app_opened", OccurredAt: now}}},
 		{"one bad in batch", "WEB", []Event{good, {Name: "nope", OccurredAt: now}}},
@@ -90,12 +92,16 @@ func TestAnalyticsBatchStoresEveryEventAndIgnoresDuplicates(t *testing.T) {
 	if err := svc.Record(ctx, "ANDROID", "", events); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := database(
-		t,
-	).Query(ctx, "SELECT id, source, journey_id, properties->>'source' FROM analytics_events WHERE id = ANY($1)", []pgtype.UUID{first, second})
+	pool := database(t)
+	rows, err := pool.Query(
+		ctx,
+		"SELECT id, source, journey_id, properties->>'source' FROM analytics_events WHERE id = ANY($1)",
+		[]pgtype.UUID{first, second},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 	type stored struct {
 		source, property string
 		journey          pgtype.UUID

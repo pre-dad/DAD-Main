@@ -21,7 +21,10 @@ administrator records payment received out of band.
 
 ## Local setup
 
-Requires Go 1.27.3, Node, npm, and Docker Compose, which runs PostgreSQL 16 on 127.0.0.1.
+Requires Go 1.27.4, Node, npm, and PostgreSQL 16 on 127.0.0.1. `go.mod` pins Go 1.27.4, so an
+older local Go downloads that toolchain and needs network access. `make db-up` runs PostgreSQL
+through the `docker compose` plugin; without it, point `.env` at any PostgreSQL 16 server and
+skip `make db-up`.
 The web app needs Node 22.13+ and the ATM ledger Worker needs Node 22.19+ (Node 24 serves
 both), so use 22.19+ or 24 if you work on both.
 Commands below run from the repository root. The local database uses port 55432.
@@ -43,7 +46,7 @@ Locally every process connects as the database owner, which `.env.example` allow
 `DONOR_ALLOW_OWNER_CONNECTION=true`; deployed processes each use their own login and refuse
 the owner ([database roles](docs/operations.md#database-roles)).
 
-Open http://localhost:3000. Without Stripe, SMTP, and encryption configuration, public
+Open http://localhost:3000. Without Stripe and email configuration, public
 pages and empty states work; giving and account email are unavailable. The staff back
 office runs only on its own host, `DONOR_STAFF_ORIGIN`: locally
 http://staff.localhost:3000/staff, which browsers resolve to this machine.
@@ -58,6 +61,14 @@ openssl rand -base64 32 | tr '+/' '-_'
 
 Each setting also accepts a comma-separated list, newest key first, which is how keys
 are rotated ([operations](docs/operations.md#encryption-keys)).
+
+Email settings are all or nothing. With none of `DONOR_SMTP_HOST`, `DONOR_SMTP_PORT`,
+`DONOR_SMTP_USERNAME`, `DONOR_SMTP_PASSWORD`, `DONOR_EMAIL_FROM`, `DONOR_SMTP_CA`, and
+`DONOR_EMAIL_ENCRYPTION_KEY` set, account email is off. If any is set, the API refuses to
+start with `invalid email configuration` unless `DONOR_SMTP_HOST`, a valid
+`DONOR_EMAIL_FROM` address, and `DONOR_EMAIL_ENCRYPTION_KEY` are all set. The port defaults
+to 587 (465 is rejected), and `DONOR_SMTP_USERNAME` and `DONOR_SMTP_PASSWORD` are set
+together or both blank. `DONOR_CONTENT_ENCRYPTION_KEY` is separate and does not enable email.
 
 Staff sign in with passkeys. With `DONOR_STAFF_ORIGIN` set, provision the first named
 administrator:
@@ -96,9 +107,14 @@ The push worker runs without provider keys, discarding app notifications it cann
 deliver; with APNs or FCM keys it sends real notifications to registered devices
 ([operations](docs/operations.md#app-notifications)).
 
+Email is sent only while the `login-email`, `email-changes`, and `messages` workers run.
 SMTP delivery requires STARTTLS and the configured encryption key. Workers send real
 email to the configured addresses, even while gifts are test payments. Local tests use
 injected transports. Never point synthetic test data at a real mail provider.
+
+For local development, `docker-compose.yml` includes a Mailpit capture inbox (web UI at
+http://127.0.0.1:8025) that keeps STARTTLS and certificate verification on. The certificate
+and `.env` steps are in [operations](docs/operations.md#capturing-mail-in-development).
 
 ## Checks
 
@@ -108,11 +124,17 @@ process's code as that process's [database role](docs/operations.md#database-rol
 privilege the process lacks fails a test. Tests must never run against the application
 database.
 
+PDF regression tests also require Poppler (`brew install poppler` on macOS or
+`apt-get install poppler-utils` on Debian/Ubuntu); CI installs it before the Go suite.
+The deployed API uses embedded, licensed fonts and pure-Go rendering; it does not
+require Poppler, a browser, Python, or network font downloads.
+
 ```sh
+docker rm -f dad-go-test-postgres 2>/dev/null
 docker run -d --name dad-go-test-postgres -p 127.0.0.1:55440:5432 \
   -e POSTGRES_USER=go_test -e POSTGRES_PASSWORD=go_test -e POSTGRES_DB=donor_go \
   postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
-# Wait for: docker exec dad-go-test-postgres pg_isready -U go_test -d donor_go
+until docker exec dad-go-test-postgres pg_isready -U go_test -d donor_go; do sleep 1; done
 export TEST_DATABASE_URL=postgresql://go_test:go_test@localhost:55440/donor_go
 (cd apps/donor-api && DONOR_GO_DATABASE_URL="$TEST_DATABASE_URL" go run ./cmd/migrate)
 make test
@@ -149,7 +171,8 @@ named `donor_go` and refuse the application database. Stop any running `make api
 well as `make web` before testing, so a test cannot reuse an application server.
 Use a synthetic application database and no live
 SMTP settings for those tests. `make lint` runs staticcheck, govulncheck for the API and its separate Go tooling module,
-`npm audit`, and shellcheck when installed. `make check-ingress` runs `nginx -t` on the production ingress
+`npm audit` (high and critical advisories fail it, except development-only ones listed with a reason and an
+expiry date in `scripts/npm-audit-exceptions.json`), and shellcheck when installed. `make check-ingress` runs `nginx -t` on the production ingress
 in both modes; `make smoke-ingress` checks its hosts, client addresses, body sizes, and
 rate limits in front of a stub web service; `make check-images` builds both production
 images, verifies the deployment commands are included, and serves the web image through nginx. CI runs all of these through the same
@@ -182,7 +205,12 @@ Capacity is measured against a seeded, disposable deployment: `make seed` fills 
 dedicated database with 50,000 synthetic donors — with their partners, employees, teams,
 initiatives, events and reservations — and writes a private fixture of session tokens,
 referral codes and event ids, and `make loadtest-seeded` runs a referral-spike burst and
-soak, an event-day burst, and a dashboard soak against an API serving it. See
+soak, an event-day burst, and a dashboard soak against an API serving it.
+`make seed` requires `SEED_DATABASE_URL` (a URL naming the host and database),
+`SEED_CONFIRM` (the database name, repeated), and `LOAD_FIXTURE` (a new file outside any
+repository for the fixture); `SEED_DONORS` defaults to 50,000. It refuses a database
+holding a donor it did not seed, so on a fresh database run `make seed` before
+`cmd/browserfixture`. See
 [operations](docs/operations.md#load-testing-with-representative-data)
 for the guard, the mix, budgets, and reading results. For a quick check of a few
 endpoints, `-url` reads a comma-separated list in equal measure:

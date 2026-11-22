@@ -21,22 +21,25 @@ export default function Content() {
     cause instanceof ApiError && cause.status === 403
       ? "Your staff role does not permit storing source documents."
       : failureMessage(cause, fallback);
-  async function upload(event: React.FormEvent) {
+  async function upload(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!source || busy) return;
+    const form = event.currentTarget;
+    setMessage("");
     if (source.size > 10 * 1024 * 1024) {
       setError("Source documents must be at most 10 MB.");
       return;
     }
     setBusy(true);
     setError("");
-    setMessage("");
     try {
       const result = await api<Schema<"StoredSource">>(
         `/donor/staff/content/sources?name=${encodeURIComponent(source.name)}`,
         { method: "POST", body: source },
       );
       setMessage(`Source stored: ${result.id}. Cite this ID as an initiative's board approval.`);
+      form.reset();
+      setSource(null);
       reload();
     } catch (cause) {
       setError(

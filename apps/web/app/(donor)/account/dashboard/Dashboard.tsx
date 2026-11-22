@@ -98,6 +98,9 @@ function StarIcon() {
     </svg>
   );
 }
+const milestoneCopy = (daysToNext: number, milestone: number) =>
+  `${daysToNext} ${daysToNext === 1 ? "day" : "days"} to your ${milestone}-day milestone.`;
+
 /** The single most useful next step, in priority order; the at-risk callout below carries the detail. */
 function nextStep(data: Schema<"DonorDashboard">): string {
   if (data.state !== "ready") return "";
@@ -106,7 +109,7 @@ function nextStep(data: Schema<"DonorDashboard">): string {
     return "Your first invite is one tap away.";
   const ladder = data.streak?.ladder;
   if (ladder?.next_milestone && ladder.days_to_next && ladder.days_to_next <= MILESTONE_NEAR_DAYS)
-    return `${ladder.days_to_next} ${ladder.days_to_next === 1 ? "day" : "days"} to your ${ladder.next_milestone}-day milestone.`;
+    return milestoneCopy(ladder.days_to_next, ladder.next_milestone);
   return "Here is what your giving has done so far.";
 }
 
@@ -130,7 +133,7 @@ export default function Dashboard() {
   // always today's New York date and never baked into cached HTML.
   const foundingLeft = data?.state === "ready" && !data.founding_donor ? foundingDaysLeft(new Date()) : null;
   return (
-    <Page wide eyebrow="Your impact" title="Welcome back.">
+    <Page wide eyebrow="Your impact" title={resource.state === "signedOut" ? "Your dashboard" : "Welcome back."}>
       {resource.state !== "signedOut" && (
         <div className="dashBand">
           {/* Reserved while loading so the band is the same height before and after the data arrives. */}
@@ -269,7 +272,7 @@ export default function Dashboard() {
                     <>
                       <p>
                         {data.streak.ladder.next_milestone && data.streak.ladder.days_to_next
-                          ? `${data.streak.ladder.days_to_next} days to your ${data.streak.ladder.next_milestone}-day milestone.`
+                          ? milestoneCopy(data.streak.ladder.days_to_next, data.streak.ladder.next_milestone)
                           : "Your giving streak keeps growing every day."}
                       </p>
                       <div

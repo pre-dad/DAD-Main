@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -156,7 +157,7 @@ func TestEndingASessionClearsItsPushToken(t *testing.T) {
 	accountCleanup(t, pool, id)
 	register := func(token string) Tokens {
 		t.Helper()
-		session := claimSession(t, pool, id, app)
+		session := claimSession(t, pool, id, appClient)
 		if _, err := service.RegisterDevice(ctx, session.Access, PushDevice{Platform: push.Android, Token: token}); err != nil {
 			t.Fatal(err)
 		}
@@ -268,11 +269,11 @@ func pushIntents(t *testing.T, db queries.DBTX, donor pgtype.UUID) []queries.Don
 	var out []queries.DonorPushNotification
 	for rows.Next() {
 		var n queries.DonorPushNotification
-		var context string
-		if err = rows.Scan(&n.ID, &n.Category, &n.DedupKey, &context, &n.ExpiresAt); err != nil {
+		var raw string
+		if err = rows.Scan(&n.ID, &n.Category, &n.DedupKey, &raw, &n.ExpiresAt); err != nil {
 			t.Fatal(err)
 		}
-		n.Context = []byte(context)
+		n.Context = []byte(raw)
 		out = append(out, n)
 	}
 	return out
@@ -328,8 +329,11 @@ func TestReferralConversionQueuesOneGenericPushWithTheGift(t *testing.T) {
 		!intents[0].ExpiresAt.Time.Equal(paid.Add(pushLifetime)) {
 		t.Fatalf("intents %+v, want one conversion notice", intents)
 	}
-	if !strings.Contains(string(intents[0].Context), `"kind" : "IRL"`) {
-		t.Fatalf("context %s lacks the channel", intents[0].Context)
+	var referral struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(intents[0].Context, &referral); err != nil || referral.Kind != "IRL" {
+		t.Fatalf("context %s lacks the IRL channel: %v", intents[0].Context, err)
 	}
 	note, err := pushContent(intents[0])
 	if err != nil || note.Body != "Someone you invited through an IRL Referral just made their first test gift." ||
@@ -537,7 +541,7 @@ func TestPushDeliveryReachesEachDeviceOnce(t *testing.T) {
 		t.Fatalf("notification %+v", note)
 	}
 	attempts, completed, _, lastError, sentTo := f.state(t)
-	if attempts != 1 || completed || lastError != "DeliveryError" || len(sentTo) != 1 || sentTo[0] != phone {
+	if attempts != 1 || completed || lastError != "DeliveryError:Unavailable" || len(sentTo) != 1 || sentTo[0] != phone {
 		t.Fatalf("after a partial failure: attempts=%d completed=%v error=%q sent=%v", attempts, completed, lastError, sentTo)
 	}
 	// The provider's Retry-After outlasts the two-minute backoff.
@@ -573,6 +577,67 @@ func TestUnregisteredTokenIsDroppedWithoutRetry(t *testing.T) {
 	}
 }
 
+func TestProviderFailureIsRecordedAsABoundedClass(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"timeout", context.DeadlineExceeded, "DeliveryError:Network"},
+		{"other", errors.New("apns: device 1234 exploded"), "DeliveryError:Provider"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPushFixture(t)
+			appDevice(t, f.pool, f.donor, push.IOS, iosToken, f.now.Add(time.Hour))
+			apns := &fakeProvider{result: func(push.Device) error { return tc.err }}
+			f.deliver(t, PushWorker{DB: as(t, dbroles.PushWorker), Providers: map[string]push.Provider{push.IOS: apns}}, f.now)
+			attempts, completed, _, lastError, _ := f.state(t)
+			if attempts != 1 || completed || lastError != tc.want {
+				t.Fatalf("attempts=%d completed=%v error=%q, want %q", attempts, completed, lastError, tc.want)
+			}
+		})
+	}
+}
+
+func TestPushSendHasADeadline(t *testing.T) {
+	f := newPushFixture(t)
+	appDevice(t, f.pool, f.donor, push.IOS, iosToken, f.now.Add(time.Hour))
+	var remaining time.Duration
+	apns := &deadlineProvider{seen: func(d time.Duration) { remaining = d }}
+	f.deliver(t, PushWorker{DB: as(t, dbroles.PushWorker), Providers: map[string]push.Provider{push.IOS: apns}}, f.now)
+	if remaining <= 0 || remaining > pushSendBudget || pushSendBudget >= deliveryLease {
+		t.Fatalf("send deadline %v, want within %v and under the %v lease", remaining, pushSendBudget, deliveryLease)
+	}
+}
+
+type deadlineProvider struct{ seen func(time.Duration) }
+
+func (p *deadlineProvider) Send(ctx context.Context, _ push.Device, _ push.Notification) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		p.seen(time.Until(deadline))
+	}
+	return nil
+}
+
+func TestMalformedMilestonePayloadFailsAsInvalid(t *testing.T) {
+	f := newPushFixture(t)
+	appDevice(t, f.pool, f.donor, push.IOS, iosToken, f.now.Add(time.Hour))
+	mustExec(t, f.pool, `UPDATE donor_push_notifications SET context='{"days":"thirty"}' WHERE id=$1`, f.intent)
+	apns := &fakeProvider{}
+	f.deliver(t, PushWorker{DB: as(t, dbroles.PushWorker), Providers: map[string]push.Provider{push.IOS: apns}}, f.now)
+	attempts, completed, reason, lastError, _ := f.state(t)
+	if attempts != 1 || completed || reason != "" || lastError != "InvalidNotification" || len(apns.sent) != 0 {
+		t.Fatalf(
+			"attempts=%d completed=%v reason=%q error=%q sends=%d, want a failed attempt",
+			attempts,
+			completed,
+			reason,
+			lastError,
+			len(apns.sent),
+		)
+	}
+}
+
 func TestRejectedConfigurationParksTheNotification(t *testing.T) {
 	f := newPushFixture(t)
 	appDevice(t, f.pool, f.donor, push.IOS, iosToken, f.now.Add(time.Hour))
@@ -580,7 +645,7 @@ func TestRejectedConfigurationParksTheNotification(t *testing.T) {
 	w := PushWorker{DB: as(t, dbroles.PushWorker), Providers: map[string]push.Provider{push.IOS: apns}}
 	f.deliver(t, w, f.now)
 	attempts, completed, _, lastError, _ := f.state(t)
-	if attempts != maxDeliveryAttempts || completed || lastError != "ProviderRejected" {
+	if attempts != MaxDeliveryAttempts || completed || lastError != "ProviderRejected" {
 		t.Fatalf("attempts=%d completed=%v error=%q, want parked", attempts, completed, lastError)
 	}
 	if f.deliver(t, w, f.now.Add(time.Hour)) || len(apns.sent) != 1 {

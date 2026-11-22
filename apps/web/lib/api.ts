@@ -62,6 +62,13 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return result;
 }
 
+/** Browser-side call for a file, such as a PDF; a refusal throws the same ApiError as api(). */
+export async function apiFile(path: string, init: RequestInit = {}): Promise<Blob> {
+  const response = await fetch(`/api${path}`, { ...init, credentials: "include" });
+  if (!response.ok) throw await toError(response);
+  return response.blob();
+}
+
 type Failure =
   | "signedOut"
   | "forbidden"
@@ -86,6 +93,9 @@ export function classifyFailure(cause: unknown): Failure {
   return cause instanceof SyntaxError ? "unavailable" : "offline";
 }
 
+/** Rows per offset-paged staff list; the API serves pages of this size. */
+export const PAGE_SIZE = 50;
+
 export const OFFLINE_MESSAGE = "You appear to be offline. Check your connection, then retry.";
 export const RATE_LIMITED_MESSAGE = "Too many requests from this connection. Wait a minute, then retry.";
 export const UNCONFIGURED_MESSAGE = "This isn’t available in this environment yet. Nothing was changed.";
@@ -94,7 +104,10 @@ export const UNCONFIGURED_MESSAGE = "This isn’t available in this environment 
 export function failureMessage(cause: unknown, fallback: string): string {
   const failure = classifyFailure(cause);
   if (failure === "offline") return OFFLINE_MESSAGE;
-  if (failure === "rateLimited") return RATE_LIMITED_MESSAGE;
+  if (failure === "rateLimited")
+    return cause instanceof ApiError && cause.code === "PARTNER_REPORT_DAILY_LIMIT"
+      ? cause.message
+      : RATE_LIMITED_MESSAGE;
   if (failure === "unconfigured") return UNCONFIGURED_MESSAGE;
   return cause instanceof ApiError && failure !== "unavailable" ? cause.message : fallback;
 }

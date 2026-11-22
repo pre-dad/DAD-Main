@@ -34,7 +34,7 @@ it("fails closed on an account lookup outage", async () => {
     vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Temporary failure" }), { status: 500 })),
   );
   render(<VerifiedDonation />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Please try again");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Please try again"));
   expect(screen.queryByRole("button", { name: /^Continue to secure checkout/ })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
 });

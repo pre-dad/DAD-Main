@@ -28,12 +28,15 @@ export function formatDollars(minor: number, currency = "USD"): string {
 /** A gift is whole dollars a day, billed monthly as the daily amount × 30, up to $30 a day (G-1, G-2). */
 export const BILLING_DAYS = 30;
 export const MAX_DAILY_DOLLARS = 30;
-const DAY_MINOR = 100 * BILLING_DAYS;
+const MONTHLY_MINOR_PER_DAILY_DOLLAR = 100 * BILLING_DAYS;
 
 /** Whether a monthly amount is a gift a donor can choose today. */
 export function isGiftAmount(minor: number): boolean {
   return (
-    Number.isInteger(minor) && minor >= DAY_MINOR && minor <= MAX_DAILY_DOLLARS * DAY_MINOR && minor % DAY_MINOR === 0
+    Number.isInteger(minor) &&
+    minor >= MONTHLY_MINOR_PER_DAILY_DOLLAR &&
+    minor <= MAX_DAILY_DOLLARS * MONTHLY_MINOR_PER_DAILY_DOLLAR &&
+    minor % MONTHLY_MINOR_PER_DAILY_DOLLAR === 0
   );
 }
 
@@ -41,7 +44,7 @@ export function isGiftAmount(minor: number): boolean {
 export function dailyGiftMinor(input: string): number | null {
   const match = /^\$?(\d{1,2})$/.exec(input.trim());
   if (!match) return null;
-  const minor = Number(match[1]) * DAY_MINOR;
+  const minor = Number(match[1]) * MONTHLY_MINOR_PER_DAILY_DOLLAR;
   return isGiftAmount(minor) ? minor : null;
 }
 

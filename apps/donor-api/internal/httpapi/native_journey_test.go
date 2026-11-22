@@ -44,16 +44,7 @@ func TestAppSessionLifecycle(t *testing.T) {
 	if _, err = pool.Exec(ctx, "INSERT INTO donors(id,email) VALUES($1,$2)", id, email); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		for _, table := range []string{"donor_preference_events", "donor_preferences", "donor_metric_projections", "donor_session_events", "donor_sessions", "donor_login_links", "donor_device_marks"} {
-			if _, err := pool.Exec(ctx, "DELETE FROM "+table+" WHERE donor_id=$1", id); err != nil {
-				t.Error(err)
-			}
-		}
-		if _, err := pool.Exec(ctx, "DELETE FROM donors WHERE id=$1", id); err != nil {
-			t.Error(err)
-		}
-	})
+	t.Cleanup(func() { deleteDonorRows(t, pool, id) })
 
 	const origin = "https://donor.example.org"
 	api := dbrolestest.Open(t, dbroles.API)

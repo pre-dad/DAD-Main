@@ -3,15 +3,18 @@
 -- is not due again until lease_until, so a crashed worker's event is retried
 -- after the lease expires. The returned attempts and available_at identify the
 -- attempt in the statements below.
-UPDATE donor_stripe_events e SET attempts = e.attempts + 1, available_at = sqlc.arg(lease_until)::timestamptz
+WITH clock AS MATERIALIZED (SELECT clock_timestamp() AS now)
+UPDATE donor_stripe_events e SET attempts = e.attempts + 1,
+    available_at = clock.now + sqlc.arg(lease_seconds)::integer * interval '1 second'
+FROM clock
 WHERE e.id = (
     SELECT due.id FROM donor_stripe_events due
-    WHERE due.processed_at IS NULL AND due.attempts < 10 AND due.available_at <= sqlc.arg(as_of)::timestamptz
+    WHERE due.processed_at IS NULL AND due.attempts < 10 AND due.available_at <= clock.now
     ORDER BY due.available_at, due.id
     FOR UPDATE SKIP LOCKED
     LIMIT 1
 )
-RETURNING *;
+RETURNING e.*;
 
 -- name: LockClaimedStripeEvent :one
 -- Fails with no rows when the attempt no longer owns the event: another worker
@@ -92,11 +95,11 @@ UPDATE donor_gifts SET stripe_payment_intent_id=$2,period_id=$3 WHERE id=$1;
 
 -- name: InvoiceAmountChange :one
 SELECT amount_minor FROM donor_amount_changes WHERE checkout_id=$1 AND confirmed_at IS NOT NULL
-AND effective_at<=$2 ORDER BY effective_at DESC,created_at DESC LIMIT 1;
+AND effective_at<=$2 ORDER BY effective_at DESC,created_at DESC,id DESC LIMIT 1;
 
 -- name: PendingAmountChange :one
 SELECT (confirmed_at IS NULL)::boolean AS pending FROM donor_amount_changes WHERE checkout_id=$1
-ORDER BY created_at DESC LIMIT 1;
+ORDER BY created_at DESC,id DESC LIMIT 1;
 
 -- name: GiftByPayment :one
 SELECT * FROM donor_gifts WHERE stripe_payment_intent_id=$1 FOR UPDATE;
@@ -119,7 +122,7 @@ INSERT INTO donor_refund_observations (id,refund_id,source_event_id,source_actio
 VALUES ($1,$2,$3,$4,$5,$6);
 
 -- name: LatestAmountChange :one
-SELECT * FROM donor_amount_changes WHERE checkout_id=$1 ORDER BY created_at DESC LIMIT 1;
+SELECT * FROM donor_amount_changes WHERE checkout_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1;
 
 -- name: ConfirmAmountChange :exec
 UPDATE donor_amount_changes SET confirmed_at=COALESCE(confirmed_at,$2) WHERE id=$1;

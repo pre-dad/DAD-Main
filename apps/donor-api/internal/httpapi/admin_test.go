@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -106,10 +107,8 @@ func TestStaffActionHistoryIsPaged(t *testing.T) {
 	if len(stub.cursors) != 2 || stub.cursors[0] != "" || stub.cursors[1] != "next-position" {
 		t.Fatalf("cursors passed to store: %v", stub.cursors)
 	}
-	for _, query := range []string{"?cursor=" + strings.Repeat("c", maxCursorLength+1)} {
-		if response := get(query); response.Code != 422 {
-			t.Fatalf("%s: got %d", query, response.Code)
-		}
+	if response := get("?cursor=" + strings.Repeat("c", maxCursorLength+1)); response.Code != 422 {
+		t.Fatalf("oversized cursor: got %d", response.Code)
 	}
 	if len(stub.cursors) != 2 {
 		t.Fatal("oversized cursor reached the store")
@@ -203,5 +202,61 @@ func TestStaffQueuesForwardFiltersAndBoundTheCursor(t *testing.T) {
 	}
 	if response := get("/donor/staff/deletions", "other"); response.Code != 403 {
 		t.Fatalf("store refusal not mapped to 403: %d", response.Code)
+	}
+}
+
+type deadlineStub struct {
+	AdminSource
+	remaining time.Duration
+}
+
+func (s *deadlineStub) note(ctx context.Context) {
+	deadline, _ := ctx.Deadline()
+	s.remaining = time.Until(deadline)
+}
+
+func (s *deadlineStub) ResetStreak(ctx context.Context, _ string, _ pgtype.UUID, _ string) error {
+	s.note(ctx)
+	return nil
+}
+
+func (s *deadlineStub) RecomputeRecognition(ctx context.Context, _ string, _ pgtype.UUID, _ string) error {
+	s.note(ctx)
+	return nil
+}
+
+func (s *deadlineStub) RequestClaim(ctx context.Context, _ string, _ pgtype.UUID) error {
+	s.note(ctx)
+	return nil
+}
+
+func (s *deadlineStub) ResendMessage(ctx context.Context, _ string, _ pgtype.UUID, _ pgtype.UUID) (store.QueuedMessage, error) {
+	s.note(ctx)
+	return store.QueuedMessage{}, nil
+}
+
+func TestStaffWritesGetTheWriteTimeout(t *testing.T) {
+	stub := &deadlineStub{}
+	server := NewServer("", Services{Origin: testPublicOrigin, StaffOrigin: testStaffOrigin, Admin: stub})
+	for _, tc := range []struct{ path, body string }{
+		{"/donor/staff/donors/" + testID + "/recognition/reset", `{"reason":"duplicate"}`},
+		{"/donor/staff/donors/" + testID + "/recognition/recompute", `{"reason":"duplicate"}`},
+		{"/donor/staff/donors/" + testID + "/claim-email", ""},
+		{"/donor/staff/messages/" + testID + "/resend", ""},
+	} {
+		stub.remaining = 0
+		r := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
+		r.Header.Set("Origin", testStaffOrigin)
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Idempotency-Key", "6f1d9c1e-6f4e-4c3e-9a51-6f1d9c1e2a3b")
+		r.AddCookie(&http.Cookie{Name: staffCookie, Value: "staff-session"})
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, r)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", tc.path, response.Code, response.Body)
+		}
+		if stub.remaining <= readTimeout || stub.remaining > staffTimeout {
+			t.Errorf("%s ran with %s left; want the %s staff write timeout", tc.path, stub.remaining, staffTimeout)
+		}
 	}
 }

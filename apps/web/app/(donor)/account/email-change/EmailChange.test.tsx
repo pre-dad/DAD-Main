@@ -41,3 +41,13 @@ it("retains the proof after a failed request so the donor can retry", async () =
   expect(fetch).toHaveBeenCalledTimes(2);
   expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ token: "retry-proof" });
 });
+
+it("treats an unrecognised stage as a received confirmation", async () => {
+  window.history.replaceState(null, "", "/account/email-change#token=private-proof");
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ stage: "LATER" }), { status: 200 })));
+  render(<EmailChangePage />);
+  fireEvent.click(screen.getByRole("button", { name: "Confirm this address" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Your confirmation was received."));
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  expect(screen.queryByText("Open the confirmation link from your email.")).not.toBeInTheDocument();
+});

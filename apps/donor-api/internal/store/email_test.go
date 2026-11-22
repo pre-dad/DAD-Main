@@ -15,7 +15,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-var emailTestKeys, _ = credentials.ParseKeyring("MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+var emailTestKeys = func() credentials.Keyring {
+	keys, err := credentials.ParseKeyring("MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+	if err != nil {
+		panic(err)
+	}
+	return keys
+}()
 
 type recordingMail struct {
 	mu       sync.Mutex
@@ -180,11 +186,7 @@ func TestLoginEmailSuppressesDisabledExpiredAndParksFailures(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "expired":
-				if _, _, err := w.prepare(ctx, now.Add(-16*time.Minute)); err != nil {
-					t.Fatal(err)
-				}
-				// Preparation selects only available work, so explicitly prepare at queue time
-				// and advance beyond the original lifetime without changing its token.
+				// Prepare at queue time, then advance beyond the link's lifetime.
 				if _, _, err := w.prepare(ctx, now); err != nil {
 					t.Fatal(err)
 				}
@@ -197,6 +199,11 @@ func TestLoginEmailSuppressesDisabledExpiredAndParksFailures(t *testing.T) {
 			if mode == "bad key" {
 				if _, err := w.DeliverNext(ctx, now); err == nil {
 					t.Fatal("bad key accepted")
+				}
+				var attempts int
+				if err := database(t).QueryRow(ctx, "SELECT attempts FROM donor_login_emails WHERE donor_id=$1", id).Scan(&attempts); err != nil ||
+					attempts != 0 {
+					t.Fatalf("a misconfigured worker spent %d attempts, err %v", attempts, err)
 				}
 				return
 			}

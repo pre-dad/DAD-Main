@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"dad/donor-api/internal/credentials"
@@ -102,7 +103,10 @@ func (w PartnerLoginEmailWorker) claim(ctx context.Context, site publicSite, now
 	worked := false
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		job, err := q.NextPartnerLoginEmail(ctx, timestamp(now))
+		job, err := q.NextPartnerLoginEmail(
+			ctx,
+			queries.NextPartnerLoginEmailParams{AvailableAt: timestamp(now), MaxAttempts: MaxDeliveryAttempts},
+		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -117,7 +121,8 @@ func (w PartnerLoginEmailWorker) claim(ctx context.Context, site publicSite, now
 		if err != nil {
 			return err
 		}
-		if user.Disabled || !user.ApprovedAt.Valid || (job.ExpiresAt.Valid && !job.ExpiresAt.Time.After(now)) {
+		if user.Disabled || !user.ApprovedAt.Valid || (job.Kind == partnerLinkSignIn && !user.AcceptedAt.Valid) ||
+			(job.ExpiresAt.Valid && !job.ExpiresAt.Time.After(now)) {
 			return complete()
 		}
 		var token string
@@ -146,7 +151,7 @@ func (w PartnerLoginEmailWorker) claim(ctx context.Context, site publicSite, now
 				if errors.Is(err, credentials.ErrInvalid) {
 					category = "InvalidToken"
 				}
-				return q.FailPartnerLoginEmail(ctx, queries.FailPartnerLoginEmailParams{
+				return q.FailUnreadablePartnerLoginEmail(ctx, queries.FailUnreadablePartnerLoginEmailParams{
 					ID: job.ID, LastError: text(category), AvailableAt: timestamp(now.Add(time.Minute)),
 				})
 			}
@@ -174,15 +179,24 @@ func (w PartnerLoginEmailWorker) claim(ctx context.Context, site publicSite, now
 	return id, message, worked, nil
 }
 
+func partnerLinkLifetimeText(kind string) string {
+	d := partnerLinkLifetime(kind)
+	if d%(24*time.Hour) == 0 {
+		return fmt.Sprintf("%d days", d/(24*time.Hour))
+	}
+	return fmt.Sprintf("%d minutes", d/time.Minute)
+}
+
 func partnerLoginEmail(kind string, user queries.LockPartnerLoginRecipientRow, link string) (string, string) {
 	org := user.Organization
+	lifetime := "This single-use link expires in " + partnerLinkLifetimeText(kind) + ".\n"
 	const unexpected = "If you were not expecting this email, you can ignore it.\n"
 	switch kind {
 	case partnerLinkApproved:
 		return "Your DAD partnership is approved",
 			org + " has been approved as a DAD partner, and you are its partner administrator.\n\n" +
 				"Sign in to your partner portal to see your verified dashboard and invite your colleagues:\n" + link + "\n\n" +
-				"This single-use link expires in 7 days.\n" + unexpected
+				lifetime + unexpected
 	case partnerLinkInvited:
 		role := "viewer"
 		if user.Role == "ADMIN" {
@@ -191,11 +205,32 @@ func partnerLoginEmail(kind string, user queries.LockPartnerLoginRecipientRow, l
 		return "You're invited to " + org + "'s DAD partner portal",
 			"You have been invited to " + org + "'s DAD partner portal as a " + role + ".\n\n" +
 				"Accept your invitation and sign in:\n" + link + "\n\n" +
-				"This single-use link expires in 7 days.\n" + unexpected
+				lifetime + unexpected
 	default:
 		return "Sign in to the DAD partner portal",
 			"Use this link to sign in to " + org + "'s DAD partner portal:\n" + link + "\n\n" +
-				"This single-use link expires in 15 minutes.\n" +
+				lifetime +
 				"If you did not request it, ignore this email. No access is granted until you confirm on the page.\n"
 	}
+}
+
+// partnerReinvite replaces the invitation of a user who has not accepted yet:
+// it ends their live link and queued emails and queues a fresh invitation,
+// which mints a new link on delivery. Unknown, removed and already-accepted
+// users, and users of another organization, are not found.
+func partnerReinvite(ctx context.Context, q *queries.Queries, partnerID, userID pgtype.UUID, now time.Time) error {
+	if _, err := q.RevokePendingPartnerInvite(ctx, queries.RevokePendingPartnerInviteParams{PartnerID: partnerID, ID: userID}); err != nil {
+		return err
+	}
+	recent, err := q.RecentPartnerInvites(ctx, queries.RecentPartnerInvitesParams{PartnerUserID: userID, AsOf: timestamp(now)})
+	if err != nil {
+		return err
+	}
+	if recent.LastMinute >= 1 || recent.LastHour >= partnerReinvitesPerHour {
+		return ErrPartnerInviteRate
+	}
+	if err = q.CancelPartnerLoginEmails(ctx, queries.CancelPartnerLoginEmailsParams{PartnerUserID: userID, CompletedAt: timestamp(now)}); err != nil {
+		return err
+	}
+	return queuePartnerLogin(ctx, q, userID, partnerLinkInvited, now)
 }

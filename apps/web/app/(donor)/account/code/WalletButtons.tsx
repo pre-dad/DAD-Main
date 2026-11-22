@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
-import { api, type ResponseBody } from "@/lib/api";
+import { ApiError, api, apiFile, failureMessage, type ResponseBody } from "@/lib/api";
 import { useApiResource } from "@/lib/useApiResource";
 
 export default function WalletButtons() {
@@ -28,10 +28,9 @@ export default function WalletButtons() {
           throw new Error("Invalid Wallet link");
         setGoogleURL(result.url);
       } else {
-        const response = await fetch("/api/donor/me/wallet/apple", { method: "POST", credentials: "include" });
-        if (!response.ok || response.headers.get("content-type") !== "application/vnd.apple.pkpass")
-          throw new Error("Pass unavailable");
-        const url = URL.createObjectURL(await response.blob());
+        const pass = await apiFile("/donor/me/wallet/apple", { method: "POST" });
+        if (pass.type !== "application/vnd.apple.pkpass") throw new Error("Pass unavailable");
+        const url = URL.createObjectURL(pass);
         const link = document.createElement("a");
         link.href = url;
         link.download = "dad-referral.pkpass";
@@ -40,8 +39,10 @@ export default function WalletButtons() {
         link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 60_000);
       }
-    } catch {
-      setError("The Wallet pass could not be prepared. Please retry. Your on-screen code still works.");
+    } catch (cause) {
+      const unprepared = "The Wallet pass could not be prepared. Please retry. Your on-screen code still works.";
+      // A pass or link that arrived malformed is ours to explain; a refusal carries the API's reason.
+      setError(cause instanceof ApiError ? failureMessage(cause, unprepared) : unprepared);
     } finally {
       setBusy(false);
     }

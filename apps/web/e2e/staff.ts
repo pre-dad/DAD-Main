@@ -34,9 +34,10 @@ const staffCommand = (args: string[]) =>
  * administrator, and later runs use break-glass recovery, which replaces earlier passkeys.
  */
 export async function administratorInvitation(email: string): Promise<string> {
-  const { stdout } = await staffCommand(["--email", email, "--name", "E2E Administrator"]).catch(() =>
-    staffCommand(["--recover", "--email", email]),
-  );
+  const { stdout } = await staffCommand(["--email", email, "--name", "E2E Administrator"]).catch((error) => {
+    if (!String(error.stderr).includes("already exists")) throw error;
+    return staffCommand(["--recover", "--email", email]);
+  });
   const link = /https?:\/\/\S+\/staff\/activate#token=\S+/.exec(stdout)?.[0];
   if (!link) throw new Error("The staff command printed no invitation");
   return link;

@@ -212,7 +212,6 @@ func TestNativeRecurringCheckoutRefusals(t *testing.T) {
 			r.Header.Del("Authorization")
 			r.AddCookie(&http.Cookie{Name: donorCookie, Value: "verified-donor-session"})
 			r.Header.Set("Origin", "http://localhost:3000")
-			r.AddCookie(&http.Cookie{Name: donorCookie, Value: appSession})
 		}, `{"amount_minor":3000}`, nil, 403},
 		{"gift already active", nil, `{"amount_minor":3000}`, payments.ErrCheckoutConflict, 409},
 		{"session ended", nil, `{"amount_minor":3000}`, store.ErrDenied, 401},

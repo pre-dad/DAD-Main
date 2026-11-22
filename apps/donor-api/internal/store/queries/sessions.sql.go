@@ -12,7 +12,7 @@ import (
 )
 
 const authenticatedDonor = `-- name: AuthenticatedDonor :one
-SELECT d.email, d.claimed_at, d.disabled, d.public_name, d.referral_code, d.id, d.created_at, d.account_role, d.zip, d.city, d.timezone, d.phone, d.company_code, d.full_name, s.id AS session_id, s.last_used_at FROM donors d JOIN donor_sessions s ON s.donor_id = d.id
+SELECT d.email, d.claimed_at, d.disabled, d.public_name, d.referral_code, d.id, d.created_at, d.account_role, d.zip, d.city, d.timezone, d.phone, d.company_code, d.full_name, d.timezone_override, s.id AS session_id, s.last_used_at FROM donors d JOIN donor_sessions s ON s.donor_id = d.id
 WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2
 AND d.disabled = false AND d.claimed_at IS NOT NULL
 `
@@ -46,6 +46,7 @@ func (q *Queries) AuthenticatedDonor(ctx context.Context, arg AuthenticatedDonor
 		&i.Donor.Phone,
 		&i.Donor.CompanyCode,
 		&i.Donor.FullName,
+		&i.Donor.TimezoneOverride,
 		&i.SessionID,
 		&i.LastUsedAt,
 	)

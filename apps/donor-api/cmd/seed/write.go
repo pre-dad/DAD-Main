@@ -29,7 +29,7 @@ import (
 // they are written, so no table is held in memory.
 type table struct {
 	name, columns string
-	rows          func(emit func(...any))
+	rows          func(emit func(...any) bool)
 }
 
 func timeOrNull(t time.Time) pgtype.Timestamptz {
@@ -107,9 +107,9 @@ func (p *population) refunds(yield func(*gift) bool) {
 // unique hash.
 func (p *population) tables() []table {
 	return []table{
-		{"donors", "id email claimed_at public_name referral_code city zip timezone created_at", func(emit func(...any)) {
+		{"donors", "id email claimed_at public_name referral_code city zip timezone created_at", func(emit func(...any) bool) {
 			for _, d := range p.donors {
-				emit(
+				if !emit(
 					d.id,
 					d.email,
 					timeOrNull(d.claimedAt),
@@ -119,53 +119,73 @@ func (p *population) tables() []table {
 					textOrNull(d.zip),
 					textOrNull(d.timezone),
 					d.createdAt,
-				)
+				) {
+					return
+				}
 			}
 		}},
-		{"donor_preferences", "id donor_id version referral_emails marketing_emails created_at", func(emit func(...any)) {
+		{"donor_preferences", "id donor_id version referral_emails marketing_emails created_at", func(emit func(...any) bool) {
 			for _, d := range p.donors {
 				if d.preference {
 					referral, marketing := d.emails()
-					emit(derived(d.id, 1), d.id, int32(1), referral, marketing, d.claimedAt)
+					if !emit(derived(d.id, 1), d.id, int32(1), referral, marketing, d.claimedAt) {
+						return
+					}
 				}
 			}
 		}},
 		{
 			"donor_preference_events",
 			"id donor_id version referral_emails marketing_emails consent_version source created_at",
-			func(emit func(...any)) {
+			func(emit func(...any) bool) {
 				for _, d := range p.donors {
 					if d.preference {
 						referral, marketing := d.emails()
-						emit(derived(d.id, 2), d.id, int32(1), referral, marketing, "r1-notifications-v1", "account", d.claimedAt)
+						if !emit(derived(d.id, 2), d.id, int32(1), referral, marketing, "r1-notifications-v1", "account", d.claimedAt) {
+							return
+						}
 					}
 				}
 			},
 		},
-		{"donor_referral_touches", "id token_hash referrer_id kind touched_at expires_at created_at", func(emit func(...any)) {
+		{"donor_referral_touches", "id token_hash referrer_id kind touched_at expires_at created_at", func(emit func(...any) bool) {
 			for _, t := range p.touches {
-				emit(t.id, t.tokenHash, t.referrer.id, t.kind, t.at, t.at.Add(referralWindow), t.at)
+				if !emit(t.id, t.tokenHash, t.referrer.id, t.kind, t.at, t.at.Add(referralWindow), t.at) {
+					return
+				}
 			}
 		}},
 		{
 			"donor_checkouts",
 			"id donor_id amount_minor currency frequency referrer_id referral_kind referral_expires_at created_at",
-			func(emit func(...any)) {
+			func(emit func(...any) bool) {
 				for c := range p.checkouts {
 					var expires pgtype.Timestamptz
 					if c.referrer != nil {
 						expires = timeOrNull(c.expiresAt)
 					}
-					emit(c.id, c.donor.id, c.amount, "USD", c.frequency, donorID(c.referrer), textOrNull(c.kind), expires, c.createdAt)
+					if !emit(
+						c.id,
+						c.donor.id,
+						c.amount,
+						"USD",
+						c.frequency,
+						donorID(c.referrer),
+						textOrNull(c.kind),
+						expires,
+						c.createdAt,
+					) {
+						return
+					}
 				}
 			},
 		},
 		{
 			"donor_stripe_checkouts",
 			"id checkout_id request_hash request_params stripe_session_id stripe_subscription_id status created_at",
-			func(emit func(...any)) {
+			func(emit func(...any) bool) {
 				for c := range p.checkouts {
-					emit(
+					if !emit(
 						c.attempt,
 						c.id,
 						hex.EncodeToString(c.attempt.Bytes[:]),
@@ -174,52 +194,84 @@ func (p *population) tables() []table {
 						textOrNull(c.subscription),
 						c.status,
 						c.createdAt,
-					)
+					) {
+						return
+					}
 				}
 			},
 		},
-		{"donor_recurring_reservations", "id donor_id attempt_id created_at", func(emit func(...any)) {
+		{"donor_recurring_reservations", "id donor_id attempt_id created_at", func(emit func(...any) bool) {
 			for c := range p.checkouts {
 				if c.frequency == "MONTHLY" && c.status != "EXPIRED" && c.status != "CANCELLED" {
-					emit(derived(c.attempt, 1), c.donor.id, c.attempt, c.createdAt)
+					if !emit(derived(c.attempt, 1), c.donor.id, c.attempt, c.createdAt) {
+						return
+					}
 				}
 			}
 		}},
 		{
 			"donor_subscriptions",
 			"id attempt_id donor_id status period_end stops_at billing_anchor observed_at created_at",
-			func(emit func(...any)) {
+			func(emit func(...any) bool) {
 				for c := range p.checkouts {
 					if s := c.sub; s != nil {
-						emit(s.id, c.attempt, c.donor.id, s.status, s.periodEnd, timeOrNull(s.stopsAt), s.anchor, s.observed, c.createdAt)
+						if !emit(
+							s.id,
+							c.attempt,
+							c.donor.id,
+							s.status,
+							s.periodEnd,
+							timeOrNull(s.stopsAt),
+							s.anchor,
+							s.observed,
+							c.createdAt,
+						) {
+							return
+						}
 					}
 				}
 			},
 		},
-		{"donor_cancellations", "id donor_id attempt_id confirmed_period_end completed_at created_at", func(emit func(...any)) {
+		{"donor_cancellations", "id donor_id attempt_id confirmed_period_end completed_at created_at", func(emit func(...any) bool) {
 			for c := range p.checkouts {
 				if x := c.cancellation; x != nil {
-					emit(x.id, c.donor.id, c.attempt, x.periodEnd, x.completed, x.created)
+					if !emit(x.id, c.donor.id, c.attempt, x.periodEnd, x.completed, x.created) {
+						return
+					}
 				}
 			}
 		}},
 		{
 			"donor_stripe_events",
 			"id stripe_event_id event_type occurred_at data processed_at attempts available_at created_at",
-			func(emit func(...any)) {
-				write := func(e stripeEvent) {
-					emit(e.id, "evt_"+hex.EncodeToString(e.id.Bytes[:]), e.kind, e.at, "{}", e.at.Add(2*time.Second), int32(1), e.at, e.at)
+			func(emit func(...any) bool) {
+				write := func(e stripeEvent) bool {
+					return emit(
+						e.id,
+						"evt_"+hex.EncodeToString(e.id.Bytes[:]),
+						e.kind,
+						e.at,
+						"{}",
+						e.at.Add(2*time.Second),
+						int32(1),
+						e.at,
+						e.at,
+					)
 				}
 				for c := range p.checkouts {
 					for _, pd := range c.periods {
 						for _, e := range pd.events() {
-							write(e)
+							if !write(e) {
+								return
+							}
 						}
 					}
 				}
 				for g := range p.refunds {
 					for _, e := range g.refund.events() {
-						write(e)
+						if !write(e) {
+							return
+						}
 					}
 				}
 			},
@@ -227,14 +279,16 @@ func (p *population) tables() []table {
 		{
 			"donor_billing_periods",
 			"id donor_id checkout_id stripe_invoice_id stripe_subscription_id due_at ends_at status created_at",
-			func(emit func(...any)) {
+			func(emit func(...any) bool) {
 				for c := range p.checkouts {
 					for _, pd := range c.periods {
 						status := "FAILED"
 						if pd.paid {
 							status = "PAID"
 						}
-						emit(pd.id, c.donor.id, c.id, pd.invoice, c.subscription, pd.due, pd.ends, status, pd.events()[0].at)
+						if !emit(pd.id, c.donor.id, c.id, pd.invoice, c.subscription, pd.due, pd.ends, status, pd.events()[0].at) {
+							return
+						}
 					}
 				}
 			},
@@ -242,7 +296,7 @@ func (p *population) tables() []table {
 		{
 			"donor_billing_observations",
 			"id period_id source_event_id status amount_minor currency billing_reason occurred_at event_created_at recorded_at",
-			func(emit func(...any)) {
+			func(emit func(...any) bool) {
 				for c := range p.checkouts {
 					for i, pd := range c.periods {
 						reason := "subscription_cycle"
@@ -250,7 +304,9 @@ func (p *population) tables() []table {
 							reason = "subscription_create"
 						}
 						for _, e := range pd.events() {
-							emit(e.id, pd.id, e.id, e.status, c.amount, "USD", reason, e.at, e.at, e.at.Add(2*time.Second))
+							if !emit(e.id, pd.id, e.id, e.status, c.amount, "USD", reason, e.at, e.at, e.at.Add(2*time.Second)) {
+								return
+							}
 						}
 					}
 				}
@@ -259,14 +315,14 @@ func (p *population) tables() []table {
 		{
 			"donor_gifts",
 			"id donor_id checkout_id stripe_object_id amount_minor currency frequency paid_at stripe_payment_intent_id period_id referrer_id referral_kind created_at",
-			func(emit func(...any)) {
+			func(emit func(...any) bool) {
 				for c := range p.checkouts {
 					for _, g := range c.gifts {
 						var period pgtype.UUID
 						if g.period != nil {
 							period = g.period.id
 						}
-						emit(
+						if !emit(
 							g.id,
 							c.donor.id,
 							c.id,
@@ -280,35 +336,52 @@ func (p *population) tables() []table {
 							donorID(g.referrer),
 							textOrNull(g.kind),
 							g.paidAt.Add(2*time.Second),
-						)
+						) {
+							return
+						}
 					}
 				}
 			},
 		},
-		{"donor_refunds", "id gift_id stripe_refund_id amount_minor currency status observed_at created_at", func(emit func(...any)) {
+		{"donor_refunds", "id gift_id stripe_refund_id amount_minor currency status observed_at created_at", func(emit func(...any) bool) {
 			for g := range p.refunds {
 				r := g.refund
-				emit(r.id, g.id, r.stripeID, r.amount, "USD", r.status, r.observations[len(r.observations)-1].at, r.observations[0].at)
-			}
-		}},
-		{"donor_refund_observations", "id refund_id source_event_id status observed_at created_at", func(emit func(...any)) {
-			for g := range p.refunds {
-				for _, e := range g.refund.events() {
-					emit(e.id, g.refund.id, e.id, e.status, e.at, e.at.Add(2*time.Second))
+				if !emit(
+					r.id,
+					g.id,
+					r.stripeID,
+					r.amount,
+					"USD",
+					r.status,
+					r.observations[len(r.observations)-1].at,
+					r.observations[0].at,
+				) {
+					return
 				}
 			}
 		}},
-		{"donor_metric_projections", "id donor_id computed_at next_refresh_at", func(emit func(...any)) {
+		{"donor_refund_observations", "id refund_id source_event_id status observed_at created_at", func(emit func(...any) bool) {
+			for g := range p.refunds {
+				for _, e := range g.refund.events() {
+					if !emit(e.id, g.refund.id, e.id, e.status, e.at, e.at.Add(2*time.Second)) {
+						return
+					}
+				}
+			}
+		}},
+		{"donor_metric_projections", "id donor_id computed_at next_refresh_at", func(emit func(...any) bool) {
 			for _, d := range p.donors {
-				emit(derived(d.id, 3), d.id, p.now, p.now)
+				if !emit(derived(d.id, 3), d.id, p.now, p.now) {
+					return
+				}
 			}
 		}},
 		{
 			"donor_partner_signups",
 			"id organization name email website message request_hash consent_version approved_at partner_type workforce_size match_rate_bp match_cap_minor company_code created_at",
-			func(emit func(...any)) {
+			func(emit func(...any) bool) {
 				for _, pt := range p.partners {
-					emit(
+					if !emit(
 						pt.id,
 						pt.name,
 						"Partner Admin",
@@ -324,39 +397,45 @@ func (p *population) tables() []table {
 						pt.matchCap,
 						pt.companyCode,
 						pt.approvedAt,
-					)
+					) {
+						return
+					}
 				}
 			},
 		},
-		{"donor_partner_teams", "id partner_id name created_at", func(emit func(...any)) {
+		{"donor_partner_teams", "id partner_id name created_at", func(emit func(...any) bool) {
 			for _, pt := range p.partners {
 				for _, tm := range pt.teams {
-					emit(tm.id, pt.id, tm.name, pt.approvedAt)
+					if !emit(tm.id, pt.id, tm.name, pt.approvedAt) {
+						return
+					}
 				}
 			}
 		}},
-		{"donor_partner_employees", "donor_id partner_id team_id enrolled_at", func(emit func(...any)) {
+		{"donor_partner_employees", "donor_id partner_id team_id enrolled_at", func(emit func(...any) bool) {
 			for _, pt := range p.partners {
 				for _, e := range pt.employees {
 					var teamID pgtype.UUID
 					if e.team != nil {
 						teamID = e.team.id
 					}
-					emit(e.donor.id, pt.id, teamID, e.enrolledAt)
+					if !emit(e.donor.id, pt.id, teamID, e.enrolledAt) {
+						return
+					}
 				}
 			}
 		}},
 		{
 			"donor_initiatives",
 			"id slug title summary type location region counties started_on status committed_minor partner_signup_id publish_state published_at created_at",
-			func(emit func(...any)) {
+			func(emit func(...any) bool) {
 				for _, in := range p.initiatives {
 					var partnerID pgtype.UUID
 					if in.partner != nil {
 						partnerID = in.partner.id
 					}
 					published := in.startedOn.Add(day)
-					emit(
+					if !emit(
 						in.id,
 						in.slug,
 						fmt.Sprintf("Initiative %d", in.index),
@@ -372,17 +451,19 @@ func (p *population) tables() []table {
 						"PUBLISHED",
 						published,
 						in.startedOn,
-					)
+					) {
+						return
+					}
 				}
 			},
 		},
 		{
 			"donor_initiative_metrics",
 			"id initiative_id position label value unit verification_note verified_on publish_state created_at",
-			func(emit func(...any)) {
+			func(emit func(...any) bool) {
 				for _, in := range p.initiatives {
 					for _, m := range in.metrics {
-						emit(
+						if !emit(
 							m.id,
 							in.id,
 							int32(m.pos),
@@ -393,17 +474,19 @@ func (p *population) tables() []table {
 							pgtype.Date{Time: in.startedOn.Add(day), Valid: true},
 							"PUBLISHED",
 							in.startedOn.Add(day),
-						)
+						) {
+							return
+						}
 					}
 				}
 			},
 		},
 		{
 			"donor_events",
-			"id slug title type description venue address city zip starts_at ends_at capacity publish_state published_at created_at",
-			func(emit func(...any)) {
+			"id slug title type description venue address city zip starts_at ends_at capacity publish_state published_at created_at time_zone",
+			func(emit func(...any) bool) {
 				for _, ev := range p.events {
-					emit(
+					if !emit(
 						ev.id,
 						ev.slug,
 						fmt.Sprintf("Event %d", ev.index),
@@ -419,17 +502,22 @@ func (p *population) tables() []table {
 						"PUBLISHED",
 						ev.publishedAt,
 						ev.publishedAt,
-					)
+						"America/New_York",
+					) {
+						return
+					}
 				}
 			},
 		},
 		{
 			"donor_event_reservations",
 			"id event_id donor_id status reserved_at checked_in_at created_at",
-			func(emit func(...any)) {
+			func(emit func(...any) bool) {
 				for _, ev := range p.events {
 					for _, r := range ev.reservations {
-						emit(r.id, ev.id, r.donor.id, r.status, r.reservedAt, timeOrNull(r.checkedIn), r.reservedAt)
+						if !emit(r.id, ev.id, r.donor.id, r.status, r.reservedAt, timeOrNull(r.checkedIn), r.reservedAt) {
+							return
+						}
 					}
 				}
 			},
@@ -447,8 +535,8 @@ func copyAll(ctx context.Context, pool *pgxpool.Pool, tables []table) (map[strin
 			return fmt.Errorf("mark database: %w", err)
 		}
 		for _, t := range tables {
-			// A COPY that fails stops pulling; the rows still produced go nowhere.
-			next, stop := iter.Pull(func(yield func([]any) bool) { t.rows(func(row ...any) { yield(row) }) })
+			// Stop the producer as soon as COPY fails, including mid-table.
+			next, stop := iter.Pull(func(yield func([]any) bool) { t.rows(func(row ...any) bool { return yield(row) }) })
 			n, err := tx.CopyFrom(ctx, pgx.Identifier{t.name}, strings.Fields(t.columns), pgx.CopyFromFunc(func() ([]any, error) {
 				row, _ := next()
 				return row, nil
@@ -491,7 +579,8 @@ func refreshProjections(ctx context.Context, pool *pgxpool.Pool, workers int) er
 			}
 		})
 	}
-	if wg.Wait(); failure != nil {
+	wg.Wait()
+	if failure != nil {
 		return failure
 	}
 	var parked int64

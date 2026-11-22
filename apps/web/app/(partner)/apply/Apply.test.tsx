@@ -40,3 +40,59 @@ it("surfaces a 422 and re-enables the form for correction", async () => {
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("pending application already exists"));
   expect(screen.getByLabelText("Organization name")).toBeEnabled();
 });
+
+it("unfreezes and starts a fresh attempt after any rejection, such as a 400", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ detail: "Website is not valid." }, { status: 400 }))
+    .mockResolvedValueOnce(Response.json({ received: true }));
+  vi.stubGlobal("fetch", fetch);
+  render(<Apply />);
+  fill();
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Website is not valid."));
+  expect(screen.getByLabelText("Organization name")).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Submit application" }));
+  await screen.findByRole("heading", { name: /pending review/i });
+  const [first, second] = fetch.mock.calls.map(([, init]) => init);
+  expect(second.headers["Idempotency-Key"]).not.toBe(first.headers["Idempotency-Key"]);
+  expect(JSON.parse(second.body).receipt).not.toBe(JSON.parse(first.body).receipt);
+});
+
+it("uses a generic prompt when a rejection carries no explanation", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 400 })));
+  render(<Apply />);
+  fill();
+  await waitFor(() => expect(screen.getByRole("alert")).not.toHaveTextContent("highlighted"));
+});
+
+it("keeps the same key, receipt and body when an unconfirmed submit is retried", async () => {
+  const fetch = vi
+    .fn()
+    .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+    .mockResolvedValueOnce(Response.json({ received: true }));
+  vi.stubGlobal("fetch", fetch);
+  render(<Apply />);
+  fill();
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("not confirmed"));
+  fireEvent.click(screen.getByRole("button", { name: "Retry application" }));
+  await screen.findByRole("heading", { name: /pending review/i });
+  const [first, second] = fetch.mock.calls.map(([, init]) => init);
+  expect(second.headers["Idempotency-Key"]).toBe(first.headers["Idempotency-Key"]);
+  expect(second.body).toBe(first.body);
+});
+
+it("resets the key and receipt after a 409", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ detail: "Conflict." }, { status: 409 }))
+    .mockResolvedValueOnce(Response.json({ received: true }));
+  vi.stubGlobal("fetch", fetch);
+  render(<Apply />);
+  fill();
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Conflict."));
+  fireEvent.click(screen.getByRole("button", { name: "Submit application" }));
+  await screen.findByRole("heading", { name: /pending review/i });
+  const [first, second] = fetch.mock.calls.map(([, init]) => init);
+  expect(second.headers["Idempotency-Key"]).not.toBe(first.headers["Idempotency-Key"]);
+  expect(JSON.parse(second.body).receipt).not.toBe(JSON.parse(first.body).receipt);
+});

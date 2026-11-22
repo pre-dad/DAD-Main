@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -76,12 +78,17 @@ func isConfigError(err error) bool {
 }
 
 func TestWorkersRunAsTheirRoles(t *testing.T) {
-	for _, kind := range []string{"projections", "push"} {
+	for _, kind := range []string{"projections", "push", "messages", "login-email", "email-changes"} {
 		role := dbroles.Workers[kind]
 		env := map[string]string{
-			"DONOR_GO_WORKERS_ENABLED": "true",
-			role.Variable():            dbrolestest.URL(t, role),
-			dbroles.AllowOwnerVariable: "true",
+			"DONOR_GO_WORKERS_ENABLED":   "true",
+			role.Variable():              dbrolestest.URL(t, role),
+			dbroles.AllowOwnerVariable:   "true",
+			"DONOR_SMTP_HOST":            "smtp.example.org",
+			"DONOR_EMAIL_FROM":           "DAD <sender@example.org>",
+			"DONOR_EMAIL_ENCRYPTION_KEY": base64.URLEncoding.EncodeToString(make([]byte, 32)),
+			"DONOR_STAFF_ORIGIN":         "https://staff.dad.example.org",
+			"DONOR_PUBLIC_ORIGIN":        "https://dad.example.org",
 		}
 		if err := run(context.Background(), []string{"--kind=" + kind, "--once"}, func(name string) string { return env[name] }); err != nil {
 			t.Errorf("%s: %v", kind, err)
@@ -148,5 +155,50 @@ func TestProjectionsWorkerBuildsQueuedExports(t *testing.T) {
 	if err = owner.QueryRow(ctx, "SELECT state,row_count FROM donor_export_jobs WHERE id=$1", job).Scan(&state, &rows); err != nil ||
 		state != "complete" || rows < 1 {
 		t.Fatalf("export %s with %d rows: %v", state, rows, err)
+	}
+}
+
+type stubQueue struct {
+	worked bool
+	err    error
+	calls  int
+}
+
+func (q *stubQueue) DeliverNext(context.Context, time.Time) (bool, error) {
+	q.calls++
+	return q.worked, q.err
+}
+
+func TestRunAllRunsEveryStepAndJoinsErrors(t *testing.T) {
+	failing, working := errors.New("first"), errors.New("second")
+	var ran []string
+	step := func(name string, worked bool, err error) func(context.Context) (bool, error) {
+		return func(context.Context) (bool, error) {
+			ran = append(ran, name)
+			return worked, err
+		}
+	}
+	worked, err := runAll(context.Background(), step("a", false, failing), step("b", true, working), step("c", false, nil))
+	if !worked || !errors.Is(err, failing) || !errors.Is(err, working) || strings.Join(ran, "") != "abc" {
+		t.Fatalf("worked=%v err=%v ran=%v", worked, err, ran)
+	}
+}
+
+func TestRotatingQueuesDoNotStarveEachOther(t *testing.T) {
+	broken := &stubQueue{err: errors.New("down")}
+	busy := &stubQueue{worked: true}
+	step := rotating([]deliverer{broken, busy})
+	for range 4 {
+		if _, err := step(context.Background()); err != nil && !errors.Is(err, broken.err) {
+			t.Fatal(err)
+		}
+	}
+	if broken.calls == 0 || busy.calls == 0 {
+		t.Fatalf("a queue never ran: broken=%d busy=%d", broken.calls, busy.calls)
+	}
+	idle := &stubQueue{}
+	worked, err := rotating([]deliverer{broken, idle})(context.Background())
+	if worked || !errors.Is(err, broken.err) || idle.calls != 1 {
+		t.Fatalf("worked=%v err=%v idle calls=%d", worked, err, idle.calls)
 	}
 }

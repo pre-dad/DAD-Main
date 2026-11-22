@@ -3,7 +3,10 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"dad/donor-api/internal/store/queries"
 
@@ -17,9 +20,9 @@ import (
 // referrals, never a population scan.
 type NetworkService struct{ DB *pgxpool.Pool }
 
-// NetworkInvitee is one person the donor brought in, shown only when they opted
-// in to visibility (N-3). Anonymous invitees are not listed; they are counted in
-// AnonymousActive instead.
+// NetworkInvitee is one person the donor brought in, listed unless they opted
+// out of visibility (N-3; visible by default, migration 0048). Invitees who
+// opted out are not listed; their active ones are counted in AnonymousActive.
 type NetworkInvitee struct {
 	Name   string `json:"name"`
 	Active bool   `json:"active"`
@@ -42,13 +45,6 @@ type NetworkMilestone struct {
 	Remaining int64  `json:"remaining"`
 }
 
-var milestoneLabels = map[string]string{
-	"REF1":  "First Referral",
-	"REF3":  "Community Builder",
-	"REF12": "Super Connector",
-	"TC":    "Team Captain",
-}
-
 // Network assembles the donor's network summary.
 func (s NetworkService) Network(ctx context.Context, token string) (NetworkSummary, error) {
 	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (NetworkSummary, error) {
@@ -68,31 +64,40 @@ func buildNetwork(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) 
 	// N-2: the converted-referral count drives the milestone ladder. Use the
 	// lifetime converted count (link+irl), not the active count -- a referral who
 	// later lapsed still counts toward "people you brought in".
+	var converted int64
 	proj, err := q.Projection(ctx, donorID)
 	if err == nil {
-		converted := int64(proj.ReferredLinkCount + proj.ReferredIrlCount)
-		rules, err := recognitionRules(ctx, q)
-		if err != nil {
-			return out, err
-		}
-		for _, rule := range rules.Badges {
-			if rule.Signal != "referrals" || rule.Threshold <= converted {
-				continue
-			}
-			if out.NextMilestone == nil || rule.Threshold < out.NextMilestone.Target {
-				out.NextMilestone = &NetworkMilestone{
-					Label:     milestoneLabels[rule.Code],
-					Target:    rule.Threshold,
-					Remaining: rule.Threshold - converted,
-				}
-			}
-		}
+		converted = int64(proj.ReferredLinkCount + proj.ReferredIrlCount)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
 	}
+	rules, err := recognitionRules(ctx, q)
+	if err != nil {
+		return out, err
+	}
+	catalog, err := badgeWording(ctx, q)
+	if err != nil {
+		return out, err
+	}
+	titles := make(map[string]string, len(catalog))
+	for _, b := range catalog {
+		titles[b.Code] = b.Title
+	}
+	for _, rule := range rules.Badges {
+		if rule.Signal != "referrals" || rule.Threshold <= converted {
+			continue
+		}
+		if out.NextMilestone == nil || rule.Threshold < out.NextMilestone.Target {
+			out.NextMilestone = &NetworkMilestone{
+				Label:     titles[rule.Code],
+				Target:    rule.Threshold,
+				Remaining: rule.Threshold - converted,
+			}
+		}
+	}
 
-	// N-3: opted-in invitees are listed by name; the rest of the active network
-	// is reported anonymously.
+	// N-3: invitees are listed by name unless they opted out; the rest of the
+	// active network is reported anonymously.
 	invitees, err := q.NetworkInviteeList(ctx, donorID)
 	if err != nil {
 		return out, err
@@ -100,7 +105,11 @@ func buildNetwork(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) 
 	var visibleActive int64
 	out.Invitees = make([]NetworkInvitee, 0, len(invitees))
 	for _, iv := range invitees {
-		out.Invitees = append(out.Invitees, NetworkInvitee{Name: iv.PublicName.String, Active: iv.Active})
+		name := listedName(iv.FullName.String, iv.PublicName.String)
+		if name == "" {
+			continue
+		}
+		out.Invitees = append(out.Invitees, NetworkInvitee{Name: name, Active: iv.Active})
 		if iv.Active {
 			visibleActive++
 		}
@@ -109,4 +118,18 @@ func buildNetwork(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) 
 		out.AnonymousActive = anon
 	}
 	return out, nil
+}
+
+// listedName is how N-3 lists an invitee: first name and last initial, or the
+// public first name they chose when no full name is on record.
+func listedName(full, public string) string {
+	parts := strings.Fields(full)
+	if len(parts) == 0 {
+		return strings.TrimSpace(public)
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	initial, _ := utf8.DecodeRuneInString(parts[len(parts)-1])
+	return parts[0] + " " + string(unicode.ToUpper(initial)) + "."
 }

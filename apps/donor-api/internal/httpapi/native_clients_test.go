@@ -14,8 +14,26 @@ import (
 
 	"dad/donor-api/internal/httpapi"
 	"dad/donor-api/internal/store"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// deleteDonorRows removes a synthetic donor and the rows the sign-in journey
+// leaves behind for it.
+func deleteDonorRows(t *testing.T, pool *pgxpool.Pool, donor pgtype.UUID) {
+	t.Helper()
+	for _, table := range []string{
+		"donor_preference_events", "donor_preferences", "donor_metric_projections", "donor_session_events",
+		"donor_sessions", "donor_login_links", "donor_device_marks",
+	} {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM "+table+" WHERE donor_id=$1", donor); err != nil {
+			t.Error(err)
+		}
+	}
+	if _, err := pool.Exec(context.Background(), "DELETE FROM donors WHERE id=$1", donor); err != nil {
+		t.Error(err)
+	}
+}
 
 // This opt-in server exists only in the test binary and uses the lifecycle
 // test's synthetic database and least-privilege API pool.
@@ -42,16 +60,7 @@ func serveNativeClients(t *testing.T, directory string, owner, api *pgxpool.Pool
 			if _, err := owner.Exec(context.Background(), "INSERT INTO donors(id,email) VALUES($1,$2)", donor, email); err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() {
-				for _, table := range []string{"donor_preference_events", "donor_preferences", "donor_metric_projections", "donor_session_events", "donor_sessions", "donor_login_links", "donor_device_marks"} {
-					if _, err := owner.Exec(context.Background(), "DELETE FROM "+table+" WHERE donor_id=$1", donor); err != nil {
-						t.Error(err)
-					}
-				}
-				if _, err := owner.Exec(context.Background(), "DELETE FROM donors WHERE id=$1", donor); err != nil {
-					t.Error(err)
-				}
-			})
+			t.Cleanup(func() { deleteDonorRows(t, owner, donor) })
 			if field == "claim_token" {
 				fixture["email"] = email
 			}

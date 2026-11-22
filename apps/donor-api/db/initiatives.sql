@@ -80,10 +80,6 @@ WHERE i.publish_state = 'PUBLISHED'
 GROUP BY s.category
 ORDER BY s.category;
 
--- name: InitiativeSpendTotal :one
-SELECT COALESCE(SUM(amount_minor), 0)::bigint AS total_minor
-FROM donor_initiative_spend WHERE initiative_id=$1;
-
 -- name: RotatableInitiatives :many
 -- The published, active set the daily rotation chooses from. Ordered stably by
 -- (started_on, id) so the deterministic index the application computes is stable
@@ -105,6 +101,7 @@ SELECT i.id, i.slug, i.title, i.summary, i.type, i.location, i.status, i.started
 FROM donor_initiatives i
 WHERE i.publish_state = 'PUBLISHED'
 ORDER BY i.status, i.started_on, i.title
+-- Hard cap: published initiatives beyond 500 are silently dropped from the list.
 LIMIT 500;
 
 -- name: PublishedInitiativeBySlug :one

@@ -82,7 +82,7 @@ func NewSender(s *Settings) Sender {
 	}
 	switch s.Provider {
 	case "stub":
-		return &StubSender{from: s.Sender}
+		return &StubSender{}
 	case "twilio":
 		return newTwilioSender(s)
 	default:
@@ -94,7 +94,6 @@ func NewSender(s *Settings) Sender {
 // so development and tests can read back the code. It is safe for concurrent
 // use. It is not a gateway: production must configure Twilio.
 type StubSender struct {
-	from string
 	mu   sync.Mutex
 	last map[string]string
 }

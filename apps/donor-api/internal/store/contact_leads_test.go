@@ -44,9 +44,9 @@ func TestContactLeadsAreDeleted(t *testing.T) {
 	var leads, partners int
 	var unlinked bool
 	if err := tx.QueryRow(ctx, `SELECT
-  (SELECT count(*) FROM donor_partner_signups WHERE approved_at IS NULL),
+  (SELECT count(*) FROM donor_partner_signups WHERE id IN ($3,$4)),
   (SELECT count(*) FROM donor_partner_signups WHERE id=$1),
-  (SELECT partner_signup_id IS NULL FROM donor_initiatives WHERE id=$2)`, partner, initiative).Scan(&leads, &partners, &unlinked); err != nil {
+  (SELECT partner_signup_id IS NULL FROM donor_initiatives WHERE id=$2)`, partner, initiative, lead, linked).Scan(&leads, &partners, &unlinked); err != nil {
 		t.Fatal(err)
 	}
 	if leads != 0 || partners != 1 || !unlinked {

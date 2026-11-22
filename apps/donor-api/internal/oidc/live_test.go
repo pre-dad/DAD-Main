@@ -25,7 +25,9 @@ type provider struct {
 	fetches atomic.Int32
 	down    atomic.Bool
 	weak    bool
-	server  *httptest.Server
+	// hold, when set, blocks each fetch until it is closed.
+	hold   chan struct{}
+	server *httptest.Server
 }
 
 func newProvider(t *testing.T) *provider {
@@ -37,6 +39,9 @@ func newProvider(t *testing.T) *provider {
 	p := &provider{t: t, key: key, kid: "k1"}
 	p.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		p.fetches.Add(1)
+		if p.hold != nil {
+			<-p.hold
+		}
 		if p.down.Load() {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
@@ -167,7 +172,7 @@ func TestLiveVerifierRejections(t *testing.T) {
 		"wrong issuer":    p.sign(rs256("k1"), with("iss", "https://evil.example")),
 		"wrong audience":  p.sign(rs256("k1"), with("aud", "someone-else")),
 		"audience list":   p.sign(rs256("k1"), with("aud", []string{"someone-else"})),
-		"expired":         p.sign(rs256("k1"), with("exp", issued.Add(-2*time.Minute).Unix())),
+		"expired":         p.sign(rs256("k1"), expiredClaims()),
 		"issued later":    p.sign(rs256("k1"), with("iat", issued.Add(10*time.Minute).Unix())),
 		"no subject":      p.sign(rs256("k1"), with("sub", "")),
 		"no expiry":       p.sign(rs256("k1"), with("exp", 0)),
@@ -193,6 +198,24 @@ func TestLiveVerifierRejections(t *testing.T) {
 		if _, err := p.verifier(issued).Verify(context.Background(), provider, token); !errors.Is(err, ErrToken) {
 			t.Errorf("%s: err = %v; want ErrToken", name, err)
 		}
+	}
+}
+
+func expiredClaims() map[string]any {
+	claims := googleClaims()
+	claims["iat"], claims["exp"] = issued.Add(-2*time.Hour).Unix(), issued.Add(-time.Hour).Unix()
+	return claims
+}
+
+func TestLiveVerifierExpiryBoundary(t *testing.T) {
+	p := newProvider(t)
+	expiry := time.Unix(googleClaims()["exp"].(int64), 0)
+	token := p.sign(rs256("k1"), googleClaims())
+	if _, err := p.verifier(expiry.Add(clockSkew)).Verify(context.Background(), Google, token); err != nil {
+		t.Errorf("at expiry plus skew: %v; want accepted", err)
+	}
+	if _, err := p.verifier(expiry.Add(clockSkew+time.Second)).Verify(context.Background(), Google, token); !errors.Is(err, ErrToken) {
+		t.Errorf("past expiry plus skew: %v; want ErrToken", err)
 	}
 }
 
@@ -378,5 +401,61 @@ func TestLiveVerifierIgnoresKeysItShouldNotTrust(t *testing.T) {
 		if !errors.Is(err, ErrKeys) {
 			t.Errorf("%s: %v; want the key refused", name, err)
 		}
+	}
+}
+
+func TestLiveVerifierFetchesOnceOutsideTheLock(t *testing.T) {
+	p := newProvider(t)
+	p.hold = make(chan struct{})
+	v := p.verifier(issued)
+	token := p.sign(rs256("k1"), googleClaims())
+	const callers = 8
+	errs := make(chan error, callers)
+	for range callers {
+		go func() {
+			_, err := v.Verify(context.Background(), Google, token)
+			errs <- err
+		}()
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for p.fetches.Load() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("no fetch started")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if !v.mu.TryLock() {
+		t.Fatal("the key lock is held across the network fetch")
+	}
+	v.mu.Unlock()
+	close(p.hold)
+	for range callers {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p.fetches.Load() != 1 {
+		t.Fatalf("%d fetches for %d concurrent callers; want 1", p.fetches.Load(), callers)
+	}
+}
+
+func TestLiveVerifierWaiterStopsWhenItsContextEnds(t *testing.T) {
+	p := newProvider(t)
+	p.hold = make(chan struct{})
+	defer close(p.hold)
+	v := p.verifier(issued)
+	token := p.sign(rs256("k1"), googleClaims())
+	go func() { _, _ = v.Verify(context.Background(), Google, token) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for p.fetches.Load() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("no fetch started")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := v.Verify(ctx, Google, token); !errors.Is(err, ErrKeys) {
+		t.Fatalf("a waiter whose context ended: %v; want ErrKeys", err)
 	}
 }

@@ -30,7 +30,7 @@ trap cleanup EXIT
 chmod 755 "$work"
 mkdir -m 755 "$work/tls" "$work/pki"
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj /CN=ingress-check \
-  -addext 'subjectAltName=DNS:public.test,DNS:staff.test' \
+  -addext 'subjectAltName=DNS:public.test,DNS:staff.test,DNS:native.test' \
   -keyout "$work/tls/privkey.pem" -out "$work/tls/fullchain.pem" 2>/dev/null
 chmod 644 "$work/tls/privkey.pem"
 cat > "$work/env" <<EOF
@@ -39,6 +39,7 @@ POSTGRES_USER=check
 POSTGRES_PASSWORD=check
 DONOR_PUBLIC_ORIGIN=https://public.test
 DONOR_STAFF_ORIGIN=https://staff.test
+DONOR_NATIVE_API_ORIGIN=https://native.test
 INGRESS_TLS_DIR=$work/tls
 EOF
 # No database is involved, but Compose requires every service's database URL.
@@ -46,6 +47,7 @@ grep -o 'DONOR_[A-Z_]*DATABASE_URL' docker-compose.prod.yml | sort -u | sed 's|$
 export ENV_FILE="$work/env"
 # Leaves the production subnet free for a real deployment on the same Docker host. The upper
 # half of the fixed edge subnet stands in for Cloudflare's ranges in the smoke test.
+# The fixed subnet and address below mean only one run can use this script at a time.
 cat > "$work/check.yml" <<EOF
 networks:
   default:
@@ -90,6 +92,14 @@ if [[ "$command" == config ]]; then
     exit 1
   fi
   printf 'unknown INGRESS_MODE rejected: ok\n'
+  for origin in http://native.test https://public.test https://staff.test https://PUBLIC.test https://native.test:invalid https://native.test:99999 https://.native.test https://native..test https://-native.test https://native.test.; do
+    if DONOR_NATIVE_API_ORIGIN="$origin" INGRESS_MODE=direct compose run --rm --no-deps -T nginx nginx -t -q >/dev/null 2>&1; then
+      printf 'Invalid native API origin was accepted: %s\n' "$origin" >&2
+      exit 1
+    fi
+  done
+  DONOR_NATIVE_API_ORIGIN='' INGRESS_MODE=direct compose run --rm --no-deps -T nginx nginx -t -q
+  printf 'native API origin validation and disabled configuration: ok\n'
   exit 0
 fi
 
@@ -100,11 +110,18 @@ services:
     image: $web_image
     build: !reset null
     depends_on: !reset {}
-    networks: !override [edge]
+    networks: !override
+      edge: {}
+      app:
+        aliases: [api]
     healthcheck:
       interval: 1s
   nginx:
     ports: !reset []
+    networks: !override
+      edge:
+        aliases: [ingress-check]
+      app: {}
     healthcheck:
       interval: 1s
 EOF
@@ -155,9 +172,10 @@ http {
     access_log off;
     server {
         listen 3000;
+        listen 8002;
         default_type text/plain;
         add_header X-Robots-Tag "noindex, nofollow";
-        return 200 "host=$host\nuri=$request_uri\nx-real-ip=$http_x_real_ip\nx-forwarded-for=$http_x_forwarded_for\ncf-connecting-ip=$http_cf_connecting_ip\n";
+        return 200 "host=$host\nuri=$request_uri\nx-real-ip=$http_x_real_ip\nx-forwarded-for=$http_x_forwarded_for\ncf-connecting-ip=$http_cf_connecting_ip\nupstream-port=$server_port\nauthorization=$http_authorization\nclient=$http_x_dad_client\n";
     }
 }
 EOF
@@ -172,13 +190,20 @@ services:
     user: "101:101"
     volumes: ["$work/stub.conf:/stub/nginx.conf:ro", "$work/pki:/pki:ro"]
     tmpfs: !override ["/tmp:uid=101,gid=101"]
-    networks: !override [edge]
+    networks: !override
+      edge: {}
+      app:
+        aliases: [api]
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:3000/]
       interval: 1s
       retries: 30
   nginx:
     ports: !reset []
+    networks: !override
+      edge:
+        aliases: [ingress-check]
+      app: {}
     volumes: ["$work/edge-ranges.conf:/etc/nginx/ingress/cloudflare/edge-ranges.conf:ro"]
     healthcheck:
       interval: 1s
@@ -186,7 +211,7 @@ EOF
 files+=(-f "$work/stub.yml")
 
 # Requests come from the stub, a peer outside the trusted ranges.
-client() { compose exec -T web curl -sS -k --http1.1 --connect-to :443:nginx:8443 --connect-to :80:nginx:8080 "${family:--4}" "$@"; }
+client() { compose exec -T web curl -sS -k --http1.1 --connect-to :443:ingress-check:8443 --connect-to :80:ingress-check:8080 "${family:--4}" "$@"; }
 status() { client -o /dev/null -w '%{http_code}' "$@" 2>/dev/null || true; }
 exit_code() { client -o /dev/null "$@" 2>/dev/null && echo 0 || echo "$?"; }
 field() { sed -n "s/^$1=//p" <<< "$2"; }
@@ -216,6 +241,25 @@ for path in /staff /staff/sign-in /STAFF/audit /api/donor/staff/me /api/donor/st
   check "public host hides $path" 404 "$(status "https://public.test$path")"
 done
 check 'public 404 is JSON' '{"detail":"Not found"}' "$(client https://public.test/staff)"
+
+body="$(client -H 'X-DAD-Client: native' -H 'Authorization: Bearer synthetic-native-access' https://native.test/donor/me/profile)"
+check 'native requests bypass the browser proxy' 8002 "$(field upstream-port "$body")"
+check 'native bearer credentials reach the API' 'Bearer synthetic-native-access' "$(field authorization "$body")"
+check 'native client marker reaches the API' native "$(field client "$body")"
+check 'native ingress does not trust a supplied client address' "$peer" "$(field x-real-ip "$(client "${spoof[@]}" -H 'X-DAD-Client: native' https://native.test/donor/me/profile)")"
+check 'native host refuses browser requests' 403 "$(status https://native.test/donor/me/profile)"
+check 'native host refuses cookies' 403 "$(status -H 'X-DAD-Client: native' -H 'Cookie: dad_session=synthetic' https://native.test/donor/me/profile)"
+check 'native host refuses Origin' 403 "$(status -H 'X-DAD-Client: native' -H 'Origin: https://native.test' https://native.test/donor/me/profile)"
+check 'native host admits its supported sign-in operation' 200 "$(status -X POST -H 'X-DAD-Client: native' https://native.test/donor/login)"
+for path in /donor/staff/me /donor/staff/sign-in /donor/checkouts /api/donor/me/profile /health/ready /staff /donor/login%0A; do
+  check "native host hides $path" 404 "$(status -X POST -H 'X-DAD-Client: native' "https://native.test$path")"
+done
+check 'native ingress refuses unsupported methods' 405 "$(status -X DELETE -H 'X-DAD-Client: native' https://native.test/donor/login)"
+check 'native method refusals name the allowed methods' POST "$(header allow "$(client -X DELETE -H 'X-DAD-Client: native' -o /dev/null -D - https://native.test/donor/login | tr -d '\r')")"
+check 'native HEAD reads are supported' 200 "$(status -I -H 'X-DAD-Client: native' https://native.test/health/live)"
+native_headers="$(head -c 262145 /dev/zero | client -X POST -H 'X-DAD-Client: native' --data-binary @- -o /dev/null -D - https://native.test/donor/login | tr -d '\r')"
+check 'native oversized bodies use JSON errors' application/json "$(header content-type "$native_headers")"
+
 body="$(client https://staff.test/)"
 check 'staff host serves /' staff.test "$(field host "$body")"
 for path in /staff /staff/donors/1 /api/donor/staff/me /_next/static/app.js /robots.txt /icon.svg; do
@@ -233,6 +277,14 @@ check 'webhook refuses larger bodies' 413 "$(post_bytes 262145 https://public.te
 check 'public API refuses bodies over 256 KiB' 413 "$(post_bytes 262145 https://public.test/api/donor/checkouts)"
 check 'staff source upload accepts 10 MiB' 200 "$(post_bytes 10485760 https://staff.test/api/donor/staff/content/sources)"
 check 'staff source upload refuses more' 413 "$(post_bytes 10485761 https://staff.test/api/donor/staff/content/sources)"
+for route in https://public.test/api/donor/partner/logo https://staff.test/api/donor/staff/partners/00000000-0000-4000-8000-000000000001/logo; do
+  check "$route accepts the API logo limit" 200 "$(post_bytes 360000 "$route")"
+  check "$route refuses larger logos" 413 "$(post_bytes 360001 "$route")"
+done
+check 'founding-claim imports accept 5 MiB' 200 "$(post_bytes 5242880 https://staff.test/api/donor/staff/founding-claims)"
+check 'founding-claim imports refuse more' 413 "$(post_bytes 5242881 https://staff.test/api/donor/staff/founding-claims)"
+check 'recognition artwork batches accept 10 MiB' 200 "$(post_bytes 10485760 https://staff.test/api/donor/staff/content/rules)"
+check 'recognition artwork batches refuse more' 413 "$(post_bytes 10485761 https://staff.test/api/donor/staff/content/rules)"
 check 'other staff API refuses bodies over 256 KiB' 413 "$(post_bytes 262145 https://staff.test/api/donor/staff/accounts)"
 check 'webhook accepts only POST' 403 "$(status https://public.test/api/donor/stripe/webhook)"
 repeat https://public.test/api/donor/stripe/webhook 1000
@@ -241,13 +293,17 @@ check 'webhook admits a burst of 500, then limits' yes \
   "$(awk -F'[: ]' '{ ok = $1 == 200 && $2 >= 500 && $3 == 429 } END { print ok ? "yes" : $0 }' <<< "$webhooks")"
 
 repeat https://public.test/api/donor/login 30
-check 'sign-in admits a burst of 21, then limits' '200:21 429:9 ' "$(counts -X POST "${urls[@]}")"
+signins="$(counts -X POST "${urls[@]}")"
+check 'sign-in admits a burst of 21, then limits' yes \
+  "$(awk -F'[: ]' '{ ok = $1 == 200 && $2 >= 21 && $3 == 429 } END { print ok ? "yes" : $0 }' <<< "$signins")"
 headers="$(client -D - -o "/tmp/limited" -X POST https://public.test/api/donor/login | tr -d '\r')"
 check 'sign-in 429 has Retry-After' 60 "$(header retry-after "$headers")"
 check 'sign-in 429 is not cacheable' no-store "$(header cache-control "$headers")"
 check 'sign-in 429 body is JSON' '{"detail":"Too many requests"}' "$(compose exec -T web cat /tmp/limited)"
 check 'passkey sign-in shares the sign-in limit' '429 429' \
   "$(status -X POST https://public.test/api/donor/passkeys/sign-in/options) $(status -X POST https://public.test/api/donor/passkeys/sign-in)"
+check 'password sign-in and signup share the sign-in limit' '429 429' \
+  "$(status -X POST https://public.test/api/donor/password/sign-in) $(status -X POST https://public.test/api/donor/signup)"
 headers="$(client -D - -o /dev/null -X POST https://staff.test/api/donor/staff/sign-in | tr -d '\r')"
 check 'staff host 429 is not indexed' '429 noindex, nofollow' \
   "$(awk 'NR == 1 { print $2 }' <<< "$headers") $(header x-robots-tag "$headers")"
@@ -257,10 +313,12 @@ check 'pages admit a burst of 300, then limit' yes \
   "$(awk -F'[: ]' '{ ok = $1 == 200 && $2 >= 300 && $3 == 429 } END { print ok ? "yes" : $0 }' <<< "$pages")"
 
 client -o /dev/null 'https://public.test/r/SECRETCODE?token=SECRETTOKEN' || true
+client -o /dev/null 'https://public.test/api/donor/company/COMPANYCODE' || true
 client -o /dev/null 'https://staff.test/staff?q=private%40example.org' || true
 log="$(compose logs --no-log-prefix nginx 2>/dev/null)"
 check 'access log redacts referral codes' yes "$(grep -q '"path":"/r/:code","status":200' <<< "$log" && echo yes)"
-check 'access log omits query strings and codes' no "$(grep -qE 'SECRET|private@|private%40|amount=' <<< "$log" && echo yes || echo no)"
+check 'access log redacts company codes' yes "$(grep -q '"path":"/api/donor/company/:code"' <<< "$log" && echo yes)"
+check 'access log omits query strings and codes' no "$(grep -qE 'SECRET|COMPANYCODE|private@|private%40|amount=' <<< "$log" && echo yes || echo no)"
 
 printf -- '-- cloudflare mode\n'
 INGRESS_MODE=cloudflare INGRESS_ORIGIN_PULL_CA="$work/pki/ca.pem" compose up -d --wait nginx >/dev/null 2>&1
@@ -275,6 +333,16 @@ check 'X-Real-IP is CF-Connecting-IP from Cloudflare' 198.51.100.7 "$(field x-re
 check 'X-Forwarded-For is CF-Connecting-IP from Cloudflare' 198.51.100.7 "$(field x-forwarded-for "$body")"
 check 'CF-Connecting-IP is not forwarded' '' "$(field cf-connecting-ip "$body")"
 check 'staff host serves Cloudflare connections' 200 "$(status "${cert[@]}" https://staff.test/staff)"
+check 'native host requires the Cloudflare origin-pull certificate' 400 "$(status -H 'X-DAD-Client: native' https://native.test/donor/me/profile)"
+body="$(docker run --rm --network "${project}_edge" --ip 172.31.243.200 -v "$work/pki:/pki:ro" "$image" \
+  curl -sS -k --http1.1 -4 --connect-to :443:nginx:8443 "${cert[@]}" -H 'CF-Connecting-IP: 198.51.100.7' \
+  -H 'X-DAD-Client: native' -H 'Authorization: Bearer synthetic-native-access' https://native.test/donor/me/profile)"
+check 'Cloudflare native requests reach the API directly' 8002 "$(field upstream-port "$body")"
+check 'native rate-limit identity is the verified Cloudflare client' 198.51.100.7 "$(field x-real-ip "$body")"
+repeat https://native.test/donor/login 30
+native_codes="$(counts "${cert[@]}" -X POST -H 'X-DAD-Client: native' "${urls[@]}")"
+check 'native sign-in floods are rate limited' yes "$(grep -q '429:' <<< "$native_codes" && echo yes || echo no)"
+check 'native sign-in 429 carries Retry-After' 60 "$(header retry-after "$(client "${cert[@]}" -X POST -H 'X-DAD-Client: native' -o /dev/null -D - https://native.test/donor/login | tr -d '\r')")"
 
 # One curl, so the auth zone (one request per 3 s) cannot refill between the groups.
 as_client() {
@@ -289,5 +357,12 @@ codes="$(docker run --rm --network "${project}_edge" --ip 172.31.243.200 -v "$wo
   curl "${args[@]:1}" | tr '\n' ' ')"
 check 'IPv6 clients share limits per /64' \
   "$(printf '200 %.0s' {1..21})429 200 $(printf '200 %.0s' {1..21})429 200 " "$codes"
+
+compose stop web >/dev/null 2>&1
+unavailable="$(docker run --rm --network "${project}_edge" --ip 172.31.243.200 -v "$work/pki:/pki:ro" "$image" \
+  curl -sS -k --http1.1 -4 --connect-to :443:nginx:8443 "${cert[@]}" -H 'X-DAD-Client: native' \
+  -w '\n%{http_code} %{content_type}' https://native.test/donor/me/profile)"
+check 'native upstream outages remain structured JSON errors' '503 application/json' "$(tail -1 <<< "$unavailable")"
+check 'native upstream outages explain safe retry' '{"detail":"API temporarily unavailable"}' "$(head -1 <<< "$unavailable")"
 
 finish

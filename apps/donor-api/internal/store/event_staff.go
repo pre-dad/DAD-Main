@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -52,7 +51,8 @@ type EventAttendee struct {
 // order, then its waitlist in promotion order.
 type StaffEventDetail struct {
 	StaffEvent
-	Attendees []EventAttendee `json:"attendees"`
+	Attendees  []EventAttendee `json:"attendees"`
+	NextOffset *int64          `json:"next_offset"`
 }
 
 func staffEvent(e queries.DonorEvent) StaffEvent {
@@ -101,7 +101,10 @@ func (s EventService) List(ctx context.Context, token string, offset int64) (Sta
 		})
 }
 
-func (s EventService) Detail(ctx context.Context, token string, id pgtype.UUID) (StaffEventDetail, error) {
+func (s EventService) Detail(ctx context.Context, token string, id pgtype.UUID, offset int64) (StaffEventDetail, error) {
+	if !pageOffsetValid(offset) {
+		return StaffEventDetail{}, ErrStaffInput
+	}
 	return staffRead(ctx, s.Staff, token, eventPermission,
 		func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (StaffEventDetail, error) {
 			q := queries.New(tx)
@@ -109,21 +112,20 @@ func (s EventService) Detail(ctx context.Context, token string, id pgtype.UUID) 
 			if err != nil {
 				return StaffEventDetail{}, err
 			}
-			roster, err := q.EventRoster(ctx, id)
+			roster, err := q.EventRoster(ctx, queries.EventRosterParams{EventID: id, PageOffset: offset})
 			if err != nil {
 				return StaffEventDetail{}, err
 			}
-			out := StaffEventDetail{StaffEvent: staffEvent(e), Attendees: make([]EventAttendee, 0, len(roster))}
+			roster, next := page(roster, offset)
+			counts, err := q.EventReservationCounts(ctx, []pgtype.UUID{id})
+			if err != nil {
+				return StaffEventDetail{}, err
+			}
+			out := StaffEventDetail{StaffEvent: staffEvent(e), Attendees: make([]EventAttendee, 0, len(roster)), NextOffset: next}
+			if len(counts) > 0 {
+				out.Reserved, out.Waitlisted, out.CheckedIn = counts[0].Reserved, counts[0].Waitlisted, counts[0].CheckedIn
+			}
 			for _, r := range roster {
-				switch r.Status {
-				case reservationReserved:
-					out.Reserved++
-					if r.CheckedInAt.Valid {
-						out.CheckedIn++
-					}
-				case reservationWaitlisted:
-					out.Waitlisted++
-				}
 				out.Attendees = append(out.Attendees, EventAttendee{
 					DonorID: r.DonorID.String(), Email: r.Email, PublicName: r.PublicName.String, Status: r.Status,
 					ReservedAt: r.ReservedAt, CheckedInAt: r.CheckedInAt,
@@ -148,6 +150,8 @@ func (s EventService) CheckInAttendee(ctx context.Context, token string, eventID
 			if err != nil {
 				return struct{}{}, err
 			}
+			// Re-read the clock after the locks: waiting for them can take long, and the
+			// check-in window must be judged when the event is actually locked.
 			now := time.Now().UTC()
 			if e.CancelledAt.Valid {
 				return struct{}{}, ErrEventCancelled
@@ -199,42 +203,14 @@ func (s EventService) Cancel(ctx context.Context, token string, eventID pgtype.U
 			if _, err = q.CancelEvent(ctx, queries.CancelEventParams{ID: eventID, CancelledAt: timestamp(now)}); err != nil {
 				return struct{}{}, err
 			}
-			holders, err := q.ReleaseEventReservations(
-				ctx,
-				queries.ReleaseEventReservationsParams{EventID: eventID, UpdatedAt: timestamp(now)},
-			)
+			notified, err := q.CancelEventReservationsAndNotify(ctx, queries.CancelEventReservationsAndNotifyParams{
+				EventID: eventID, AsOf: timestamp(now), ExpiresAt: e.EndsAt,
+			})
 			if err != nil {
 				return struct{}{}, err
-			}
-			payload, err := json.Marshal(map[string]string{"event_id": eventID.String()})
-			if err != nil {
-				return struct{}{}, err
-			}
-			for _, donor := range holders {
-				key := eventID.String() + ":" + donor.String()
-				pushID, err := NewID()
-				if err != nil {
-					return struct{}{}, err
-				}
-				if err = q.QueueEventPush(ctx, queries.QueueEventPushParams{
-					ID: pushID, DonorID: donor, Category: eventCancelledCategory, DedupKey: "push:event-cancelled:" + key,
-					Context: payload, AvailableAt: timestamp(now), ExpiresAt: e.EndsAt,
-				}); err != nil {
-					return struct{}{}, err
-				}
-				messageID, err := NewID()
-				if err != nil {
-					return struct{}{}, err
-				}
-				if err = q.InsertFinancialMessage(ctx, queries.InsertFinancialMessageParams{
-					ID: messageID, DonorID: donor, Kind: eventCancelledCategory, DedupKey: "message:event-cancelled:" + key,
-					Context: payload, AvailableAt: timestamp(now),
-				}); err != nil {
-					return struct{}{}, err
-				}
 			}
 			return struct{}{}, auditStaff(ctx, q, actor.ID, "event.cancelled", eventID.String(),
-				map[string]int{"notified": len(holders)}, now)
+				map[string]int64{"notified": notified}, now)
 		})
 	return err
 }

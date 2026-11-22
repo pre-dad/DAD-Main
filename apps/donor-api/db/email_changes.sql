@@ -27,12 +27,12 @@ INSERT INTO donor_identity_events(id,donor_id,email_change_id,action) VALUES($1,
 
 -- name: EmailChangeDeliveryOwner :one
 SELECT d.id FROM donors d JOIN donor_email_changes c ON c.donor_id=d.id
-WHERE c.stage IN ('CURRENT','NEW') AND c.sent_at IS NULL AND c.attempts<5 AND c.available_at<=$1
+WHERE c.stage IN ('CURRENT','NEW') AND c.sent_at IS NULL AND c.attempts<sqlc.arg(max_attempts)::int AND c.available_at<=$1
 ORDER BY c.available_at,c.id LIMIT 1 FOR UPDATE OF d SKIP LOCKED;
 
 -- name: NextEmailChangeDelivery :one
 SELECT * FROM donor_email_changes WHERE donor_id=$1 AND stage IN ('CURRENT','NEW')
-AND sent_at IS NULL AND attempts<5 AND available_at<=$2 ORDER BY available_at,id LIMIT 1 FOR UPDATE;
+AND sent_at IS NULL AND attempts<sqlc.arg(max_attempts)::int AND available_at<=$2 ORDER BY available_at,id LIMIT 1 FOR UPDATE;
 
 -- name: EmailChangeDelivered :exec
 UPDATE donor_email_changes SET sent_at=$2,encrypted_token=NULL WHERE id=$1 AND stage=$3;

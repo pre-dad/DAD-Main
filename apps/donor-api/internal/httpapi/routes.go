@@ -1,6 +1,10 @@
 package httpapi
 
-import "net/http"
+import (
+	"net/http"
+
+	"dad/donor-api/internal/store"
+)
 
 // auth names the credential a route acts on. The OpenAPI contract test checks
 // each operation's documented security against it.
@@ -22,13 +26,11 @@ type route struct {
 }
 
 // routes is the complete API surface. Reads are unguarded because they cannot
-// change state. Mutations pass the Origin and rate-limit guard: donor and
-// public routes admit the public origin, and the native donor app on donor
-// account routes and link capture only, of which app entry routes admit
-// nothing else; staff
-// routes admit only the staff origin, and refuse any request a browser reports
-// as started elsewhere. The Stripe webhook is authenticated by its signature
-// instead.
+// change state. Mutations pass the Origin and rate-limit guard: public routes
+// admit the public origin, donor account routes and link capture also admit the
+// native app (app entry routes admit nothing else), and staff routes admit only the staff origin and refuse any
+// request a browser reports as started elsewhere. The Stripe webhook is
+// authenticated by its signature instead.
 func (a *api) routes() []route {
 	return []route{
 		a.public("GET /health/live", a.live),
@@ -117,9 +119,9 @@ func (a *api) routes() []route {
 		a.staffRead("GET /donor/staff/me", a.staffMe),
 		a.staffRead("GET /donor/staff/accounts", a.staffAccounts),
 		a.staffWrite("POST /donor/staff/accounts", a.inviteStaff),
-		a.staffWrite("POST /donor/staff/accounts/{staff_id}/disable", a.changeStaffAccess("disable")),
-		a.staffWrite("POST /donor/staff/accounts/{staff_id}/recovery", a.changeStaffAccess("recovery")),
-		a.staffWrite("POST /donor/staff/accounts/{staff_id}/role", a.changeStaffAccess("role")),
+		a.staffWrite("POST /donor/staff/accounts/{staff_id}/disable", a.changeStaffAccess(store.AccessDisable)),
+		a.staffWrite("POST /donor/staff/accounts/{staff_id}/recovery", a.changeStaffAccess(store.AccessRecovery)),
+		a.staffWrite("POST /donor/staff/accounts/{staff_id}/role", a.changeStaffAccess(store.AccessRole)),
 
 		a.staffRead("GET /donor/staff/donors", a.searchDonors),
 		a.staffRead("GET /donor/staff/donors/{donor_id}", a.donorDetail),
@@ -169,21 +171,23 @@ func (a *api) routes() []route {
 		a.partnerWrite("POST /donor/partner/logo", a.partnerSaveLogo),
 		a.partnerRead("GET /donor/partner/company-code.svg", a.partnerCompanyCode),
 		a.partnerWrite("POST /donor/partner/users", a.partnerInviteUser),
-		a.partnerWrite("POST /donor/partner/users/{userID}/remove", a.partnerRemoveUser),
+		a.partnerWrite("POST /donor/partner/users/{user_id}/reinvite", a.partnerReinviteUser),
+		a.partnerWrite("POST /donor/partner/users/{user_id}/remove", a.partnerRemoveUser),
 		a.partnerWrite("POST /donor/partner/sign-out", a.partnerSignOut),
 		a.staffRead("GET /donor/staff/partners", a.staffPartners),
 		a.staffRead("GET /donor/staff/partners/pending", a.staffPartnerPending),
-		a.staffRead("GET /donor/staff/partners/{partnerID}", a.staffPartnerDetail),
-		a.staffWrite("POST /donor/staff/partners/{partnerID}/users", a.staffPartnerInviteUser),
-		a.staffRead("GET /donor/staff/partners/{partnerID}/logo", a.staffPartnerLogo),
-		a.staffWrite("POST /donor/staff/partners/{partnerID}/logo", a.staffPartnerSaveLogo),
-		a.staffWrite("POST /donor/staff/partners/{partnerID}/users/{userID}/remove", a.staffPartnerRemoveUser),
-		a.staffWrite("POST /donor/staff/partners/{appID}/approve", a.staffPartnerApprove),
-		a.staffWrite("POST /donor/staff/partners/{appID}/reject", a.staffPartnerReject),
-		a.staffWrite("POST /donor/staff/partners/{partnerID}/link", a.staffPartnerLink),
-		a.staffWrite("POST /donor/staff/partners/{partnerID}/match", a.staffPartnerMatch),
-		a.staffRead("GET /donor/staff/partners/{partnerID}/match-status", a.staffPartnerMatchStatus),
-		a.staffWrite("POST /donor/staff/partners/{partnerID}/match-payment", a.staffPartnerMatchPayment),
+		a.staffRead("GET /donor/staff/partners/{partner_id}", a.staffPartnerDetail),
+		a.staffWrite("POST /donor/staff/partners/{partner_id}/users", a.staffPartnerInviteUser),
+		a.staffRead("GET /donor/staff/partners/{partner_id}/logo", a.staffPartnerLogo),
+		a.staffWrite("POST /donor/staff/partners/{partner_id}/logo", a.staffPartnerSaveLogo),
+		a.staffWrite("POST /donor/staff/partners/{partner_id}/users/{user_id}/reinvite", a.staffPartnerReinviteUser),
+		a.staffWrite("POST /donor/staff/partners/{partner_id}/users/{user_id}/remove", a.staffPartnerRemoveUser),
+		a.staffWrite("POST /donor/staff/partners/{app_id}/approve", a.staffPartnerApprove),
+		a.staffWrite("POST /donor/staff/partners/{app_id}/reject", a.staffPartnerReject),
+		a.staffWrite("POST /donor/staff/partners/{partner_id}/link", a.staffPartnerLink),
+		a.staffWrite("POST /donor/staff/partners/{partner_id}/match", a.staffPartnerMatch),
+		a.staffRead("GET /donor/staff/partners/{partner_id}/match-status", a.staffPartnerMatchStatus),
+		a.staffWrite("POST /donor/staff/partners/{partner_id}/match-payment", a.staffPartnerMatchPayment),
 		a.staffWrite("POST /donor/staff/content/sources", a.uploadSource),
 		a.staffRead("GET /donor/staff/content/sources/{source_id}", a.downloadSource),
 		a.staffWrite("POST /donor/staff/content/wording", a.setRecognitionWording),

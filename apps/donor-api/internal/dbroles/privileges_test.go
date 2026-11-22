@@ -215,14 +215,14 @@ func TestEachProcessReadsItsOwnURL(t *testing.T) {
 		dbroles.OwnerVariable:                   "postgresql://owner@db/app",
 	}
 	getenv := func(name string) string { return env[name] }
-	if got := dbroles.Workers["login-email"].URL(getenv); got != "postgresql://login@db/app" {
-		t.Errorf("own URL: %q", got)
+	if got, err := dbroles.Workers["login-email"].URL(getenv); err != nil || got != "postgresql://login@db/app" {
+		t.Errorf("own URL: %q, %v", got, err)
 	}
-	if got := dbroles.API.URL(getenv); got != "" {
-		t.Errorf("owner URL without permission: %q", got)
+	if got, err := dbroles.API.URL(getenv); err != nil || got != "" {
+		t.Errorf("owner URL without permission: %q, %v", got, err)
 	}
 	env[dbroles.AllowOwnerVariable] = "true"
-	if got := dbroles.API.URL(getenv); got != "postgresql://owner@db/app" {
+	if got, err := dbroles.API.URL(getenv); err != nil || got != "postgresql://owner@db/app" {
 		t.Errorf("owner URL with permission: %q", got)
 	}
 	if got := dbroles.StaffCLI.Variable(); got != "DONOR_STAFF_CLI_DATABASE_URL" {

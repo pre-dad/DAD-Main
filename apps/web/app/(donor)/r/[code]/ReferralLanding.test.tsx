@@ -5,7 +5,9 @@ import ReferralLanding from "./ReferralLanding";
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  vi.useRealTimers();
 });
+
 function response(data: unknown, status = 200) {
   return { ok: status < 400, status, json: async () => data };
 }
@@ -35,6 +37,34 @@ it("holds a tap made before the referral is saved, rather than losing the attrib
   expect(fireEvent.click(link)).toBe(false);
   expect(await screen.findByRole("link", { name: "Saving your referral…" })).toHaveAttribute("aria-disabled", "true");
   expect(screen.getByRole("status")).toHaveTextContent("Saving your referral…");
+});
+
+it("follows the give link after the capture window and ignores repeat taps while waiting", async () => {
+  vi.useFakeTimers();
+  const assign = vi.fn();
+  vi.stubGlobal("location", { assign });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => new Promise(() => {})),
+  );
+  try {
+    render(<ReferralLanding code="code" kind="LINK" referrer={{ state: "found", name: "Sam" }} />);
+    const link = screen.getByRole("link", { name: "Give $1 a day with Sam" });
+    expect(fireEvent.click(link, { altKey: true })).toBe(true);
+    expect(fireEvent.click(link)).toBe(false);
+    expect(fireEvent.click(screen.getByRole("link", { name: "Saving your referral…" }))).toBe(false);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3999);
+    });
+    expect(assign).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(assign).toHaveBeenCalledWith("/donate");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("does not let a capture response rename the server-rendered invitation", async () => {

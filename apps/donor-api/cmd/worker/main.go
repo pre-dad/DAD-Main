@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -56,7 +57,10 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 	if getenv("DONOR_GO_WORKERS_ENABLED") != "true" {
 		return configError("workers require DONOR_GO_WORKERS_ENABLED=true")
 	}
-	dsn := role.URL(getenv)
+	dsn, err := role.URL(getenv)
+	if err != nil {
+		return configError(err.Error())
+	}
 	if dsn == "" {
 		return configError(role.Variable() + " is required")
 	}
@@ -142,40 +146,22 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 		exports := &store.ExportWorker{DB: pool}
 		return func(ctx context.Context) (bool, error) {
 			now := time.Now().UTC()
-			purged, err := retention.PurgeNext(ctx, now)
-			if err != nil {
-				return false, err
-			}
-			// Staff exports share this worker (no extra service to deploy): one
-			// bounded batch per step, so projections are never starved.
-			purged = exports.RunNext(ctx, now) || purged
-			processed, err := store.CatchUpProjections(ctx, pool, func() time.Time { return time.Now().UTC() }, store.CatchUpSlice)
-			if err != nil {
-				return purged || processed > 0, err
-			}
-			// Periodic, throttled global ranking rollup (PRD §6.4, risk #6).
-			ranked, err := rankings.RefreshIfDue(ctx, now)
-			if err != nil {
-				return purged || processed > 0 || ranked, err
-			}
-			alerted, err := nearby.QueueNext(ctx, now)
-			if err != nil {
-				return purged || processed > 0 || ranked, err
-			}
-			// Event reminder sweeps (E-7); idempotent per window, so a frequent
-			// sweep is cheap and each 24h/2h window fires once.
-			remind, err := reminders.QueueDueReminders(ctx, now)
-			if err != nil {
-				return purged || processed > 0 || ranked || alerted || remind > 0, err
-			}
-			// Monthly partner report sweep (§6.11); idempotent per partner per
-			// calendar month via the intent's dedup key.
-			monthly, err := monthlyPartners.QueueDueMonthly(ctx, now)
-			if err != nil {
-				return purged || processed > 0 || ranked || remind > 0 || alerted || monthly > 0, err
-			}
-			teams, err := teamMonths.CloseDue(ctx, now)
-			return purged || processed > 0 || ranked || remind > 0 || alerted || monthly > 0 || teams > 0, err
+			return runAll(ctx,
+				func(ctx context.Context) (bool, error) { return retention.PurgeNext(ctx, now) },
+				// Staff exports share this worker (no extra service to deploy): one
+				// bounded batch per step, so projections are never starved.
+				func(ctx context.Context) (bool, error) { return exports.RunNext(ctx, now), nil },
+				func(ctx context.Context) (bool, error) {
+					return counted(store.CatchUpProjections(ctx, pool, func() time.Time { return time.Now().UTC() }, store.CatchUpSlice))
+				},
+				func(ctx context.Context) (bool, error) { return rankings.RefreshIfDue(ctx, now) },
+				func(ctx context.Context) (bool, error) { return nearby.QueueNext(ctx, now) },
+				// Idempotent per window, so a frequent sweep is cheap and each 24h/2h window fires once.
+				func(ctx context.Context) (bool, error) { return counted(reminders.QueueDueReminders(ctx, now)) },
+				// Idempotent per partner per calendar month via the intent's dedup key.
+				func(ctx context.Context) (bool, error) { return counted(monthlyPartners.QueueDueMonthly(ctx, now)) },
+				func(ctx context.Context) (bool, error) { return counted(teamMonths.CloseDue(ctx, now)) },
+			)
 		}, nil
 	case "push":
 		config, err := push.FromEnvironment(getenv)
@@ -195,12 +181,8 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 		partner := store.PartnerPushWorker{DB: pool, Providers: providers}
 		return func(ctx context.Context) (bool, error) {
 			now := time.Now().UTC()
-			donorWorked, err := worker.DeliverNext(ctx, now)
-			if err != nil {
-				return donorWorked, err
-			}
-			partnerWorked, err := partner.DeliverNext(ctx, now)
-			return donorWorked || partnerWorked, err
+			return runAll(ctx, func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, now) },
+				func(ctx context.Context) (bool, error) { return partner.DeliverNext(ctx, now) })
 		}, nil
 	}
 	settings, err := mail.FromEnvironment(getenv)
@@ -231,15 +213,40 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 			store.PartnerMessageWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport},
 		}
 	}
+	return rotating(queues), nil
+}
+
+// rotating delivers at most one item per step. It starts at a different queue each step, so a busy or failing
+// queue cannot starve the ones after it.
+func rotating(queues []deliverer) func(context.Context) (bool, error) {
+	var start atomic.Uint64
 	return func(ctx context.Context) (bool, error) {
 		now := time.Now().UTC()
-		for _, queue := range queues {
-			if worked, err := queue.DeliverNext(ctx, now); worked || err != nil {
-				return worked, err
+		first := int(start.Add(1) % uint64(len(queues)))
+		var failures error
+		for i := range queues {
+			worked, err := queues[(first+i)%len(queues)].DeliverNext(ctx, now)
+			if worked {
+				return true, err
 			}
+			failures = errors.Join(failures, err)
 		}
-		return false, nil
-	}, nil
+		return false, failures
+	}
+}
+
+func counted[N ~int | ~int64](n N, err error) (bool, error) { return n > 0, err }
+
+// runAll runs every step even when an earlier one fails, so one persistent error cannot starve the others.
+func runAll(ctx context.Context, steps ...func(context.Context) (bool, error)) (bool, error) {
+	var worked bool
+	var failures error
+	for _, step := range steps {
+		stepWorked, err := step(ctx)
+		worked = worked || stepWorked
+		failures = errors.Join(failures, err)
+	}
+	return worked, failures
 }
 
 func main() {

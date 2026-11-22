@@ -67,6 +67,3 @@ INSERT INTO donor_staff_ceremonies(token_hash,kind,invite_id,session,expires_at)
 -- name: TakeStaffCeremony :one
 DELETE FROM donor_staff_ceremonies WHERE token_hash=$1 AND kind=$2 AND expires_at>clock_timestamp()
 RETURNING invite_id,session,expires_at;
-
--- name: DeleteExpiredStaffCeremonies :exec
-DELETE FROM donor_staff_ceremonies WHERE expires_at<=$1;

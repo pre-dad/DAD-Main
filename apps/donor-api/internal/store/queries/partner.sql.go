@@ -117,6 +117,22 @@ func (q *Queries) AuthenticatedPartnerUser(ctx context.Context, arg Authenticate
 	return i, err
 }
 
+const cancelPartnerLoginEmails = `-- name: CancelPartnerLoginEmails :exec
+UPDATE donor_partner_login_emails SET completed_at=$2, encrypted_token=NULL
+WHERE partner_user_id=$1 AND completed_at IS NULL
+`
+
+type CancelPartnerLoginEmailsParams struct {
+	PartnerUserID pgtype.UUID        `json:"partner_user_id"`
+	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
+}
+
+// Drops the user's queued emails that have not been delivered.
+func (q *Queries) CancelPartnerLoginEmails(ctx context.Context, arg CancelPartnerLoginEmailsParams) error {
+	_, err := q.db.Exec(ctx, cancelPartnerLoginEmails, arg.PartnerUserID, arg.CompletedAt)
+	return err
+}
+
 const claimPartnerLoginEmail = `-- name: ClaimPartnerLoginEmail :exec
 UPDATE donor_partner_login_emails SET attempts=attempts+1, available_at=$2 WHERE id=$1
 `
@@ -267,6 +283,22 @@ func (q *Queries) FailPartnerMessage(ctx context.Context, arg FailPartnerMessage
 	return err
 }
 
+const failUnreadablePartnerLoginEmail = `-- name: FailUnreadablePartnerLoginEmail :exec
+UPDATE donor_partner_login_emails SET attempts=attempts+1, last_error=$2, available_at=$3 WHERE id=$1 AND completed_at IS NULL
+`
+
+type FailUnreadablePartnerLoginEmailParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	LastError   pgtype.Text        `json:"last_error"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+}
+
+// The stored link cannot be decrypted, so no send was attempted; count the try so the job parks.
+func (q *Queries) FailUnreadablePartnerLoginEmail(ctx context.Context, arg FailUnreadablePartnerLoginEmailParams) error {
+	_, err := q.db.Exec(ctx, failUnreadablePartnerLoginEmail, arg.ID, arg.LastError, arg.AvailableAt)
+	return err
+}
+
 const fanOutPartnerMessage = `-- name: FanOutPartnerMessage :execrows
 INSERT INTO donor_partner_message_deliveries (id,message_id,partner_user_id,ordinal,available_at)
 SELECT gen_random_uuid(),$1,u.id,(row_number() OVER (ORDER BY u.email,u.id))::int-1,$2
@@ -381,8 +413,8 @@ func (q *Queries) InsertPartnerApplication(ctx context.Context, arg InsertPartne
 
 const insertPartnerReport = `-- name: InsertPartnerReport :exec
 INSERT INTO donor_partner_reports
-  (id, partner_id, exported_by, committed_minor, deployed_minor, people_reached, created_at, pdf, snapshot)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+  (id, partner_id, exported_by, committed_minor, deployed_minor, people_reached, created_at, pdf, snapshot, snapshot_digest)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 `
 
 type InsertPartnerReportParams struct {
@@ -395,6 +427,7 @@ type InsertPartnerReportParams struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	Pdf            []byte             `json:"pdf"`
 	Snapshot       []byte             `json:"snapshot"`
+	SnapshotDigest []byte             `json:"snapshot_digest"`
 }
 
 // P-14: record one dashboard PDF export for the export-history list.
@@ -409,6 +442,7 @@ func (q *Queries) InsertPartnerReport(ctx context.Context, arg InsertPartnerRepo
 		arg.CreatedAt,
 		arg.Pdf,
 		arg.Snapshot,
+		arg.SnapshotDigest,
 	)
 	return err
 }
@@ -443,7 +477,7 @@ const invitePartnerUser = `-- name: InvitePartnerUser :one
 INSERT INTO donor_partner_users (id, partner_id, email, name, role, invited_by, created_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7)
 ON CONFLICT (partner_id, email) DO UPDATE
-SET role=EXCLUDED.role, disabled=false
+SET name=EXCLUDED.name, role=EXCLUDED.role, disabled=false
 RETURNING id
 `
 
@@ -459,7 +493,9 @@ type InvitePartnerUserParams struct {
 
 // P-4: a partner admin invites a VIEWER (or ADMIN) by email; the signer of an
 // approved application is invited as the first ADMIN. Re-inviting refreshes
-// the role and re-enables a removed user. The emailed link is minted on delivery.
+// the name and role and re-enables a removed user; accepted_at is kept on
+// purpose, since sign-in still needs a freshly emailed link. The emailed link
+// is minted on delivery.
 func (q *Queries) InvitePartnerUser(ctx context.Context, arg InvitePartnerUserParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, invitePartnerUser,
 		arg.ID,
@@ -505,7 +541,7 @@ func (q *Queries) LinkInitiativeToPartner(ctx context.Context, arg LinkInitiativ
 }
 
 const lockPartnerLoginRecipient = `-- name: LockPartnerLoginRecipient :one
-SELECT u.id, u.email, u.name, u.role, u.disabled, u.invite_token_hash, p.organization, p.approved_at
+SELECT u.id, u.email, u.name, u.role, u.disabled, u.invite_token_hash, u.accepted_at, p.organization, p.approved_at
 FROM donor_partner_users u
 JOIN donor_partner_signups p ON p.id = u.partner_id
 WHERE u.id=$1
@@ -519,6 +555,7 @@ type LockPartnerLoginRecipientRow struct {
 	Role            string             `json:"role"`
 	Disabled        bool               `json:"disabled"`
 	InviteTokenHash pgtype.Text        `json:"invite_token_hash"`
+	AcceptedAt      pgtype.Timestamptz `json:"accepted_at"`
 	Organization    string             `json:"organization"`
 	ApprovedAt      pgtype.Timestamptz `json:"approved_at"`
 }
@@ -533,6 +570,7 @@ func (q *Queries) LockPartnerLoginRecipient(ctx context.Context, id pgtype.UUID)
 		&i.Role,
 		&i.Disabled,
 		&i.InviteTokenHash,
+		&i.AcceptedAt,
 		&i.Organization,
 		&i.ApprovedAt,
 	)
@@ -553,11 +591,11 @@ func (q *Queries) LockPartnerOrg(ctx context.Context, id pgtype.UUID) (pgtype.UU
 const nextPartnerDelivery = `-- name: NextPartnerDelivery :one
 WITH next AS (
     SELECT q.id FROM donor_partner_message_deliveries q
-    WHERE q.completed_at IS NULL AND q.attempts<5 AND q.available_at<=$1
+    WHERE q.completed_at IS NULL AND q.attempts<$1::int AND q.available_at<=$2
     ORDER BY q.available_at,q.id LIMIT 1 FOR UPDATE SKIP LOCKED
 ), claimed AS (
     UPDATE donor_partner_message_deliveries d
-    SET attempts=d.attempts+1,available_at=$2
+    SET attempts=d.attempts+1,available_at=$3
     FROM next WHERE d.id=next.id
     RETURNING d.id,d.message_id,d.partner_user_id,d.ordinal,d.attempts
 )
@@ -572,8 +610,9 @@ JOIN donor_partner_signups s ON s.id=m.partner_id
 `
 
 type NextPartnerDeliveryParams struct {
-	AsOf       pgtype.Timestamptz `json:"as_of"`
-	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+	MaxAttempts int32              `json:"max_attempts"`
+	AsOf        pgtype.Timestamptz `json:"as_of"`
+	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
 }
 
 type NextPartnerDeliveryRow struct {
@@ -593,7 +632,7 @@ type NextPartnerDeliveryRow struct {
 // lease taken in the same statement, so a send that crashes the worker is still
 // retried later and eventually parked.
 func (q *Queries) NextPartnerDelivery(ctx context.Context, arg NextPartnerDeliveryParams) (NextPartnerDeliveryRow, error) {
-	row := q.db.QueryRow(ctx, nextPartnerDelivery, arg.AsOf, arg.LeaseUntil)
+	row := q.db.QueryRow(ctx, nextPartnerDelivery, arg.MaxAttempts, arg.AsOf, arg.LeaseUntil)
 	var i NextPartnerDeliveryRow
 	err := row.Scan(
 		&i.ID,
@@ -611,12 +650,17 @@ func (q *Queries) NextPartnerDelivery(ctx context.Context, arg NextPartnerDelive
 }
 
 const nextPartnerLoginEmail = `-- name: NextPartnerLoginEmail :one
-SELECT id, partner_user_id, kind, encrypted_token, expires_at, attempts, last_error, available_at, completed_at, created_at FROM donor_partner_login_emails WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+SELECT id, partner_user_id, kind, encrypted_token, expires_at, attempts, last_error, available_at, completed_at, created_at FROM donor_partner_login_emails WHERE completed_at IS NULL AND attempts<$2::int AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
 `
 
-func (q *Queries) NextPartnerLoginEmail(ctx context.Context, availableAt pgtype.Timestamptz) (DonorPartnerLoginEmail, error) {
-	row := q.db.QueryRow(ctx, nextPartnerLoginEmail, availableAt)
+type NextPartnerLoginEmailParams struct {
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	MaxAttempts int32              `json:"max_attempts"`
+}
+
+func (q *Queries) NextPartnerLoginEmail(ctx context.Context, arg NextPartnerLoginEmailParams) (DonorPartnerLoginEmail, error) {
+	row := q.db.QueryRow(ctx, nextPartnerLoginEmail, arg.AvailableAt, arg.MaxAttempts)
 	var i DonorPartnerLoginEmail
 	err := row.Scan(
 		&i.ID,
@@ -634,12 +678,17 @@ func (q *Queries) NextPartnerLoginEmail(ctx context.Context, availableAt pgtype.
 }
 
 const nextPartnerMessage = `-- name: NextPartnerMessage :one
-SELECT id, partner_id, kind, dedup_key, context, available_at, completed_at, attempts, last_error, suppressed_reason, subject, body, created_at, fanned_out_at FROM donor_partner_messages WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+SELECT id, partner_id, kind, dedup_key, context, available_at, completed_at, attempts, last_error, suppressed_reason, subject, body, created_at, fanned_out_at FROM donor_partner_messages WHERE completed_at IS NULL AND attempts<$2::int AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
 `
 
-func (q *Queries) NextPartnerMessage(ctx context.Context, availableAt pgtype.Timestamptz) (DonorPartnerMessage, error) {
-	row := q.db.QueryRow(ctx, nextPartnerMessage, availableAt)
+type NextPartnerMessageParams struct {
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	MaxAttempts int32              `json:"max_attempts"`
+}
+
+func (q *Queries) NextPartnerMessage(ctx context.Context, arg NextPartnerMessageParams) (DonorPartnerMessage, error) {
+	row := q.db.QueryRow(ctx, nextPartnerMessage, arg.AvailableAt, arg.MaxAttempts)
 	var i DonorPartnerMessage
 	err := row.Scan(
 		&i.ID,
@@ -863,12 +912,37 @@ func (q *Queries) PartnerLogo(ctx context.Context, id pgtype.UUID) ([]byte, erro
 }
 
 const partnerOrgByID = `-- name: PartnerOrgByID :one
-SELECT organization, name, email, website, message, request_hash, consent_version, id, created_at, approved_at, partner_type, workforce_size, match_rate_bp, match_cap_minor, company_code, logo_url, description, logo_png FROM donor_partner_signups WHERE id=$1
+SELECT organization, name, email, website, message, request_hash, consent_version, id, created_at, approved_at,
+  partner_type, workforce_size, match_rate_bp, match_cap_minor, company_code, logo_url, description,
+  (logo_png IS NOT NULL)::boolean AS has_logo
+FROM donor_partner_signups WHERE id=$1
 `
 
-func (q *Queries) PartnerOrgByID(ctx context.Context, id pgtype.UUID) (DonorPartnerSignup, error) {
+type PartnerOrgByIDRow struct {
+	Organization   string             `json:"organization"`
+	Name           string             `json:"name"`
+	Email          string             `json:"email"`
+	Website        string             `json:"website"`
+	Message        string             `json:"message"`
+	RequestHash    string             `json:"request_hash"`
+	ConsentVersion string             `json:"consent_version"`
+	ID             pgtype.UUID        `json:"id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
+	PartnerType    string             `json:"partner_type"`
+	WorkforceSize  int32              `json:"workforce_size"`
+	MatchRateBp    int32              `json:"match_rate_bp"`
+	MatchCapMinor  int64              `json:"match_cap_minor"`
+	CompanyCode    pgtype.Text        `json:"company_code"`
+	LogoUrl        string             `json:"logo_url"`
+	Description    string             `json:"description"`
+	HasLogo        bool               `json:"has_logo"`
+}
+
+// Excludes the logo bytes (up to 1 MiB); PartnerLogo reads them on their own.
+func (q *Queries) PartnerOrgByID(ctx context.Context, id pgtype.UUID) (PartnerOrgByIDRow, error) {
 	row := q.db.QueryRow(ctx, partnerOrgByID, id)
-	var i DonorPartnerSignup
+	var i PartnerOrgByIDRow
 	err := row.Scan(
 		&i.Organization,
 		&i.Name,
@@ -887,7 +961,7 @@ func (q *Queries) PartnerOrgByID(ctx context.Context, id pgtype.UUID) (DonorPart
 		&i.CompanyCode,
 		&i.LogoUrl,
 		&i.Description,
-		&i.LogoPng,
+		&i.HasLogo,
 	)
 	return i, err
 }
@@ -904,7 +978,7 @@ SELECT
   EXISTS(SELECT 1 FROM donor_initiative_metrics m JOIN donor_initiatives i ON i.id=m.initiative_id
     WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED' AND m.publish_state='PUBLISHED' AND m.unit='PEOPLE') AS people_reached_verified,
   coalesce((SELECT sum(ip.committed_minor) FROM donor_initiatives i JOIN donor_initiative_partners ip ON ip.initiative_id=i.id AND ip.partner_id=p.id
-            WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
+            WHERE i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
   coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s
             JOIN donor_initiatives i ON i.id=s.initiative_id
             WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED'), 0)::bigint AS deployed_minor,
@@ -976,6 +1050,54 @@ func (q *Queries) PartnerReportArtifact(ctx context.Context, arg PartnerReportAr
 	return pdf, err
 }
 
+const partnerReportSnapshot = `-- name: PartnerReportSnapshot :one
+SELECT pdf FROM donor_partner_reports
+WHERE partner_id=$1 AND snapshot_digest=$2 AND pdf IS NOT NULL
+`
+
+type PartnerReportSnapshotParams struct {
+	PartnerID      pgtype.UUID `json:"partner_id"`
+	SnapshotDigest []byte      `json:"snapshot_digest"`
+}
+
+func (q *Queries) PartnerReportSnapshot(ctx context.Context, arg PartnerReportSnapshotParams) ([]byte, error) {
+	row := q.db.QueryRow(ctx, partnerReportSnapshot, arg.PartnerID, arg.SnapshotDigest)
+	var pdf []byte
+	err := row.Scan(&pdf)
+	return pdf, err
+}
+
+const partnerReportUsage = `-- name: PartnerReportUsage :one
+WITH reports AS MATERIALIZED (
+  SELECT created_at,octet_length(pdf) AS size FROM donor_partner_reports
+  WHERE partner_id=$2 LIMIT 1001
+)
+SELECT count(*)::bigint AS reports,
+  coalesce(sum(size),0)::bigint AS bytes,
+  count(*) FILTER (WHERE created_at >= $1::timestamptz
+    AND created_at < $1::timestamptz + interval '24 hours')::bigint AS today
+FROM reports
+`
+
+type PartnerReportUsageParams struct {
+	DayStart  pgtype.Timestamptz `json:"day_start"`
+	PartnerID pgtype.UUID        `json:"partner_id"`
+}
+
+type PartnerReportUsageRow struct {
+	Reports int64 `json:"reports"`
+	Bytes   int64 `json:"bytes"`
+	Today   int64 `json:"today"`
+}
+
+// Legacy organizations already over quota need only a bounded prefix to refuse growth.
+func (q *Queries) PartnerReportUsage(ctx context.Context, arg PartnerReportUsageParams) (PartnerReportUsageRow, error) {
+	row := q.db.QueryRow(ctx, partnerReportUsage, arg.DayStart, arg.PartnerID)
+	var i PartnerReportUsageRow
+	err := row.Scan(&i.Reports, &i.Bytes, &i.Today)
+	return i, err
+}
+
 const partnerReports = `-- name: PartnerReports :many
 SELECT r.id, r.committed_minor, r.deployed_minor, r.people_reached, r.created_at, u.name AS exported_by_name,
   (r.pdf IS NOT NULL)::boolean AS downloadable,
@@ -1035,7 +1157,13 @@ JOIN donor_initiatives i ON i.id = s.initiative_id
 WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=$1) AND i.publish_state='PUBLISHED'
 GROUP BY s.category
 ORDER BY s.category
+LIMIT $2::integer
 `
+
+type PartnerSpendByCategoryParams struct {
+	PartnerID pgtype.UUID `json:"partner_id"`
+	MaxRows   pgtype.Int4 `json:"max_rows"`
+}
 
 type PartnerSpendByCategoryRow struct {
 	Category    string `json:"category"`
@@ -1043,8 +1171,8 @@ type PartnerSpendByCategoryRow struct {
 }
 
 // P-12: spend by category across a partner's linked initiatives (totals only).
-func (q *Queries) PartnerSpendByCategory(ctx context.Context, partnerID pgtype.UUID) ([]PartnerSpendByCategoryRow, error) {
-	rows, err := q.db.Query(ctx, partnerSpendByCategory, partnerID)
+func (q *Queries) PartnerSpendByCategory(ctx context.Context, arg PartnerSpendByCategoryParams) ([]PartnerSpendByCategoryRow, error) {
+	rows, err := q.db.Query(ctx, partnerSpendByCategory, arg.PartnerID, arg.MaxRows)
 	if err != nil {
 		return nil, err
 	}
@@ -1127,11 +1255,14 @@ func (q *Queries) PartnerUsersForPartner(ctx context.Context, partnerID pgtype.U
 const partnerUsersForSignIn = `-- name: PartnerUsersForSignIn :many
 SELECT u.id FROM donor_partner_users u
 JOIN donor_partner_signups p ON p.id = u.partner_id
-WHERE u.email=$1 AND NOT u.disabled AND p.approved_at IS NOT NULL
-ORDER BY u.id
+WHERE u.email=$1 AND NOT u.disabled AND u.accepted_at IS NOT NULL AND p.approved_at IS NOT NULL
+ORDER BY u.id FOR UPDATE OF u
 `
 
-// The enabled users of approved partners who sign in with this email.
+// The enabled users of approved partners who sign in with this email. Only a
+// user who has accepted their invitation qualifies: a public request must not
+// replace the live invite link of someone who has not, who is re-invited by an
+// admin instead.
 func (q *Queries) PartnerUsersForSignIn(ctx context.Context, email string) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, partnerUsersForSignIn, email)
 	if err != nil {
@@ -1359,6 +1490,32 @@ func (q *Queries) QueuePartnerMessage(ctx context.Context, arg QueuePartnerMessa
 	return err
 }
 
+const recentPartnerInvites = `-- name: RecentPartnerInvites :one
+SELECT
+  count(*) FILTER (WHERE created_at > $1::timestamptz - interval '1 minute')::int AS last_minute,
+  count(*) FILTER (WHERE created_at > $1::timestamptz - interval '1 hour')::int AS last_hour
+FROM donor_partner_login_emails
+WHERE partner_user_id=$2::uuid AND kind IN ('APPROVED','INVITED')
+`
+
+type RecentPartnerInvitesParams struct {
+	AsOf          pgtype.Timestamptz `json:"as_of"`
+	PartnerUserID pgtype.UUID        `json:"partner_user_id"`
+}
+
+type RecentPartnerInvitesRow struct {
+	LastMinute int32 `json:"last_minute"`
+	LastHour   int32 `json:"last_hour"`
+}
+
+// How many invitations were queued for the user in the last minute and hour.
+func (q *Queries) RecentPartnerInvites(ctx context.Context, arg RecentPartnerInvitesParams) (RecentPartnerInvitesRow, error) {
+	row := q.db.QueryRow(ctx, recentPartnerInvites, arg.AsOf, arg.PartnerUserID)
+	var i RecentPartnerInvitesRow
+	err := row.Scan(&i.LastMinute, &i.LastHour)
+	return i, err
+}
+
 const renderPartnerMessage = `-- name: RenderPartnerMessage :exec
 UPDATE donor_partner_messages SET subject=$2,body=$3 WHERE id=$1
 `
@@ -1400,6 +1557,26 @@ type RevokePartnerUserSessionsParams struct {
 func (q *Queries) RevokePartnerUserSessions(ctx context.Context, arg RevokePartnerUserSessionsParams) error {
 	_, err := q.db.Exec(ctx, revokePartnerUserSessions, arg.PartnerUserID, arg.RevokedAt)
 	return err
+}
+
+const revokePendingPartnerInvite = `-- name: RevokePendingPartnerInvite :one
+UPDATE donor_partner_users SET invite_token_hash=NULL, invite_expires_at=NULL
+WHERE partner_id=$1 AND id=$2 AND NOT disabled AND accepted_at IS NULL
+RETURNING id
+`
+
+type RevokePendingPartnerInviteParams struct {
+	PartnerID pgtype.UUID `json:"partner_id"`
+	ID        pgtype.UUID `json:"id"`
+}
+
+// Ends the live invite link of a user who has not accepted yet, so a resend
+// leaves exactly one working link.
+func (q *Queries) RevokePendingPartnerInvite(ctx context.Context, arg RevokePendingPartnerInviteParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, revokePendingPartnerInvite, arg.PartnerID, arg.ID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const setPartnerLogo = `-- name: SetPartnerLogo :exec

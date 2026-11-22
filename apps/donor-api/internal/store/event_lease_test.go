@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -167,7 +169,7 @@ func TestConcurrentWorkersApplyAnEventOnce(t *testing.T) {
 func TestCrashBetweenClaimAndApplyRetriesAfterLeaseExpiry(t *testing.T) {
 	f, event := queuedRefund(t)
 	ctx := context.Background()
-	if _, found, err := f.worker.claim(ctx, time.Now().UTC()); err != nil || !found {
+	if _, found, err := f.worker.claim(ctx); err != nil || !found {
 		t.Fatal("claim failed", found, err)
 	}
 	// The claiming worker dies here: nothing else was written.
@@ -301,5 +303,84 @@ func TestDuplicateDeliveryAppliesOnce(t *testing.T) {
 func TestEventLeaseOutlastsProcessorStepBudget(t *testing.T) {
 	if eventLease <= workers.ProcessorStepBudget {
 		t.Fatalf("lease %s must outlast the step budget %s", eventLease, workers.ProcessorStepBudget)
+	}
+}
+
+// racingRefunds records a rival refund observation during the first rivals
+// refund reads, as a concurrent webhook or staff action would between the
+// attempt's count of observations and its apply.
+type racingRefunds struct {
+	*financialGateway
+	t      *testing.T
+	f      *workerFixture
+	rivals int
+	reads  int
+}
+
+func (g *racingRefunds) RetrieveRefund(ctx context.Context, id string) (payments.Object, error) {
+	g.reads++
+	if g.reads <= g.rivals {
+		g.t.Helper()
+		suffix := g.f.donorID.String()
+		for _, statement := range []string{
+			`INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at)
+SELECT gen_random_uuid(),id,'re_rival_` + suffix + `',3000,'USD','PENDING',now() FROM donor_gifts WHERE donor_id=$1
+ON CONFLICT DO NOTHING`,
+			`INSERT INTO donor_stripe_events(id,stripe_event_id,event_type,occurred_at,data,processed_at)
+VALUES (gen_random_uuid(),'evt_rival_` + suffix + `_` + strconv.Itoa(g.reads) + `','rival.test',now(),'{}',now())`,
+			`INSERT INTO donor_refund_observations(id,refund_id,source_event_id,status,observed_at)
+SELECT gen_random_uuid(),r.id,e.id,'PENDING',now() FROM donor_refunds r, donor_stripe_events e
+WHERE r.stripe_refund_id='re_rival_` + suffix + `' AND e.stripe_event_id='evt_rival_` + suffix + `_` + strconv.Itoa(g.reads) + `'`,
+		} {
+			args := []any{}
+			if strings.Contains(statement, "$1") {
+				args = append(args, g.f.donorID)
+			}
+			if _, err := g.f.db.Exec(ctx, statement, args...); err != nil {
+				g.t.Fatal(err)
+			}
+		}
+	}
+	return g.financialGateway.RetrieveRefund(ctx, id)
+}
+
+func cleanRivalRefunds(t *testing.T, f *workerFixture) {
+	t.Helper()
+	t.Cleanup(func() {
+		suffix := f.donorID.String()
+		cleanExec(
+			t,
+			"DELETE FROM donor_refund_observations WHERE refund_id IN (SELECT id FROM donor_refunds WHERE stripe_refund_id=$1)",
+			"re_rival_"+suffix,
+		)
+		cleanExec(t, "DELETE FROM donor_refunds WHERE stripe_refund_id=$1", "re_rival_"+suffix)
+		cleanExec(t, "DELETE FROM donor_stripe_events WHERE stripe_event_id LIKE $1", "evt_rival_"+suffix+"%")
+	})
+}
+
+func TestRefundApplyRefetchesWhenAnObservationLandsMeanwhile(t *testing.T) {
+	f, event := queuedRefund(t)
+	cleanRivalRefunds(t, f)
+	gateway := &racingRefunds{financialGateway: f.gateway, t: t, f: f, rivals: 1}
+	worker := EventWorker{DB: as(t, dbroles.StripeWorker), Gateway: gateway}
+	if worked, err := worker.ProcessNext(context.Background()); !worked || err != nil {
+		t.Fatalf("worker: %v %v", worked, err)
+	}
+	if row := readEvent(t, f, event); !row.processed || row.failure != "" || gateway.reads != 2 {
+		t.Fatalf("state %+v after %d refund reads, want applied on the second", row, gateway.reads)
+	}
+}
+
+func TestRefundApplyGivesUpAfterBoundedRefetches(t *testing.T) {
+	f, event := queuedRefund(t)
+	cleanRivalRefunds(t, f)
+	gateway := &racingRefunds{financialGateway: f.gateway, t: t, f: f, rivals: 100}
+	worker := EventWorker{DB: as(t, dbroles.StripeWorker), Gateway: gateway}
+	if worked, err := worker.ProcessNext(context.Background()); !worked || err != nil {
+		t.Fatalf("worker: %v %v", worked, err)
+	}
+	row := readEvent(t, f, event)
+	if row.processed || row.attempts != 1 || row.failure == "" || gateway.reads != 1+maxRefetch {
+		t.Fatalf("state %+v after %d refund reads, want a recorded failure after %d", row, gateway.reads, 1+maxRefetch)
 	}
 }

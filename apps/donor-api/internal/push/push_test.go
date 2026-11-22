@@ -21,7 +21,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -89,13 +91,31 @@ type apnsCall struct {
 	proto               int
 }
 
-func apnsServer(t *testing.T, status int, reason string) (*httptest.Server, *[]apnsCall) {
+// apnsCalls records requests from the server's handler goroutines.
+type apnsCalls struct {
+	mu   sync.Mutex
+	list []apnsCall
+}
+
+func (c *apnsCalls) add(call apnsCall) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.list = append(c.list, call)
+}
+
+func (c *apnsCalls) all() []apnsCall {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.list)
+}
+
+func apnsServer(t *testing.T, status int, reason string) (*httptest.Server, *apnsCalls) {
 	t.Helper()
-	var calls []apnsCall
+	calls := &apnsCalls{}
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		calls = append(calls, apnsCall{r.URL.Path, r.Header.Get("Authorization"), r.Header.Clone(), body, r.ProtoMajor})
+		calls.add(apnsCall{r.URL.Path, r.Header.Get("Authorization"), r.Header.Clone(), body, r.ProtoMajor})
 		if status == http.StatusServiceUnavailable {
 			w.Header().Set("Retry-After", "30")
 		}
@@ -107,7 +127,7 @@ func apnsServer(t *testing.T, status int, reason string) (*httptest.Server, *[]a
 	server.EnableHTTP2 = true
 	server.StartTLS()
 	t.Cleanup(server.Close)
-	return server, &calls
+	return server, calls
 }
 
 func newTestAPNs(t *testing.T, server *httptest.Server) (*APNs, *ecdsa.PrivateKey) {
@@ -136,10 +156,10 @@ func TestAPNsSendsSignedAlertsOverHTTP2(t *testing.T) {
 	if err := a.Send(context.Background(), Device{Token: token, Environment: "SANDBOX"}, notification); err != nil {
 		t.Fatal(err)
 	}
-	if len(*calls) != 2 || (*calls)[0].path != "/production/3/device/"+token || (*calls)[1].path != "/sandbox/3/device/"+token {
-		t.Fatalf("calls %+v", *calls)
+	if len(calls.all()) != 2 || calls.all()[0].path != "/production/3/device/"+token || calls.all()[1].path != "/sandbox/3/device/"+token {
+		t.Fatalf("calls %+v", calls.all())
 	}
-	first := (*calls)[0]
+	first := calls.all()[0]
 	if first.proto != 2 {
 		t.Fatalf("APNs requires HTTP/2, got HTTP/%d", first.proto)
 	}
@@ -158,7 +178,7 @@ func TestAPNsSendsSignedAlertsOverHTTP2(t *testing.T) {
 	if !reflect.DeepEqual(first.body, want) {
 		t.Fatalf("payload %v, want %v", first.body, want)
 	}
-	if (*calls)[1].authorization != first.authorization {
+	if calls.all()[1].authorization != first.authorization {
 		t.Fatal("a fresh provider token was signed for each send")
 	}
 	bearer, ok := strings.CutPrefix(first.authorization, "bearer ")
@@ -179,7 +199,7 @@ func TestAPNsSendsSignedAlertsOverHTTP2(t *testing.T) {
 	if err := a.Send(context.Background(), Device{Token: token, Environment: "PRODUCTION"}, notification); err != nil {
 		t.Fatal(err)
 	}
-	if (*calls)[2].authorization == first.authorization {
+	if calls.all()[2].authorization == first.authorization {
 		t.Fatal("provider token was not renewed after its lifetime")
 	}
 }
@@ -208,7 +228,7 @@ func TestAPNsMapsResponses(t *testing.T) {
 		}
 		if tc.status == http.StatusForbidden {
 			_ = a.Send(context.Background(), device, notification)
-			if (*calls)[0].authorization == (*calls)[1].authorization {
+			if calls.all()[0].authorization == calls.all()[1].authorization {
 				t.Errorf("%s: the refused provider token was used again", tc.reason)
 			}
 		}
@@ -217,12 +237,31 @@ func TestAPNsMapsResponses(t *testing.T) {
 
 type fcmServer struct {
 	*httptest.Server
+	mu          sync.Mutex
 	exchanges   []url.Values
 	sends       []map[string]any
 	authorized  []string
 	tokenStatus int
 	sendStatus  int
 	sendReply   string
+}
+
+func (s *fcmServer) exchangeList() []url.Values {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.exchanges)
+}
+
+func (s *fcmServer) authorizations() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.authorized)
+}
+
+func (s *fcmServer) sendList() []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.sends)
 }
 
 func newFCMServer(t *testing.T) *fcmServer {
@@ -232,17 +271,22 @@ func newFCMServer(t *testing.T) *fcmServer {
 		switch r.URL.Path {
 		case "/token":
 			_ = r.ParseForm()
+			s.mu.Lock()
 			s.exchanges = append(s.exchanges, r.PostForm)
+			count := len(s.exchanges)
+			s.mu.Unlock()
 			w.WriteHeader(s.tokenStatus)
 			_, _ = io.WriteString(
 				w,
-				`{"access_token":"access-`+string(rune('0'+len(s.exchanges)))+`","expires_in":3599,"token_type":"Bearer"}`,
+				`{"access_token":"access-`+string(rune('0'+count))+`","expires_in":3599,"token_type":"Bearer"}`,
 			)
 		case "/v1/projects/dad-donor-app/messages:send":
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
+			s.mu.Lock()
 			s.sends = append(s.sends, body)
 			s.authorized = append(s.authorized, r.Header.Get("Authorization"))
+			s.mu.Unlock()
 			if s.sendStatus == http.StatusTooManyRequests {
 				w.Header().Set("Retry-After", "30")
 			}
@@ -297,14 +341,15 @@ func TestFCMExchangesASignedAssertionAndCachesTheAccessToken(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(server.exchanges) != 1 || server.authorized[0] != "Bearer access-1" || server.authorized[1] != "Bearer access-1" {
+	if len(server.exchangeList()) != 1 || server.authorizations()[0] != "Bearer access-1" ||
+		server.authorizations()[1] != "Bearer access-1" {
 		t.Fatalf(
 			"exchanges %d, authorizations %v: the access token should be exchanged once and reused",
-			len(server.exchanges),
-			server.authorized,
+			len(server.exchangeList()),
+			server.authorizations(),
 		)
 	}
-	form := server.exchanges[0]
+	form := server.exchangeList()[0]
 	if form.Get("grant_type") != "urn:ietf:params:oauth:grant-type:jwt-bearer" {
 		t.Fatalf("grant type %q", form.Get("grant_type"))
 	}
@@ -329,16 +374,16 @@ func TestFCMExchangesASignedAssertionAndCachesTheAccessToken(t *testing.T) {
 			"notification": map[string]any{"tag": notification.ID},
 		},
 	}}
-	if !reflect.DeepEqual(server.sends[0], want) {
-		t.Fatalf("message %v, want %v", server.sends[0], want)
+	if !reflect.DeepEqual(server.sendList()[0], want) {
+		t.Fatalf("message %v, want %v", server.sendList()[0], want)
 	}
 
 	clock = clock.Add(time.Hour - accessMargin)
 	if err := f.Send(context.Background(), device, notification); err != nil {
 		t.Fatal(err)
 	}
-	if len(server.exchanges) != 2 || server.authorized[2] != "Bearer access-2" {
-		t.Fatalf("access token was not renewed before expiry: %v", server.authorized)
+	if len(server.exchangeList()) != 2 || server.authorizations()[2] != "Bearer access-2" {
+		t.Fatalf("access token was not renewed before expiry: %v", server.authorizations())
 	}
 }
 
@@ -370,7 +415,7 @@ func TestFCMMapsResponses(t *testing.T) {
 		}
 		if tc.status == http.StatusUnauthorized {
 			_ = f.Send(context.Background(), Device{Token: "fcm-token"}, notification)
-			if len(server.exchanges) != 2 {
+			if len(server.exchangeList()) != 2 {
 				t.Errorf("%s: the refused access token was used again", tc.name)
 			}
 		}
@@ -438,8 +483,8 @@ func TestAPNsKeepsHostileTokensInsideTheDevicePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Unescaped, the dots would be resolved and the query and fragment split off.
-	if len(*calls) != 1 || (*calls)[0].path != "/production/3/device/"+hostile {
-		t.Fatalf("device token escaped its path segment: %+v", *calls)
+	if len(calls.all()) != 1 || calls.all()[0].path != "/production/3/device/"+hostile {
+		t.Fatalf("device token escaped its path segment: %+v", calls.all())
 	}
 }
 
@@ -469,5 +514,20 @@ func TestProviderTransportFailuresNeverUnregisterTheDevice(t *testing.T) {
 				t.Errorf("%s %s: %v; want a retryable failure that keeps the device", name, label, err)
 			}
 		}
+	}
+}
+
+func TestAPNsTransportErrorsOmitTheDeviceToken(t *testing.T) {
+	server, _ := apnsServer(t, http.StatusOK, "")
+	a, _ := newTestAPNs(t, server)
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	const secret = "0123456789abcdef0123456789abcdef"
+	err := a.Send(cancelled, Device{Token: secret, Environment: "PRODUCTION"}, notification)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled send: %v, want the cancellation preserved", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("transport error %q leaks the device token", err)
 	}
 }

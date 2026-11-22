@@ -4,6 +4,7 @@
  * ones that were missing entirely until they were added.
  */
 
+// Next exposes no public path matcher; this mirrors how it matches header sources.
 import { getPathMatch } from "next/dist/shared/lib/router/utils/path-match";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { NextRequest } from "next/server";
@@ -84,6 +85,12 @@ describe("security headers", () => {
     ["Referrer-Policy", "no-referrer"],
   ])("sets %s", async (key, value) => {
     expect((await headerMap()).get(key)).toBe(value);
+  });
+
+  it("pins HSTS to at least a year and covers subdomains", async () => {
+    const value = (await headerMap()).get("Strict-Transport-Security") ?? "";
+    expect(Number(/max-age=(\d+)/.exec(value)?.[1])).toBeGreaterThanOrEqual(31_536_000);
+    expect(value).toContain("includeSubDomains");
   });
 
   it("refuses framing in the CSP as well as the legacy header", async () => {

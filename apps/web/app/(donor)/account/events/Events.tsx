@@ -33,7 +33,7 @@ export function placeSummary(event: Event): string {
 
 function EventList({ events }: { events: Event[] }) {
   return (
-    <ul className="events">
+    <ul>
       {events.map((event) => (
         <li key={event.id}>
           <Link href={`/events/${encodeURIComponent(event.id)}`}>{event.title}</Link>

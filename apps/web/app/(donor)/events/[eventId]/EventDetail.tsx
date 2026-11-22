@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { ApiError, api, failureMessage, type Schema } from "@/lib/api";
@@ -18,7 +19,7 @@ type Loaded = { event: Event; signedIn: boolean };
  */
 export default function EventDetail({ event: id }: { event: string }) {
   const path = encodeURIComponent(id);
-  const { resource, data, reload } = useApiResource<Loaded>(`/events/${path}`, {
+  const { resource, data, reload, failed } = useApiResource<Loaded>(`/events/${path}`, {
     load: async (signal) => {
       try {
         return { event: await api<Event>(`/donor/me/events/${path}`, { signal }), signedIn: true };
@@ -95,9 +96,14 @@ export default function EventDetail({ event: id }: { event: string }) {
           {!event.cancelled && !started && data.signedIn && (
             <p>
               {event.reservation_status ? (
-                <button type="button" className="secondary" disabled={busy} onClick={() => act("cancel")}>
+                <ConfirmButton
+                  disabled={busy}
+                  confirmLabel={event.reservation_status === "RESERVED" ? "Confirm cancellation" : "Confirm leaving"}
+                  keepLabel={event.reservation_status === "RESERVED" ? "Keep my spot" : "Stay on the waitlist"}
+                  onConfirm={() => act("cancel")}
+                >
                   {event.reservation_status === "RESERVED" ? "Cancel my spot" : "Leave the waitlist"}
-                </button>
+                </ConfirmButton>
               ) : (
                 canReserve && (
                   <button type="button" className="button" disabled={busy} onClick={() => act("reserve")}>
@@ -124,6 +130,11 @@ export default function EventDetail({ event: id }: { event: string }) {
             {data.signedIn && <a href="/account/events">All events near you</a>}
           </p>
         </>
+      )}
+      {failed && (
+        <button type="button" className="secondary" onClick={reload}>
+          Retry event
+        </button>
       )}
       <Announcer status={status || messages.status} alert={error || messages.alert} />
     </Page>

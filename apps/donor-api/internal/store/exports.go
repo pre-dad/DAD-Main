@@ -100,7 +100,9 @@ var exportDatasets = map[string]exportDataset{
 
 // exportAsOf names, per dataset, an insert-time timestamp column that is never
 // updated. A file excludes rows stamped after its request, which keeps it
-// consistent as of that moment without holding a snapshot. Datasets absent here
+// consistent as of that moment without holding a snapshot. Gifts are stamped
+// with the processor's payment time, so a gift recorded late with an earlier
+// payment time is still included. Datasets absent here
 // hold rows that change in place, so those read each row's latest state as the
 // worker reaches it.
 var exportAsOf = map[string]string{

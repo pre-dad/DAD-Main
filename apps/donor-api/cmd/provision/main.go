@@ -1,8 +1,8 @@
 // Command provision creates or updates the database login of every process
 // from that process's database URL: the user it names, its password, and a
-// connection limit of its pool size times the replicas it may run. It runs as the schema owner
-// after migrations, which create the roles the logins join, and can be run
-// again at any time, such as after changing a password.
+// connection limit of its pool size times the replicas it may run. It runs as
+// the schema owner after migrations, which create the roles the logins join,
+// and can be run again at any time, such as after changing a password.
 package main
 
 import (
@@ -25,7 +25,10 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 	if len(args) != 0 {
 		return errors.New("provision takes no arguments")
 	}
-	ownerURL := dbroles.ConnectionURL(dbroles.OwnerVariable, getenv)
+	ownerURL, err := dbroles.ConnectionURL(dbroles.OwnerVariable, getenv)
+	if err != nil {
+		return err
+	}
 	if ownerURL == "" {
 		return errors.New(dbroles.OwnerVariable + " is required")
 	}
@@ -44,7 +47,10 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 	var logins []dbroles.Login
 	var missing []string
 	for _, role := range dbroles.Roles {
-		url := dbroles.ConnectionURL(role.Variable(), getenv)
+		url, err := dbroles.ConnectionURL(role.Variable(), getenv)
+		if err != nil {
+			return err
+		}
 		if url == "" {
 			missing = append(missing, role.Variable())
 			continue

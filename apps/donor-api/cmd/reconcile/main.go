@@ -37,7 +37,7 @@ import (
 
 // reconcileRowBound caps the database rows, and the pending refunds, one run
 // holds in memory.
-const reconcileRowBound = 100000
+var reconcileRowBound int32 = 100000
 
 // window resolves the flags into the reconciliation window. -since/-until win
 // when both are set; otherwise -date (or, empty, yesterday in New York).
@@ -92,7 +92,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	if err != nil {
 		return err
 	}
-	dsn := dbroles.ReconcileJob.URL(getenv)
+	dsn, err := dbroles.ReconcileJob.URL(getenv)
+	if err != nil {
+		return err
+	}
 	if dsn == "" {
 		return errors.New(dbroles.ReconcileJob.Variable() + " is required")
 	}
@@ -171,8 +174,12 @@ func reconcileWindowPaced(
 			continue
 		}
 		id, payment := charge.Text("id"), charge.Text("payment_intent")
-		chargeIDs, paymentIDs = append(chargeIDs, id), append(paymentIDs, payment)
-		seenCharges[id], seenCharges[payment] = true, true
+		chargeIDs = append(chargeIDs, id)
+		seenCharges[id] = true
+		if payment != "" {
+			paymentIDs = append(paymentIDs, payment)
+			seenCharges[payment] = true
+		}
 	}
 	for _, refund := range refunds {
 		id := refund.Text("id")
@@ -185,6 +192,7 @@ func reconcileWindowPaced(
 		EndAt:          bound(win.End),
 		StripeObjects:  append(chargeIDs, paymentIDs...),
 		PaymentIntents: paymentIDs,
+		RowLimit:       reconcileRowBound + 1,
 	}
 	giftRows, err := q.ReconciliationGifts(ctx, giftParams)
 	if err != nil {
@@ -228,7 +236,12 @@ func reconcileWindowPaced(
 	}
 	refundRows, err := q.ReconciliationRefunds(
 		ctx,
-		queries.ReconciliationRefundsParams{Start: bound(win.Start), EndAt: bound(win.End), StripeRefunds: refundIDs},
+		queries.ReconciliationRefundsParams{
+			Start:         bound(win.Start),
+			EndAt:         bound(win.End),
+			StripeRefunds: refundIDs,
+			RowLimit:      reconcileRowBound + 1,
+		},
 	)
 	if err != nil {
 		return reconcile.Report{}, errors.New("refund window query failed")
@@ -238,7 +251,7 @@ func reconcileWindowPaced(
 	// window length; Stripe listing splits windows itself (see listSplitting).
 	// A window whose DB side exceeds this bound is rejected with guidance to
 	// narrow it.
-	if len(giftRows) > reconcileRowBound || len(refundRows) > reconcileRowBound {
+	if len(giftRows) > int(reconcileRowBound) || len(refundRows) > int(reconcileRowBound) {
 		return reconcile.Report{}, errors.New("reconciliation window exceeds the in-memory row bound; use a smaller -since/-until range")
 	}
 
@@ -268,12 +281,8 @@ func reconcileWindowPaced(
 			StripePaymentIntentID: payment,
 			AmountMinor:           g.AmountMinor,
 			Currency:              g.Currency,
-			PaidAt:                g.PaidAt.Time,
 		})
-		if seenCharges[g.StripeObjectID] || (payment != "" && seenCharges[payment]) {
-			continue
-		}
-		if payment == "" {
+		if payment == "" || seenCharges[g.StripeObjectID] || seenCharges[payment] {
 			continue
 		}
 		if err := wait(ctx); err != nil {
@@ -309,7 +318,6 @@ func reconcileWindowPaced(
 			AmountMinor:    r.AmountMinor,
 			Currency:       r.Currency,
 			Status:         r.Status,
-			ObservedAt:     r.ObservedAt.Time,
 		})
 		if !seenRefunds[r.StripeRefundID] {
 			if err := wait(ctx); err != nil {
@@ -342,7 +350,7 @@ func reconcileWindowPaced(
 		if len(rows) == 0 {
 			return report, nil
 		}
-		if report.PendingRefundsChecked+len(rows) > reconcileRowBound {
+		if report.PendingRefundsChecked+len(rows) > int(reconcileRowBound) {
 			return reconcile.Report{}, errors.New("pending refund backlog exceeds the in-memory row bound")
 		}
 		remote := make([]payments.Object, 0, len(rows))
@@ -363,7 +371,6 @@ func reconcileWindowPaced(
 					AmountMinor:    row.AmountMinor,
 					Currency:       row.Currency,
 					Status:         row.Status,
-					ObservedAt:     row.ObservedAt.Time,
 				},
 			)
 		}
@@ -394,10 +401,11 @@ func listSplitting(
 	if !errors.Is(err, payments.ErrListPageCap) {
 		return nil, err
 	}
-	if !end.After(start) {
+	first, last := start.Unix(), end.Unix()
+	if last <= first {
 		return nil, err
 	}
-	mid := start.Add(end.Sub(start) / 2)
+	mid := time.Unix(first+(last-first)/2+1, 0)
 	left, err := listSplitting(ctx, start, mid.Add(-time.Second), list)
 	if err != nil {
 		return nil, err

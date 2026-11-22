@@ -11,26 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const claimProjectionSchedule = `-- name: ClaimProjectionSchedule :execrows
-INSERT INTO donor_projection_schedules(id,next_run_at) VALUES($1,$2)
-ON CONFLICT(id) DO UPDATE SET next_run_at=EXCLUDED.next_run_at
-WHERE donor_projection_schedules.next_run_at <= $3::timestamptz
-`
-
-type ClaimProjectionScheduleParams struct {
-	ID        string             `json:"id"`
-	NextRunAt pgtype.Timestamptz `json:"next_run_at"`
-	AsOf      pgtype.Timestamptz `json:"as_of"`
-}
-
-func (q *Queries) ClaimProjectionSchedule(ctx context.Context, arg ClaimProjectionScheduleParams) (int64, error) {
-	result, err := q.db.Exec(ctx, claimProjectionSchedule, arg.ID, arg.NextRunAt, arg.AsOf)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const donorRanking = `-- name: DonorRanking :one
 SELECT r.national_percentile, r.city, r.city_rank,
   coalesce((SELECT population FROM donor_ranking_populations WHERE scope='NATIONAL' AND city=''), 0)::int AS national_population,
@@ -66,19 +46,4 @@ func (q *Queries) DonorRanking(ctx context.Context, donorID pgtype.UUID) (DonorR
 		&i.ComputedAt,
 	)
 	return i, err
-}
-
-const saveProjectionSchedule = `-- name: SaveProjectionSchedule :exec
-INSERT INTO donor_projection_schedules(id,next_run_at) VALUES($1,$2)
-ON CONFLICT(id) DO UPDATE SET next_run_at=EXCLUDED.next_run_at
-`
-
-type SaveProjectionScheduleParams struct {
-	ID        string             `json:"id"`
-	NextRunAt pgtype.Timestamptz `json:"next_run_at"`
-}
-
-func (q *Queries) SaveProjectionSchedule(ctx context.Context, arg SaveProjectionScheduleParams) error {
-	_, err := q.db.Exec(ctx, saveProjectionSchedule, arg.ID, arg.NextRunAt)
-	return err
 }

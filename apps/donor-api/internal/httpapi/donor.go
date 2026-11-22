@@ -69,6 +69,8 @@ func donorStatus(err error) (int, string) {
 		return http.StatusUnprocessableEntity, "Choose a public first name or nickname of 1 to 80 characters"
 	case errors.Is(err, store.ErrZip):
 		return http.StatusUnprocessableEntity, "Enter a valid US ZIP code"
+	case errors.Is(err, store.ErrTimezone):
+		return http.StatusUnprocessableEntity, "Choose a supported US time zone"
 	case errors.Is(err, store.ErrCity):
 		return http.StatusUnprocessableEntity, "Enter a city of 1 to 80 characters"
 	case errors.Is(err, store.ErrPhone):
@@ -107,14 +109,24 @@ func (a *api) profile(w http.ResponseWriter, r *http.Request, session string) {
 
 func (a *api) saveProfile(w http.ResponseWriter, r *http.Request, session string) {
 	var body struct {
-		Zip   *string `json:"zip"`
-		City  *string `json:"city"`
-		Phone *string `json:"phone"`
+		Zip              *string         `json:"zip"`
+		City             *string         `json:"city"`
+		Phone            *string         `json:"phone"`
+		TimezoneOverride json.RawMessage `json:"timezone_override"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
 	update := store.ProfileUpdate{}
+	if body.TimezoneOverride != nil {
+		zone, ok := optional(body.TimezoneOverride, "")
+		if !ok {
+			invalidFields(w, r)
+			return
+		}
+		update.TimezoneOverride = &zone
+	}
+
 	if body.Zip != nil {
 		update.Zip = *body.Zip
 	}
@@ -134,7 +146,7 @@ func (a *api) deleteAccount(w http.ResponseWriter, r *http.Request, session stri
 		if err := a.Donor.DeleteAccount(ctx, session); err != nil {
 			return nil, err
 		}
-		a.setSessionCookie(w, donorCookie, "", -1)
+		a.clearDonorCookie(w, r)
 		return map[string]bool{"deleted": true}, nil
 	})
 }
@@ -270,9 +282,9 @@ func (a *api) referralCode(w http.ResponseWriter, r *http.Request, session strin
 
 const referralGone = "This referral link is no longer available"
 
-// referralCode reads a code from the path. Issued codes are URL-safe base64,
+// pathReferralCode reads a code from the path. Issued codes are URL-safe base64,
 // so anything else names no referrer.
-func referralCode(w http.ResponseWriter, r *http.Request) (string, bool) {
+func pathReferralCode(w http.ResponseWriter, r *http.Request) (string, bool) {
 	code := r.PathValue("code")
 	valid := len(code) <= 64 && strings.Trim(code, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_") == ""
 	if !valid {
@@ -282,7 +294,7 @@ func referralCode(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 func (a *api) referrer(w http.ResponseWriter, r *http.Request) {
-	code, ok := referralCode(w, r)
+	code, ok := pathReferralCode(w, r)
 	if !ok {
 		return
 	}
@@ -293,7 +305,7 @@ func (a *api) referrer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) captureReferral(w http.ResponseWriter, r *http.Request) {
-	code, ok := referralCode(w, r)
+	code, ok := pathReferralCode(w, r)
 	if !ok {
 		return
 	}
@@ -329,7 +341,7 @@ func (a *api) captureReferral(w http.ResponseWriter, r *http.Request) {
 // visitor token, mirroring referral capture. The response never reveals whether
 // the code resolves to a partner. Account ownership is proved before linking it.
 func (a *api) captureCompany(w http.ResponseWriter, r *http.Request) {
-	code, ok := referralCode(w, r)
+	code, ok := pathReferralCode(w, r)
 	if !ok {
 		return
 	}

@@ -6,6 +6,9 @@ import { Page } from "@/components/donor/Page";
 import { api, type Schema, unconfirmedMessage } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
+/** Matches the API's resend eligibility, which treats a message with this many attempts as needing review. */
+const parkedAttempts = 5;
+
 export default function DeliveryHistory({ donor }: { donor: string }) {
   // Keyset paging: each entry is the cursor that opened a page, the first being none.
   const [cursors, setCursors] = useState<string[]>([]);
@@ -40,6 +43,7 @@ export default function DeliveryHistory({ donor }: { donor: string }) {
           method: "POST",
           headers: { "Idempotency-Key": keys.current[id] },
         });
+        delete keys.current[id];
       } else await api(`/donor/staff/donors/${encodeURIComponent(donor)}/claim-email`, { method: "POST" });
       setMessage("Delivery request recorded. This does not confirm email delivery.");
       reload();
@@ -84,14 +88,14 @@ export default function DeliveryHistory({ donor }: { donor: string }) {
                     ? `Suppressed: ${item.suppressed_reason}`
                     : item.completed_at
                       ? "Sent"
-                      : item.attempts >= 5
+                      : item.attempts >= parkedAttempts
                         ? "Parked for review"
                         : "Queued"}{" "}
                   · Attempts {item.attempts}
                   {item.last_error && <> · Last failure: {item.last_error}</>}
                   {["RECEIPT", "ANNUAL"].includes(item.kind) &&
                     !item.suppressed_reason &&
-                    (item.completed_at || item.attempts >= 5) && (
+                    (item.completed_at || item.attempts >= parkedAttempts) && (
                       <details>
                         <summary>Resend record</summary>
                         <p>Send a new copy showing current verified refund adjustments.</p>

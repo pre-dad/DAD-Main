@@ -117,6 +117,30 @@ func (q *Queries) InsertObservedEvents(ctx context.Context, arg InsertObservedEv
 	return err
 }
 
+const insertServerGiftEvents = `-- name: InsertServerGiftEvents :exec
+INSERT INTO analytics_events(id,name,donor_id,source,properties,occurred_at,dedup_key)
+SELECT unnest($1::uuid[]),'gift_completed',$2::uuid,'SERVER','{}'::jsonb,
+ unnest($3::timestamptz[]),unnest($4::text[])
+ON CONFLICT DO NOTHING
+`
+
+type InsertServerGiftEventsParams struct {
+	Ids        []pgtype.UUID        `json:"ids"`
+	DonorID    pgtype.UUID          `json:"donor_id"`
+	OccurredAt []pgtype.Timestamptz `json:"occurred_at"`
+	DedupKeys  []string             `json:"dedup_keys"`
+}
+
+func (q *Queries) InsertServerGiftEvents(ctx context.Context, arg InsertServerGiftEventsParams) error {
+	_, err := q.db.Exec(ctx, insertServerGiftEvents,
+		arg.Ids,
+		arg.DonorID,
+		arg.OccurredAt,
+		arg.DedupKeys,
+	)
+	return err
+}
+
 const journeyReport = `-- name: JourneyReport :one
 WITH landings AS (
  SELECT journey_id,min(occurred_at) AS landed FROM analytics_events

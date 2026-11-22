@@ -18,7 +18,7 @@ func awaitPartnerWaiters(t *testing.T, pool *pgxpool.Pool, count int) {
 	for {
 		var blocked int
 		if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
-			WHERE datname=current_database() AND cardinality(pg_blocking_pids(pid))>0`).Scan(&blocked); err != nil {
+			WHERE datname=current_database() AND wait_event_type='Lock' AND cardinality(pg_blocking_pids(pid))>0`).Scan(&blocked); err != nil {
 			t.Fatal(err)
 		}
 		if blocked >= count {
@@ -53,7 +53,7 @@ func TestPartnerInviteIsSingleUseUnderConcurrency(t *testing.T) {
 	results := make(chan error, requests)
 	for range requests {
 		go func() {
-			_, err := portal.AcceptInvite(ctx, proof)
+			_, err := portal.AcceptInvite(ctx, proof, false)
 			results <- err
 		}()
 	}

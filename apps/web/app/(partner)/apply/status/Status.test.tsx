@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import Status from "./Status";
 
@@ -11,6 +11,7 @@ it.each(["PENDING", "APPROVED", "REJECTED"])("shows the persisted %s decision", 
   );
   render(<Status />);
   expect(await screen.findByRole("heading", { name: "Delta" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "About DAD" })).toHaveAttribute("href", "/how-it-works");
   if (status === "PENDING") expect(screen.getByText(/Your application is pending review/)).toBeVisible();
   if (status === "APPROVED")
     expect(screen.getByRole("link", { name: "Partner sign-in" })).toHaveAttribute("href", "/partner/sign-in");
@@ -36,7 +37,9 @@ it("retries an unavailable status without losing the receipt", async () => {
       .mockResolvedValueOnce(Response.json({ organization: "Delta", status: "PENDING" })),
   );
   render(<Status />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Your application status could not be loaded");
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent("Your application status could not be loaded"),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   expect(await screen.findByRole("heading", { name: "Delta" })).toBeVisible();
 });

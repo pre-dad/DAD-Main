@@ -27,6 +27,10 @@ const (
 // surface through queue age in the monitor.
 func Run(ctx context.Context, once bool, idle, budget time.Duration, step func(context.Context) (bool, error)) error {
 	failures := 0
+	backoffBase := idle
+	if backoffBase <= 0 {
+		backoffBase = time.Second
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -41,7 +45,7 @@ func Run(ctx context.Context, once bool, idle, budget time.Duration, step func(c
 		switch {
 		case err != nil && ctx.Err() == nil:
 			failures++
-			wait = min(idle<<min(failures-1, 16), maxBackoff)
+			wait = min(backoffBase<<min(failures-1, 16), maxBackoff)
 			// Error text may carry row values, so only the type is logged.
 			slog.Error("worker step failed", "cause", fmt.Sprintf("%T", err), "consecutive_failures", failures, "retry_in", wait.String())
 		case err == nil:

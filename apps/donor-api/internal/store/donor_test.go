@@ -421,3 +421,64 @@ func TestPageKeepsAFullPageAndReportsWhereTheNextBegins(t *testing.T) {
 		t.Fatalf("empty page: %d rows, next %v", len(got), next)
 	}
 }
+
+func TestTimezoneCorrectionPreservesDefaultsAndInvalidatesProjections(t *testing.T) {
+	service, token, id := donorServiceFixture(t)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_deletions WHERE donor_id=$1", id) })
+	pool := database(t)
+	ctx := context.Background()
+	profile, err := service.SaveProfile(ctx, token, ProfileUpdate{Zip: "60601"})
+	if err != nil || profile.Timezone == nil || *profile.Timezone != "America/Chicago" || profile.TimezoneOverride != nil {
+		t.Fatalf("ZIP default: %+v %v", profile, err)
+	}
+	mustExec(
+		t,
+		pool,
+		`INSERT INTO donor_metric_projections(id,donor_id,computed_at,next_refresh_at) VALUES($1,$2,now(),now()+interval '1 day')
+  ON CONFLICT(donor_id) DO UPDATE SET next_refresh_at=now()+interval '1 day'`,
+		mustNewID(t),
+		id,
+	)
+	zone := "America/New_York"
+	profile, err = service.SaveProfile(ctx, token, ProfileUpdate{Zip: "60601", TimezoneOverride: &zone})
+	if err != nil || profile.Timezone == nil || *profile.Timezone != zone || profile.TimezoneOverride == nil ||
+		*profile.TimezoneOverride != zone {
+		t.Fatalf("manual correction: %+v %v", profile, err)
+	}
+	var due bool
+	if err := pool.QueryRow(ctx, "SELECT next_refresh_at<=clock_timestamp() FROM donor_metric_projections WHERE donor_id=$1", id).Scan(&due); err != nil ||
+		!due {
+		t.Fatalf("zone change did not queue projection: %v %v", due, err)
+	}
+	profile, err = service.SaveProfile(ctx, token, ProfileUpdate{Zip: "94103"})
+	if err != nil || profile.Timezone == nil || *profile.Timezone != zone || profile.TimezoneOverride == nil {
+		t.Fatalf("older client erased the correction: %+v %v", profile, err)
+	}
+	reset := ""
+	profile, err = service.SaveProfile(ctx, token, ProfileUpdate{Zip: "94103", TimezoneOverride: &reset})
+	if err != nil || profile.Timezone == nil || *profile.Timezone != "America/Los_Angeles" || profile.TimezoneOverride != nil {
+		t.Fatalf("reset to ZIP: %+v %v", profile, err)
+	}
+	zone = "Pacific/Honolulu"
+	profile, err = service.SaveProfile(ctx, token, ProfileUpdate{TimezoneOverride: &zone})
+	if err != nil || profile.Zip != nil || profile.Timezone == nil || *profile.Timezone != zone {
+		t.Fatalf("correction without ZIP: %+v %v", profile, err)
+	}
+	for _, invalid := range []string{"UTC", "Local", "Europe/London", "America/Unknown", "../../etc/passwd", " America/New_York", strings.Repeat("x", 65)} {
+		if _, err := service.SaveProfile(ctx, token, ProfileUpdate{TimezoneOverride: &invalid}); !errors.Is(err, ErrTimezone) {
+			t.Fatalf("accepted invalid zone %q: %v", invalid, err)
+		}
+	}
+	retained, err := service.Profile(ctx, token)
+	if err != nil || retained.TimezoneOverride == nil || *retained.TimezoneOverride != zone {
+		t.Fatalf("invalid request mutated the choice: %+v %v", retained, err)
+	}
+	if err := service.DeleteAccount(ctx, token); err != nil {
+		t.Fatal(err)
+	}
+	var cleared bool
+	if err := pool.QueryRow(ctx, "SELECT timezone IS NULL AND timezone_override IS NULL FROM donors WHERE id=$1", id).Scan(&cleared); err != nil ||
+		!cleared {
+		t.Fatalf("deleted account retained zone: %v %v", cleared, err)
+	}
+}

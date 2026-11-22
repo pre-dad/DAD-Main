@@ -13,7 +13,7 @@
 			"name": "INGRESS",
 			"namespace_id": "1378692308",
 			"simple": {
-				"limit": 60,
+				"limit": 120,
 				"period": 60
 			}
 		}

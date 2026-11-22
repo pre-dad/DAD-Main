@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"net"
 	"regexp"
 	"slices"
 	"strconv"
@@ -36,6 +37,10 @@ var (
 // could not be sent by then, or that waited on an unconfigured provider, is
 // dropped rather than shown late.
 const pushLifetime = 24 * time.Hour
+
+// pushSendBudget bounds all provider sends for one claimed notification, so
+// they finish well inside deliveryLease and the claim cannot lapse mid-send.
+const pushSendBudget = deliveryLease / 2
 
 // PushDevice is the installation behind the caller's app session.
 type PushDevice struct {
@@ -149,8 +154,11 @@ func queuePushIntents(ctx context.Context, q *queries.Queries, p projection, now
 		if err != nil {
 			return err
 		}
-		if reached := ladder.LastMilestone; reached > 0 && now.Sub(run.Reaches(reached, p.zone)) < pushLifetime {
-			if err := recordServerEvent(ctx, q, p.DonorID, "milestone_reached", "milestone:"+p.DonorID.String()+":"+p.streakSince.String()+":"+strconv.FormatInt(reached, 10), run.Reaches(reached, p.zone)); err != nil {
+		reached := ladder.LastMilestone
+		at := run.Reaches(reached, p.zone)
+		if reached > 0 && now.Sub(at) < pushLifetime {
+			key := "milestone:" + p.DonorID.String() + ":" + p.streakSince.String() + ":" + strconv.FormatInt(reached, 10)
+			if err := recordServerEvent(ctx, q, p.DonorID, "milestone_reached", key, at); err != nil {
 				return err
 			}
 			params.Milestone = pgtype.Int4{Int32: int32(reached), Valid: true}
@@ -232,7 +240,7 @@ func pushSuppression(
 		}
 		days, err := data.Int("days")
 		if err != nil {
-			return "superseded", nil
+			return "", payments.ErrFacts
 		}
 		current, err := q.Projection(ctx, donor.ID)
 		if err != nil {
@@ -413,6 +421,7 @@ type pushOutcome struct {
 	sent     []pgtype.UUID
 	dropped  []pushTarget
 	retry    bool
+	cause    string
 	after    time.Duration
 	rejected bool
 }
@@ -428,8 +437,10 @@ func (w PushWorker) DeliverNext(ctx context.Context, now time.Time) (bool, error
 	// keeps other workers off the job, and a resend after a crash replaces
 	// the notification on the device rather than repeating it.
 	var outcome pushOutcome
+	sendCtx, cancel := context.WithTimeout(ctx, pushSendBudget)
+	defer cancel()
 	for _, target := range job.targets {
-		err := target.provider.Send(ctx, target.device, job.note)
+		err := target.provider.Send(sendCtx, target.device, job.note)
 		var unavailable push.Unavailable
 		switch {
 		case err == nil:
@@ -439,12 +450,22 @@ func (w PushWorker) DeliverNext(ctx context.Context, now time.Time) (bool, error
 		case errors.Is(err, push.ErrRejected):
 			outcome.rejected = true
 		case errors.As(err, &unavailable):
-			outcome.retry, outcome.after = true, max(outcome.after, unavailable.After)
+			outcome.retry, outcome.cause, outcome.after = true, "Unavailable", max(outcome.after, unavailable.After)
 		default:
-			outcome.retry = true
+			outcome.retry, outcome.cause = true, sendFailureClass(err)
 		}
 	}
 	return true, w.record(ctx, job, outcome, now)
+}
+
+// sendFailureClass names why a provider call failed without carrying the
+// error text, which can include device identifiers or response bodies.
+func sendFailureClass(err error) string {
+	var network net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.As(err, &network) {
+		return "Network"
+	}
+	return "Provider"
 }
 
 // claim selects the next due notification and, unless it should no longer
@@ -455,7 +476,10 @@ func (w PushWorker) claim(ctx context.Context, now time.Time) (*pushJob, bool, e
 	worked := false
 	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		row, err := q.NextPushNotification(ctx, timestamp(now))
+		row, err := q.NextPushNotification(
+			ctx,
+			queries.NextPushNotificationParams{AvailableAt: timestamp(now), MaxAttempts: MaxDeliveryAttempts},
+		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -548,7 +572,7 @@ func (w PushWorker) record(ctx context.Context, job *pushJob, outcome pushOutcom
 					ID:          job.ID,
 					LastError:   text("ProviderRejected"),
 					AvailableAt: timestamp(now),
-					Attempts:    maxDeliveryAttempts,
+					Attempts:    MaxDeliveryAttempts,
 				},
 			)
 		case outcome.retry:
@@ -558,7 +582,12 @@ func (w PushWorker) record(ctx context.Context, job *pushJob, outcome pushOutcom
 			}
 			return q.FailPushNotification(
 				ctx,
-				queries.FailPushNotificationParams{ID: job.ID, LastError: text("DeliveryError"), AvailableAt: retryAt, Attempts: attempt},
+				queries.FailPushNotificationParams{
+					ID:          job.ID,
+					LastError:   text("DeliveryError:" + outcome.cause),
+					AvailableAt: retryAt,
+					Attempts:    attempt,
+				},
 			)
 		case len(outcome.sent) == 0 && len(job.SentTo) == 0:
 			return completePush(ctx, q, job.ID, now, "unregistered")

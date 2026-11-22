@@ -73,6 +73,46 @@ func (q *Queries) PurgeLoginLinks(ctx context.Context, arg PurgeLoginLinksParams
 	return result.RowsAffected(), nil
 }
 
+const purgePartnerLoginEmails = `-- name: PurgePartnerLoginEmails :execrows
+DELETE FROM donor_partner_login_emails WHERE id=ANY(ARRAY(
+ SELECT id FROM donor_partner_login_emails WHERE completed_at<$1::timestamptz
+ ORDER BY completed_at,id LIMIT $2
+))
+`
+
+type PurgePartnerLoginEmailsParams struct {
+	CompletedBefore pgtype.Timestamptz `json:"completed_before"`
+	Batch           int32              `json:"batch"`
+}
+
+func (q *Queries) PurgePartnerLoginEmails(ctx context.Context, arg PurgePartnerLoginEmailsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, purgePartnerLoginEmails, arg.CompletedBefore, arg.Batch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgePartnerSessions = `-- name: PurgePartnerSessions :execrows
+DELETE FROM donor_partner_sessions WHERE id=ANY(ARRAY(
+ SELECT id FROM donor_partner_sessions WHERE expires_at<$1::timestamptz
+ ORDER BY expires_at,id LIMIT $2
+))
+`
+
+type PurgePartnerSessionsParams struct {
+	ExpiredBefore pgtype.Timestamptz `json:"expired_before"`
+	Batch         int32              `json:"batch"`
+}
+
+func (q *Queries) PurgePartnerSessions(ctx context.Context, arg PurgePartnerSessionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, purgePartnerSessions, arg.ExpiredBefore, arg.Batch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const purgePhoneCodes = `-- name: PurgePhoneCodes :execrows
 DELETE FROM donor_phone_codes WHERE phone=ANY(ARRAY(
  SELECT phone FROM donor_phone_codes WHERE expires_at<$1::timestamptz
@@ -87,6 +127,40 @@ type PurgePhoneCodesParams struct {
 
 func (q *Queries) PurgePhoneCodes(ctx context.Context, arg PurgePhoneCodesParams) (int64, error) {
 	result, err := q.db.Exec(ctx, purgePhoneCodes, arg.ExpiredBefore, arg.Batch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeRateLimits = `-- name: PurgeRateLimits :execrows
+DELETE FROM donor_rate_limits WHERE (class, client) IN (
+ SELECT class, client FROM donor_rate_limits WHERE tat < clock_timestamp() LIMIT $1
+)
+`
+
+func (q *Queries) PurgeRateLimits(ctx context.Context, batch int32) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeRateLimits, batch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeStaffCeremonies = `-- name: PurgeStaffCeremonies :execrows
+DELETE FROM donor_staff_ceremonies WHERE token_hash=ANY(ARRAY(
+ SELECT token_hash FROM donor_staff_ceremonies WHERE expires_at<$1::timestamptz
+ ORDER BY expires_at,token_hash LIMIT $2
+))
+`
+
+type PurgeStaffCeremoniesParams struct {
+	ExpiredBefore pgtype.Timestamptz `json:"expired_before"`
+	Batch         int32              `json:"batch"`
+}
+
+func (q *Queries) PurgeStaffCeremonies(ctx context.Context, arg PurgeStaffCeremoniesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeStaffCeremonies, arg.ExpiredBefore, arg.Batch)
 	if err != nil {
 		return 0, err
 	}

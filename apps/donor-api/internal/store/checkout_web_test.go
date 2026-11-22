@@ -79,7 +79,7 @@ func TestWebCheckoutRestartExpiresTheAbandonedSession(t *testing.T) {
 func TestWebCheckoutRestartReplacesANativeSession(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
 	gateway := f.service.Gateway.(*checkoutGateway)
-	token := claimSession(t, f.db, f.donorID, app).Access
+	token := claimSession(t, f.db, f.donorID, appClient).Access
 	native, err := f.service.BeginNativeCheckout(context.Background(), token, testID(t), 3000, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -92,9 +92,9 @@ func TestWebCheckoutRestartReplacesANativeSession(t *testing.T) {
 }
 
 func TestWebCheckoutPaidWhileRestartingIsAnActiveGift(t *testing.T) {
-	for name, arrange := range map[string]func(*workerFixture, *checkoutGateway){
-		"processor reports the session complete": func(_ *workerFixture, g *checkoutGateway) { g.expireStatus = "complete" },
-		"webhook completes it as the expiry runs": func(f *workerFixture, g *checkoutGateway) {
+	for name, arrange := range map[string]func(*testing.T, *workerFixture, *checkoutGateway){
+		"processor reports the session complete": func(_ *testing.T, _ *workerFixture, g *checkoutGateway) { g.expireStatus = "complete" },
+		"webhook completes it as the expiry runs": func(t *testing.T, f *workerFixture, g *checkoutGateway) {
 			g.beforeExpire = func() {
 				mustExec(t, f.db, "UPDATE donor_stripe_checkouts SET status='COMPLETE' WHERE id=$1", f.request.RequestID)
 			}
@@ -102,7 +102,7 @@ func TestWebCheckoutPaidWhileRestartingIsAnActiveGift(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, gateway, _ := webRestartFixture(t)
-			arrange(f, gateway)
+			arrange(t, f, gateway)
 			if _, _, err := restarted(t, f, 6000); !errors.Is(err, payments.ErrCheckoutConflict) {
 				t.Fatalf("got %v, want a conflict", err)
 			}
@@ -256,5 +256,40 @@ func TestWebCheckoutRefusesInvalidInputBeforeTheProcessor(t *testing.T) {
 	}
 	if len(gateway.calls) != 0 {
 		t.Fatalf("refused requests reached the processor %d times", len(gateway.calls))
+	}
+}
+
+func TestWebCheckoutStoresTheDonorProfileTrimmed(t *testing.T) {
+	service, request, id, _ := checkoutFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+	request.Name, request.City, request.Zip = "  Alex Rivera \t", " Portland\u00a0", "\u00a0 97201 "
+	if _, err := service.BeginCheckout(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	var name, city, zip string
+	if err := pool.QueryRow(ctx, "SELECT full_name,city,zip FROM donors WHERE id=$1", id).Scan(&name, &city, &zip); err != nil {
+		t.Fatal(err)
+	}
+	if name != "Alex Rivera" || city != "Portland" || zip != "97201" {
+		t.Fatalf("stored %q, %q, %q; want trimmed values", name, city, zip)
+	}
+}
+
+func TestWebCheckoutTreatsWhitespaceLikeEmpty(t *testing.T) {
+	service, request, id, _ := checkoutFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+	request.Name, request.Zip = "Alex Rivera", "   "
+	if _, err := service.BeginCheckout(ctx, request); !errors.Is(err, payments.ErrCheckoutInput) {
+		t.Fatalf("whitespace-only zip: got %v, want an input error as for an empty zip", err)
+	}
+	request.Name, request.Zip = " \t ", "97201"
+	if _, err := service.BeginCheckout(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	var name *string
+	if err := pool.QueryRow(ctx, "SELECT full_name FROM donors WHERE id=$1", id).Scan(&name); err != nil || name != nil {
+		t.Fatalf("a whitespace-only name was stored as %v (%v), want none as for an empty name", name, err)
 	}
 }

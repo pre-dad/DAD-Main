@@ -303,3 +303,57 @@ func TestEventWorkerReadsProcessorOutsideDonorLock(t *testing.T) {
 		})
 	}
 }
+
+// A nonblocking probe is safe inside provider doubles, including command goroutines.
+func probeDonorLock(t *testing.T, pool *pgxpool.Pool, donor pgtype.UUID) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	defer tx.Rollback(context.Background())
+	var id pgtype.UUID
+	if err := tx.QueryRow(ctx, "SELECT id FROM donors WHERE id=$1 FOR UPDATE SKIP LOCKED", donor).Scan(&id); err != nil {
+		t.Errorf("provider fallback held the donor lock: %v", err)
+	}
+}
+
+func TestPaymentSetupRefetchesStaleSubscriptionOutsideDonorLock(t *testing.T) {
+	r := newRecurringFixture(t)
+	r.sub.beforeRetrieve = func() {
+		mustExec(t, r.db, "UPDATE donor_subscriptions SET observed_at=observed_at+interval '1 millisecond' WHERE attempt_id=$1", r.attempt)
+		r.sub.mu.Lock()
+		r.sub.beforeRetrieve = func() { probeDonorLock(t, r.db, r.donorID) }
+		r.sub.mu.Unlock()
+	}
+	update, err := r.service.BeginPaymentUpdate(context.Background(), r.token, testID(t))
+	if err != nil || update.URL == nil {
+		t.Fatalf("card setup: %+v %v", update, err)
+	}
+	if r.sub.retrievals != 2 {
+		t.Fatalf("provider reads: %d, want a fresh retry after conflict", r.sub.retrievals)
+	}
+}
+
+func TestAnchorBackfillRefetchesOutsideDonorLock(t *testing.T) {
+	r := newRecurringFixture(t)
+	mustExec(t, r.db, "UPDATE donor_subscriptions SET billing_anchor=NULL WHERE attempt_id=$1", r.attempt)
+	r.sub.beforeRetrieve = func() {
+		mustExec(t, r.db, "UPDATE donor_subscriptions SET observed_at=observed_at+interval '1 millisecond' WHERE attempt_id=$1", r.attempt)
+		r.sub.mu.Lock()
+		r.sub.beforeRetrieve = func() { probeDonorLock(t, r.db, r.donorID) }
+		r.sub.mu.Unlock()
+	}
+	backfill := AnchorBackfill{DB: as(t, dbroles.StripeWorker), Gateway: r.sub}
+	if worked, err := backfill.SyncNext(context.Background(), time.Now().UTC()); err != nil || !worked {
+		t.Fatal(worked, err)
+	}
+	var anchored bool
+	if err := r.db.QueryRow(context.Background(), "SELECT billing_anchor IS NOT NULL FROM donor_subscriptions WHERE attempt_id=$1", r.attempt).Scan(&anchored); err != nil ||
+		!anchored {
+		t.Fatal("anchor not reconciled", err)
+	}
+}

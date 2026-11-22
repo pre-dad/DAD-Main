@@ -1,6 +1,9 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import { expect, it } from "vitest";
+import { afterEach, expect, it } from "vitest";
+import { launchDateLabel } from "@/lib/launch";
 import ThankYouPage from "./page";
+
+afterEach(() => sessionStorage.clear());
 
 async function renderWith(params: Record<string, string | string[] | undefined>) {
   render(await ThankYouPage({ params: Promise.resolve({}), searchParams: Promise.resolve(params) }));
@@ -17,11 +20,11 @@ it("restates a monthly gift with the charge and daily framing at equal weight", 
 it("carries the Founding Donor timing, receipt notice, and dashboard link", async () => {
   await renderWith({ session_id: "cs_test", amount_minor: "9000", frequency: "MONTHLY" });
   expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("You’re in. Welcome to the beginning.");
-  expect(screen.getByText(/launches April 22, 2027/)).toHaveTextContent(
+  expect(screen.getByText(new RegExp(`launches ${launchDateLabel()}`))).toHaveTextContent(
     "A first gift completed on or before December 31, 2026 (New York time) earns a permanent Founding Donor badge.",
   );
   expect(screen.getByRole("heading", { level: 2, name: "What happens next" })).toBeVisible();
-  expect(document.querySelector("main .button, .button")).toBeNull();
+  expect(document.querySelector(".button")).toBeNull();
   expect(screen.getByText(/receipt email follows/)).toBeVisible();
   expect(screen.getByText(/test gift record, not a tax receipt/)).toBeVisible();
   expect(screen.getByText(/giving streak and your personal referral link/)).toBeVisible();
@@ -48,10 +51,10 @@ it.each([
   expect(screen.queryByText(/Your gift:/)).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "dashboard" })).toBeVisible();
 });
+
 it("clears the remembered choice without handing anything to sign-in", async () => {
   sessionStorage.setItem("dad.donate.choice", JSON.stringify({ amount: "1", email: "d@example.org", zip: "10001" }));
   await renderWith({});
   await waitFor(() => expect(sessionStorage.getItem("dad.donate.choice")).toBeNull());
   expect(sessionStorage.getItem("dad.signin.email")).toBeNull();
-  sessionStorage.clear();
 });

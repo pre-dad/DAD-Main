@@ -8,8 +8,9 @@ SELECT * FROM donors WHERE id=$1;
 
 -- name: StaffReferredPage :many
 SELECT d.id,d.email,p.referral_kind,p.net_minor FROM donors d
-JOIN donor_metric_projections p ON p.donor_id=d.id WHERE p.referrer_id=$1
-ORDER BY d.id LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
+JOIN donor_metric_projections p ON p.donor_id=d.id
+WHERE p.referrer_id=sqlc.arg(referrer_id)::uuid AND d.id > sqlc.arg(after_id)::uuid
+ORDER BY d.id LIMIT 51;
 
 -- name: StaffAuditPage :many
 -- Newest first, keyset-paged on (created_at DESC, id). The first page passes an

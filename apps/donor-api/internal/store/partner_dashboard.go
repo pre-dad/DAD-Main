@@ -1,17 +1,20 @@
 package store
 
 import (
-	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/bits"
+	"math/rand/v2"
 	"strconv"
 	"time"
 
+	"dad/donor-api/internal/partnerreport"
 	"dad/donor-api/internal/store/queries"
-	"github.com/go-pdf/fpdf"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -187,7 +190,7 @@ func (s PartnerDashboardService) Initiatives(ctx context.Context, token string) 
 // Spend lists spend by category across the partner's initiatives (P-12).
 func (s PartnerDashboardService) Spend(ctx context.Context, token string) ([]PartnerSpendRow, error) {
 	return partnerRead(ctx, s.DB, token, func(q *queries.Queries, actor PartnerActor) ([]PartnerSpendRow, error) {
-		rows, err := q.PartnerSpendByCategory(ctx, actor.PartnerID)
+		rows, err := q.PartnerSpendByCategory(ctx, queries.PartnerSpendByCategoryParams{PartnerID: actor.PartnerID})
 		if err != nil {
 			return nil, err
 		}
@@ -218,39 +221,117 @@ func (s PartnerDashboardService) Exports(ctx context.Context, token string) ([]P
 	})
 }
 
-// ExportReport renders the branded PDF of the dashboard at this moment and
-// records the export in the history (P-14). Exporting is admin-only (§7.2).
+const (
+	partnerReportLimit   = 1000
+	partnerReportBytes   = 128 << 20
+	partnerReportsPerDay = 20
+	// partnerReportPDFMax bounds a single rendered report PDF.
+	partnerReportPDFMax = 2 << 20
+	// partnerReportRetryBackoff is the base delay, jittered, before retrying a conflicting export.
+	partnerReportRetryBackoff = 25 * time.Millisecond
+)
+
+// ErrPartnerReportStorage is returned when the organization's stored reports reach the count or byte limit.
+var ErrPartnerReportStorage = errors.New("report storage limit reached; existing reports remain available")
+
+// PartnerReportDailyLimit is returned when the organization has created its quota of new reports today.
+// RetryAt is the next UTC midnight.
+type PartnerReportDailyLimit struct{ RetryAt time.Time }
+
+func (PartnerReportDailyLimit) Error() string {
+	return "Today's new report limit has been reached. Download an existing report or try again after midnight UTC."
+}
+
+// ExportReport returns the organization's report PDF, reusing the stored one when the figures are unchanged.
+// Serialization conflicts are retried a few times with a short jittered pause.
 func (s PartnerDashboardService) ExportReport(ctx context.Context, token string) ([]byte, error) {
-	return partnerAdminTransaction(
-		ctx,
-		s.DB,
-		token,
-		pgx.TxOptions{IsoLevel: pgx.RepeatableRead},
+	for attempt := 0; ; attempt++ {
+		pdf, err := s.exportReport(ctx, token)
+		var databaseError *pgconn.PgError
+		retryable := errors.As(err, &databaseError) && (databaseError.Code == "40001" ||
+			(databaseError.Code == "23505" && databaseError.ConstraintName == "donor_partner_reports_snapshot_key"))
+		if !retryable || attempt >= 2 || ctx.Err() != nil {
+			return pdf, err
+		}
+		pause := partnerReportRetryBackoff * time.Duration(attempt+1)
+		select {
+		case <-time.After(pause/2 + rand.N(pause)):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+func (s PartnerDashboardService) exportReport(ctx context.Context, token string) ([]byte, error) {
+	// Serializable retries preserve coherent figures and the per-organization quota under concurrent exports.
+	return partnerAdminTransaction(ctx, s.DB, token, pgx.TxOptions{IsoLevel: pgx.Serializable},
 		func(tx pgx.Tx, actor PartnerActor, now time.Time) ([]byte, error) {
 			q := queries.New(tx)
-			t, err := q.PartnerOverviewTotals(ctx, actor.PartnerID)
+			totals, err := q.PartnerOverviewTotals(ctx, actor.PartnerID)
 			if err != nil {
 				return nil, err
 			}
-			spend, err := q.PartnerSpendByCategory(ctx, actor.PartnerID)
+			spend, err := q.PartnerSpendByCategory(
+				ctx,
+				queries.PartnerSpendByCategoryParams{
+					PartnerID: actor.PartnerID,
+					MaxRows:   pgtype.Int4{Int32: partnerreport.MaxSpendRows + 1, Valid: true},
+				},
+			)
 			if err != nil {
 				return nil, err
 			}
-			id, err := NewID()
-			if err != nil {
-				return nil, err
+			if len(spend) > partnerreport.MaxSpendRows {
+				return nil, ErrPartnerReportTooLarge
 			}
 			logo, err := q.PartnerLogo(ctx, actor.PartnerID)
 			if err != nil {
 				return nil, err
 			}
-			overview := partnerOverview(actor, t)
-			pdf, err := renderPartnerReport(overview, spend, logo, now)
+			overview := partnerOverview(actor, totals)
+			normalized := overview
+			normalized.UserID, normalized.Role = "", ""
+			day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+			content, err := json.Marshal(struct {
+				Version  int
+				Day      string
+				Overview PartnerOverview
+				Spend    []queries.PartnerSpendByCategoryRow
+				Logo     []byte
+			}{partnerreport.Version, day.Format(time.DateOnly), normalized, spend, logo})
 			if err != nil {
 				return nil, err
 			}
-			if len(pdf) > 2<<20 {
-				return nil, ErrPartnerApplication
+			digest := sha256.Sum256(content)
+			pdf, err := q.PartnerReportSnapshot(
+				ctx,
+				queries.PartnerReportSnapshotParams{PartnerID: actor.PartnerID, SnapshotDigest: digest[:]},
+			)
+			if err == nil {
+				return pdf, nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return nil, err
+			}
+			usage, err := q.PartnerReportUsage(ctx, queries.PartnerReportUsageParams{PartnerID: actor.PartnerID, DayStart: timestamp(day)})
+			if err != nil {
+				return nil, err
+			}
+			if usage.Reports >= partnerReportLimit || usage.Bytes >= partnerReportBytes {
+				return nil, ErrPartnerReportStorage
+			}
+			if usage.Today >= partnerReportsPerDay {
+				return nil, PartnerReportDailyLimit{RetryAt: day.AddDate(0, 0, 1)}
+			}
+			pdf, err = renderPartnerReport(ctx, overview, spend, logo, now)
+			if err != nil {
+				return nil, err
+			}
+			if len(pdf) > partnerReportPDFMax {
+				return nil, ErrPartnerReportTooLarge
+			}
+			if usage.Bytes+int64(len(pdf)) > partnerReportBytes {
+				return nil, ErrPartnerReportStorage
 			}
 			snapshot, err := json.Marshal(struct {
 				Overview PartnerOverview                     `json:"overview"`
@@ -259,20 +340,21 @@ func (s PartnerDashboardService) ExportReport(ctx context.Context, token string)
 			if err != nil {
 				return nil, err
 			}
+			id, err := NewID()
+			if err != nil {
+				return nil, err
+			}
 			if err = q.InsertPartnerReport(ctx, queries.InsertPartnerReportParams{
-				Pdf: pdf, Snapshot: snapshot,
-				ID: id, PartnerID: actor.PartnerID, ExportedBy: actor.UserID,
-				CommittedMinor: t.CommittedMinor, DeployedMinor: t.DeployedMinor,
-				PeopleReached: t.PeopleReached, CreatedAt: timestamp(now),
+				Pdf: pdf, Snapshot: snapshot, SnapshotDigest: digest[:], ID: id, PartnerID: actor.PartnerID, ExportedBy: actor.UserID,
+				CommittedMinor: totals.CommittedMinor, DeployedMinor: totals.DeployedMinor, PeopleReached: totals.PeopleReached, CreatedAt: timestamp(now),
 			}); err != nil {
 				return nil, err
 			}
-			if err := recordServerEvent(ctx, q, pgtype.UUID{}, "partner_report_exported", "partner-report:"+id.String(), now); err != nil {
+			if err = recordServerEvent(ctx, q, pgtype.UUID{}, "partner_report_exported", "partner-report:"+id.String(), now); err != nil {
 				return nil, err
 			}
 			return pdf, nil
-		},
-	)
+		})
 }
 
 func (s PartnerDashboardService) ReportArtifact(ctx context.Context, token string, id pgtype.UUID) ([]byte, error) {
@@ -281,85 +363,18 @@ func (s PartnerDashboardService) ReportArtifact(ctx context.Context, token strin
 	})
 }
 
-// renderPartnerReport builds the branded PDF: the DAD header band,
-// the partner organization, the dashboard figures, spend by category, the
-// export time, and the "Figures verified by DAD" statement (P-14). The core
-// fonts are cp1252, so every string is translated rather than written as UTF-8.
-func renderPartnerReport(o PartnerOverview, spend []queries.PartnerSpendByCategoryRow, logo []byte, now time.Time) ([]byte, error) {
-	pdf := fpdf.New("P", "mm", "A4", "")
-	pdf.SetCreationDate(now.UTC())
-	pdf.SetModificationDate(now.UTC())
-	tr := pdf.UnicodeTranslatorFromDescriptor("")
-	pdf.SetMargins(18, 32, 18)
-	pdf.SetAutoPageBreak(true, 30)
-	pdf.SetHeaderFunc(func() {
-		pdf.SetFillColor(16, 32, 31)
-		pdf.Rect(0, 0, 210, 26, "F")
-		pdf.SetY(8)
-		pdf.SetFont("Helvetica", "B", 20)
-		pdf.SetTextColor(255, 255, 255)
-		pdf.CellFormat(0, 10, tr("DAD — Impact Report"), "", 1, "L", false, 0, "")
-		if len(logo) > 0 {
-			pdf.RegisterImageOptionsReader("partner-logo", fpdf.ImageOptions{ImageType: "PNG"}, bytes.NewReader(logo))
-			image := pdf.GetImageInfo("partner-logo")
-			if image != nil {
-				width, height := image.Extent()
-				scale := min(30/width, 15/height)
-				pdf.ImageOptions(
-					"partner-logo",
-					192-width*scale,
-					6+(15-height*scale)/2,
-					width*scale,
-					height*scale,
-					false,
-					fpdf.ImageOptions{ImageType: "PNG"},
-					0,
-					"",
-				)
-			}
-		}
-		pdf.SetY(32)
-	})
-	pdf.SetFooterFunc(func() {
-		pdf.SetY(-24)
-		pdf.SetDrawColor(200, 200, 200)
-		pdf.Line(18, pdf.GetY(), 192, pdf.GetY())
-		pdf.Ln(3)
-		pdf.SetFont("Helvetica", "I", 9)
-		pdf.SetTextColor(90, 90, 90)
-		pdf.MultiCell(
-			0,
-			5,
-			"Sandbox preview. Figures verified by DAD. Only published, verified figures are shown; unverified figures are never estimated.",
-			"",
-			"L",
-			false,
-		)
-		pdf.CellFormat(0, 4, fmt.Sprintf("Page %d", pdf.PageNo()), "", 0, "R", false, 0, "")
-	})
-	pdf.AddPage()
+var ErrPartnerReportTooLarge = partnerreport.ErrTooLarge
 
-	pdf.SetTextColor(20, 20, 20)
-	pdf.Ln(10)
-	pdf.SetFont("Helvetica", "B", 15)
-	pdf.MultiCell(0, 8, tr(o.Organization), "", "L", false)
-	pdf.SetFont("Helvetica", "", 10)
-	pdf.SetTextColor(90, 90, 90)
-	pdf.CellFormat(0, 6, "Exported "+now.UTC().Format("2 January 2006, 15:04 UTC"), "", 1, "L", false, 0, "")
-	if o.UpdatedAt != nil {
-		pdf.CellFormat(0, 6, "Figures last updated "+o.UpdatedAt.UTC().Format("2 January 2006, 15:04 UTC"), "", 1, "L", false, 0, "")
-	}
-	pdf.Ln(6)
-
-	pdf.SetTextColor(20, 20, 20)
+func renderPartnerReport(
+	ctx context.Context,
+	o PartnerOverview,
+	spend []queries.PartnerSpendByCategoryRow,
+	logo []byte,
+	now time.Time,
+) ([]byte, error) {
+	data := partnerreport.Data{Organization: o.Organization, ExportedAt: now, UpdatedAt: o.UpdatedAt, Logo: logo}
 	tile := func(value, label string) {
-		pdf.SetFont("Helvetica", "B", 16)
-		pdf.CellFormat(0, 8, tr(value), "", 1, "L", false, 0, "")
-		pdf.SetFont("Helvetica", "", 10)
-		pdf.SetTextColor(90, 90, 90)
-		pdf.CellFormat(0, 6, tr(label), "", 1, "L", false, 0, "")
-		pdf.SetTextColor(20, 20, 20)
-		pdf.Ln(3)
+		data.Metrics = append(data.Metrics, partnerreport.Metric{Label: label, Value: value})
 	}
 	if o.CommittedVerified {
 		tile(money(o.CommittedMinor), "Committed")
@@ -377,30 +392,8 @@ func renderPartnerReport(o PartnerOverview, spend []queries.PartnerSpendByCatego
 		}
 		tile(enrolled, "Employees enrolled")
 	}
-
-	if len(spend) > 0 {
-		pdf.Ln(4)
-		pdf.SetFont("Helvetica", "B", 12)
-		pdf.CellFormat(0, 8, "Spend by category", "", 1, "L", false, 0, "")
-		pdf.SetFont("Helvetica", "", 10)
-		for _, row := range spend {
-			height := 6 * float64(len(pdf.SplitLines([]byte(tr(row.Category)), 120)))
-			if pdf.GetY()+height > 267 {
-				pdf.AddPage()
-				pdf.SetFont("Helvetica", "", 10)
-				pdf.SetTextColor(20, 20, 20)
-			}
-			y := pdf.GetY()
-			pdf.MultiCell(120, 6, tr(row.Category), "", "L", false)
-			pdf.SetXY(138, y)
-			pdf.CellFormat(54, height, money(row.AmountMinor), "", 0, "R", false, 0, "")
-			pdf.SetXY(18, y+height)
-		}
+	for _, row := range spend {
+		data.Spend = append(data.Spend, partnerreport.Spend{Category: row.Category, Amount: money(row.AmountMinor)})
 	}
-
-	var buf bytes.Buffer
-	if err := pdf.Output(&buf); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	return partnerreport.Render(ctx, data)
 }

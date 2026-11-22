@@ -94,7 +94,7 @@ func subscriptionView(
 	if row.StopsAt.Valid {
 		sub.StopsAt = &row.StopsAt.Time
 	}
-	return RecurringDetails{Mode: "test", ObservedAt: &row.ObservedAt.Time, State: "ready", Subscription: sub}, nil
+	return RecurringDetails{Mode: processorMode, ObservedAt: &row.ObservedAt.Time, State: "ready", Subscription: sub}, nil
 }
 
 // syncedSubscription returns the donor's latest monthly attempt and its
@@ -131,7 +131,7 @@ func storedDetails(ctx context.Context, q *queries.Queries, donor pgtype.UUID) (
 		if !attempt.ID.Valid {
 			state = "ready"
 		}
-		return RecurringDetails{Mode: "test", State: state}, nil
+		return RecurringDetails{Mode: processorMode, State: state}, nil
 	}
 	return subscriptionView(ctx, q, attempt, *row)
 }
@@ -155,29 +155,33 @@ func (s RecurringService) prefetchSubscription(ctx context.Context, donor pgtype
 // command refused because the stored state was behind still leaves the next
 // view current. The snapshot returned is the state saved.
 func (s RecurringService) refresh(ctx context.Context, owner ownerResolver, donor pgtype.UUID) (*subscriptionSnapshot, error) {
-	snapshot, err := s.prefetchSubscription(ctx, donor)
-	if err != nil || snapshot == nil {
-		return nil, err
-	}
-	return donorWrite(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (*subscriptionSnapshot, error) {
-		attempt, ok, err := latestSubscription(ctx, queries.New(tx), d.ID)
-		if err != nil || !ok {
-			return nil, err
-		}
-		row, remote, err := s.read(ctx, tx, attempt, now, viewOnly, snapshot)
-		if err != nil {
-			return nil, err
-		}
-		if _, err = refreshProjection(ctx, tx, d.ID, now); err != nil {
-			return nil, err
-		}
-		return &subscriptionSnapshot{
-			attempt:  attempt.ID,
-			id:       attempt.StripeSubscriptionID.String,
-			observed: row.ObservedAt,
-			remote:   remote,
-		}, nil
-	})
+	return withFreshSnapshot(
+		func() (*subscriptionSnapshot, error) { return s.prefetchSubscription(ctx, donor) },
+		func(snapshot *subscriptionSnapshot) (*subscriptionSnapshot, error) {
+			if snapshot == nil {
+				return nil, nil
+			}
+			return donorWrite(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (*subscriptionSnapshot, error) {
+				attempt, ok, err := latestSubscription(ctx, queries.New(tx), d.ID)
+				if err != nil || !ok {
+					return nil, err
+				}
+				row, remote, err := s.read(ctx, tx, attempt, now, viewOnly, snapshot)
+				if err != nil {
+					return nil, err
+				}
+				if _, err = refreshProjection(ctx, tx, d.ID, now); err != nil {
+					return nil, err
+				}
+				return &subscriptionSnapshot{
+					attempt:  attempt.ID,
+					id:       attempt.StripeSubscriptionID.String,
+					observed: row.ObservedAt,
+					remote:   remote,
+				}, nil
+			})
+		}, ErrSubscriptionConflict,
+	)
 }
 
 // donorRefresh is refresh for the donor signed in with token.
@@ -203,8 +207,9 @@ type subscriptionLease struct {
 	subscription     string
 }
 
-// Even an identical retry must wait: otherwise it can release the lease while
-// the original request is still in flight. Crash recovery waits for expiry.
+// leaseSubscription takes the subscription lease for a command. Even an
+// identical retry must wait: otherwise it can release the lease while the
+// original request is still in flight. Crash recovery waits for expiry.
 func leaseSubscription(
 	ctx context.Context,
 	q *queries.Queries,
@@ -307,7 +312,7 @@ func (s RecurringService) read(
 	snapshot *subscriptionSnapshot,
 ) (queries.DonorSubscription, payments.Object, error) {
 	q := queries.New(tx)
-	remote, err := currentSubscription(ctx, q, newSubFetcher(s.Gateway), attempt, snapshot)
+	remote, err := lockedSubscription(ctx, q, attempt, snapshot)
 	if err != nil {
 		return queries.DonorSubscription{}, nil, err
 	}

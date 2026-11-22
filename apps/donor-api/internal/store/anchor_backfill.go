@@ -50,31 +50,35 @@ func (b *AnchorBackfill) SyncNext(ctx context.Context, now time.Time) (bool, err
 // sync reads the subscription with no lock held, then reconciles it under
 // the donor lock as a subscription event would.
 func (b *AnchorBackfill) sync(ctx context.Context, row queries.NextSubscriptionWithoutAnchorRow, now time.Time) error {
-	fetcher := newSubFetcher(b.Gateway)
-	snapshot, err := fetchSubscription(ctx, queries.New(b.DB), fetcher, row.ID, row.StripeSubscriptionID.String)
-	if err != nil {
-		return err
-	}
-	return pgx.BeginFunc(ctx, b.DB, func(tx pgx.Tx) error {
-		q := queries.New(tx)
-		if _, err := q.LockDonor(ctx, row.DonorID); err != nil {
-			return err
-		}
-		draft, err := q.CheckoutDraft(ctx, row.CheckoutID)
-		if err != nil {
-			return err
-		}
-		attempt, err := q.AttemptForCheckout(ctx, row.CheckoutID)
-		if err != nil {
-			return err
-		}
-		if attempt.ID != row.ID || attempt.StripeSubscriptionID != row.StripeSubscriptionID {
-			return payments.ErrFacts
-		}
-		if _, err = reconcileSubscription(ctx, q, fetcher, draft, attempt, snapshot, now); err != nil {
-			return err
-		}
-		_, err = refreshProjection(ctx, tx, row.DonorID, now)
-		return err
-	})
+	_, err := withFreshSnapshot(
+		func() (*subscriptionSnapshot, error) {
+			return fetchSubscription(ctx, queries.New(b.DB), newSubFetcher(b.Gateway), row.ID, row.StripeSubscriptionID.String)
+		},
+		func(snapshot *subscriptionSnapshot) (struct{}, error) {
+			fetcher := &subFetcher{frozen: true}
+			return struct{}{}, pgx.BeginFunc(ctx, b.DB, func(tx pgx.Tx) error {
+				q := queries.New(tx)
+				if _, err := q.LockDonor(ctx, row.DonorID); err != nil {
+					return err
+				}
+				draft, err := q.CheckoutDraft(ctx, row.CheckoutID)
+				if err != nil {
+					return err
+				}
+				attempt, err := q.AttemptForCheckout(ctx, row.CheckoutID)
+				if err != nil {
+					return err
+				}
+				if attempt.ID != row.ID || attempt.StripeSubscriptionID != row.StripeSubscriptionID {
+					return payments.ErrFacts
+				}
+				if _, err = reconcileSubscription(ctx, q, fetcher, draft, attempt, snapshot, now); err != nil {
+					return err
+				}
+				_, err = refreshProjection(ctx, tx, row.DonorID, now)
+				return err
+			})
+		}, ErrSubscriptionConflict,
+	)
+	return err
 }

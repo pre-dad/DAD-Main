@@ -232,3 +232,69 @@ it("refuses an oversized body that declares no length", async () => {
   expect(fetch).not.toHaveBeenCalled();
   expect(sent).toBeLessThan(13);
 });
+
+it("relays the analytics event POST with its body", async () => {
+  vi.stubEnv("DONOR_API_BASE_URL", "http://api.test:8002");
+  const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetch);
+  const response = await POST(
+    new NextRequest("http://localhost:3000/api/analytics/events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"name":"view"}',
+    }),
+    context("analytics", "events"),
+  );
+  expect(response.status).toBe(204);
+  expect(String(fetch.mock.calls[0][0])).toBe("http://api.test:8002/analytics/events");
+  expect(fetch.mock.calls[0][1].method).toBe("POST");
+  expect(new TextDecoder().decode(fetch.mock.calls[0][1].body)).toBe('{"name":"view"}');
+});
+
+it("forwards the query string to the upstream URL", async () => {
+  vi.stubEnv("DONOR_API_BASE_URL", "http://api.test:8002");
+  const fetch = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+  vi.stubGlobal("fetch", fetch);
+  await GET(
+    new NextRequest("http://localhost:3000/api/donor/public/spend?a=b&c=d"),
+    context("donor", "public", "spend"),
+  );
+  expect(String(fetch.mock.calls[0][0])).toBe("http://api.test:8002/donor/public/spend?a=b&c=d");
+});
+
+it("passes an upstream redirect through without following it", async () => {
+  vi.stubEnv("DONOR_API_BASE_URL", "http://api.test:8002");
+  const fetch = vi
+    .fn()
+    .mockResolvedValue(new Response(null, { status: 302, headers: { location: "https://elsewhere.example/" } }));
+  vi.stubGlobal("fetch", fetch);
+  const response = await GET(new NextRequest("http://localhost:3000/api/donor/login"), context("donor", "login"));
+  expect(fetch.mock.calls[0][1].redirect).toBe("manual");
+  expect(response.status).toBe(302);
+  expect(response.headers.get("location")).toBe("https://elsewhere.example/");
+});
+
+it("answers 502 when the upstream times out", async () => {
+  vi.stubEnv("DONOR_API_BASE_URL", "http://api.test:8002");
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("The operation timed out.", "TimeoutError")));
+  const response = await GET(new NextRequest("http://localhost:3000/api/donor/me"), context("donor", "me"));
+  expect(response.status).toBe(502);
+  expect((await response.json()).detail.code).toBe("API_UNREACHABLE");
+});
+
+it("holds an ordinary route to a small body but lets the upload routes take what the API accepts", async () => {
+  const fetch = vi.fn().mockResolvedValue(Response.json({}));
+  vi.stubGlobal("fetch", fetch);
+  const post = (size: number, ...path: string[]) =>
+    POST(
+      new NextRequest(`http://localhost:3000/api/${path.join("/")}`, { method: "POST", body: new Uint8Array(size) }),
+      context(...path),
+    );
+  expect((await post((1 << 20) + 1, "donor", "sign-in", "email")).status).toBe(413);
+  expect(fetch).not.toHaveBeenCalled();
+  expect((await post(1 << 20, "donor", "sign-in", "email")).status).toBe(200);
+  expect((await post((5 << 20) + 1, "donor", "staff", "founding-claims")).status).toBe(413);
+  expect((await post(5 << 20, "donor", "staff", "founding-claims")).status).toBe(200);
+  expect((await post(10 << 20, "donor", "staff", "content", "rules")).status).toBe(200);
+  expect((await post(10 << 20, "donor", "staff", "content", "sources")).status).toBe(200);
+});

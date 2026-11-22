@@ -15,6 +15,8 @@ final class NullableTests: XCTestCase {
             "referrals": NSNull(), "streak": NSNull(), "rank": NSNull(), "rankings_opted_out": false, "network": NSNull(),
             "impact": ["given_minor": NSNull(), "currency": "USD", "initiatives_funded": 0, "events_volunteered": 0],
         ]
+        // The generator numbers oneOf variants in spec order (case1 is the preparing
+        // state, case2 the ready one); a reordered schema fails here with the variant named.
         guard case .case2(let unknown) = try decode(Components.Schemas.DonorDashboard.self, body) else {
             return XCTFail("ready dashboard lost its response variant")
         }

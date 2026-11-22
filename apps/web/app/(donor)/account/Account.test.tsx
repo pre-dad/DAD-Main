@@ -65,7 +65,7 @@ it("prefills and clears a handed-off email, then locks resend with a quiet count
   expect(screen.getByRole("status")).toHaveTextContent("A link will arrive. You can resend in 30 seconds.");
   const resend = screen.getByRole("button", { name: "Resend the link" });
   expect(resend).toHaveAttribute("aria-disabled", "true");
-  expect(screen.getByText("You can resend in 30 s.")).not.toBe(screen.getByRole("status"));
+  expect(screen.getByRole("status")).not.toHaveTextContent("You can resend in 30 s.");
   // Each second re-arms the timer after a render, so advance one tick at a time.
   for (let second = 0; second < 30; second++) {
     await act(async () => {
@@ -76,6 +76,7 @@ it("prefills and clears a handed-off email, then locks resend with a quiet count
   expect(screen.getByRole("button", { name: "Resend the link" })).toHaveAttribute("aria-disabled", "false");
   vi.useRealTimers();
 });
+
 it("renders protected empty history, and removes it after logout", async () => {
   const fetch = vi
     .fn()
@@ -95,7 +96,7 @@ it("ignores a redirect target outside the account pages after claiming", async (
   render(<ClaimPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Confirm and sign in" }));
   expect(await screen.findByRole("heading", { name: "You’re signed in" })).toBeVisible();
-  expect(window.location.href).toBe("http://localhost:3000/account/claim");
+  expect(window.location.href).toBe(`${window.location.origin}/account/claim`);
 });
 
 it("tells a donor who is already signed in, and stays silent for a visitor", async () => {

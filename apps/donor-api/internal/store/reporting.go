@@ -8,12 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ReportingService serves the PRD §4 success metrics as a staff read. Every
-// number comes from committed server facts (gifts, billing periods, refunds,
-// and the donor metric projection); nothing is read from the browser
-// analytics_events stream, whose collection docs/analytics.md defers by product
-// agreement. Metrics that depend on that stream are reported unavailable with a
-// reason, never as a fabricated zero.
+// ReportingService combines committed financial facts with consented journey
+// observations. Missing observations remain unavailable rather than becoming zeros.
 type ReportingService struct {
 	Staff *StaffService
 }
@@ -23,8 +19,7 @@ type ReportingService struct {
 // grants no mutation.
 const reportReadPermission = "report.read"
 
-// shareProxyUnavailable explains why the seven-day share rate is not computed:
-// it requires the browser share-handoff observation that analytics.md defers.
+// shareProxyUnavailable explains a window without consented share observations.
 const shareProxyUnavailable = "no consented share-action observations exist in this reporting window; " +
 	"this metric cannot be computed from server facts"
 
@@ -95,7 +90,7 @@ type RetentionMilestone struct {
 	Unknown  int64 `json:"unknown"`
 }
 
-// TimeToFirstGift is unavailable until landing linkage is collected.
+// TimeToFirstGift requires an observed landing linked to a verified first gift.
 type TimeToFirstGift struct {
 	Available     bool   `json:"available"`
 	Reason        string `json:"reason,omitempty"`
@@ -126,10 +121,9 @@ type Report struct {
 	SevenDayShareRate Metric              `json:"seven_day_share_rate"`
 }
 
-// coverageNote is the fixed disclosure that server facts, not browser events,
-// back this report, with the committed-facts coverage boundary.
 const coverageNote = "Computed from committed server facts (gifts, billing periods, refunds, projection) as of the " +
-	"observation cutoff. Browser-dependent metrics are unavailable until analytics collection is approved."
+	"observation cutoff, with consented journey observations for time to first gift and seven-day sharing. " +
+	"Metrics without sufficient observations are unavailable."
 
 // Report computes the §4 metrics over [start, end). end also serves as the
 // observation cutoff: the involuntary-churn deadline (due_at + 7 days) is
@@ -174,9 +168,8 @@ func (s *ReportingService) Report(ctx context.Context, token string, start, end 
 		}
 		report.FirstGiftBySource = make([]SourceConversions, 0, len(sources))
 		for _, row := range sources {
-			source, _ := row.Source.(string)
 			report.FirstGiftBySource = append(report.FirstGiftBySource, SourceConversions{
-				Source:     source,
+				Source:     row.Source,
 				Frequency:  row.Frequency,
 				Donors:     row.Donors,
 				GrossMinor: row.GrossMinor,

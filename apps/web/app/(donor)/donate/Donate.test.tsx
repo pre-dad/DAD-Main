@@ -123,7 +123,7 @@ describe("sandbox giving", () => {
     expect(screen.getByText("1 · Your daily gift")).toBeVisible();
     expect(screen.getByText("2 · Where we send your receipt")).toBeVisible();
   });
-  it("sends exactly the same checkout request body and keys as before", async () => {
+  it("sends the checkout body with integer cents and an idempotency key", async () => {
     const fetch = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
     vi.stubGlobal("fetch", fetch);
     render(<Donate verifiedEmail="ben@example.org" />);
@@ -148,6 +148,37 @@ describe("sandbox giving", () => {
       zip: "10001",
       city: "New York",
     });
+  });
+  it("trims name and city before sending", async () => {
+    const fetch = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetch);
+    render(<Donate verifiedEmail="ben@example.org" />);
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "  Ben Donor " } });
+    fireEvent.change(screen.getByLabelText("ZIP code"), { target: { value: "10001" } });
+    fireEvent.change(screen.getByLabelText("City"), { target: { value: " New York  " } });
+    fireEvent.click(screen.getByRole("button", { name: "$3 a day · $90/month" }));
+    fireEvent.click(checkout());
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({
+      name: "Ben Donor",
+      zip: "10001",
+      city: "New York",
+    });
+  });
+  it("signs the donor out and says checkout could not be opened when the session has ended", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Sign in required" }), { status: 401 })),
+    );
+    const onSignedOut = vi.fn();
+    render(<Donate verifiedEmail="ben@example.org" onSignedOut={onSignedOut} />);
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Ben Donor" } });
+    fireEvent.change(screen.getByLabelText("ZIP code"), { target: { value: "10001" } });
+    fireEvent.change(screen.getByLabelText("City"), { target: { value: "New York" } });
+    fireEvent.click(checkout());
+    await waitFor(() => expect(onSignedOut).toHaveBeenCalledTimes(1));
+    await expectAlert(/Sign in required|Checkout could not be opened/);
+    expect(checkout()).toBeEnabled();
   });
   it("keeps the card-handling and test-payment notes next to the submit", () => {
     render(<Donate verifiedEmail="ben@example.org" />);

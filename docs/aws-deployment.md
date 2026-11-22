@@ -1,13 +1,9 @@
 # AWS deployment design (DAD foundation)
 
-Status: approved design, reconciled against the repository. This document records an
-already-decided AWS deployment for the DAD donor release and reconciles every concrete
-value (service names, environment variable names, ports, commands) against the real
-repository files: `docker-compose.prod.yml`, `scripts/deploy.sh`, `docs/operations.md`,
-`docs/edge.md`, `docs/architecture.md`, `README.md`, `Makefile`,
-`apps/donor-api/Dockerfile`, `apps/web/Dockerfile`, and `scripts/refresh-cloudflare-ips.sh`.
-Where the design's assumptions differed from the repository, the repository wins and the
-reconciliation is noted inline.
+This document describes the AWS deployment of the DAD donor release. Service names,
+environment variable names, ports and commands match `docker-compose.prod.yml`,
+`scripts/deploy.sh`, `docs/operations.md` and `docs/edge.md`; where this document and
+those files differ, the repository files win.
 
 The IaC is AWS CDK (TypeScript). This is the design; the CDK app lives in the
 [DAD-infra](https://github.com/pre-dad/DAD-infra) repository at `apps/dad-main/`, and
@@ -22,8 +18,9 @@ DAD-infra `docs/design/aws-infra-design.md`.
   DAD-infra's shared `packages/config`; DAD-Main-specific values (hostnames, counts, task
   sizes) are an app-level extension of it.
 - **Accounts / environments:**
-  - `staging` → AWS account `853377042897` (org "sandbox"). Primary focus for the test.
-  - `production` → AWS account `216833405626` (org "production").
+  - `staging` → the sandbox organization's account.
+  - `production` → the production organization's account.
+  - Account ids live in DAD-infra's `packages/config`.
 - The same code targets either account. A typed per-environment config object holds
   account id, region, hostnames, desired counts, task sizes, `multiAz`, log retention,
   deletion protection, and the Cloudflare-ingress toggle. Promotion to production is a
@@ -108,7 +105,7 @@ Reconciled exactly against `docker-compose.prod.yml`. Nine services:
 | --- | --- | --- | --- | --- |
 | `api` | `dad/api` | `api` (image default CMD) | `DONOR_GO_LISTEN=0.0.0.0:8002`, `DONOR_PUBLIC_ORIGIN`, `DONOR_STAFF_ORIGIN`, `DONOR_API_DATABASE_URL`, `DONOR_TRUSTED_PROXY_CIDRS` (compute subnet CIDRs), plus the Stripe, encryption and mail-queue secrets | 8002 |
 | `web` | `dad/web` | `node server.js` (image default) | `DONOR_API_BASE_URL=http://api:8002`, `DONOR_CLIENT_IP_HEADER=X-Real-IP` | 3000 |
-| `nginx` | `dad/nginx` | image default | `INGRESS_MODE=cloudflare`, `DONOR_PUBLIC_ORIGIN`, `DONOR_STAFF_ORIGIN`, `NGINX_ENVSUBST_FILTER=^INGRESS_` | 8080/8443 (task-local health 8081) |
+| `nginx` | `dad/nginx` | image default | `INGRESS_MODE=cloudflare`, `DONOR_PUBLIC_ORIGIN`, `DONOR_STAFF_ORIGIN`, optional `DONOR_NATIVE_API_ORIGIN` ([native API hostname](#native-api-hostname)), `NGINX_ENVSUBST_FILTER=^INGRESS_` | 8080/8443 (task-local health 8081) |
 | `stripe-worker` | `dad/api` | `worker --kind stripe` | `DONOR_GO_WORKERS_ENABLED`, `STRIPE_SECRET_KEY`, `DONOR_STRIPE_REQUESTS_PER_SECOND`, `DONOR_WORKER_STRIPE_DATABASE_URL` | none |
 | `projection-worker` | `dad/api` | `worker --kind projections` | `DONOR_GO_WORKERS_ENABLED`, `DONOR_WORKER_PROJECTIONS_DATABASE_URL` | none |
 | `login-email-worker` | `dad/api` | `worker --kind login-email` | `DONOR_GO_WORKERS_ENABLED`, `DONOR_PUBLIC_ORIGIN`, mail transport (`DONOR_SMTP_*`, `DONOR_EMAIL_FROM`, `DONOR_EMAIL_ENCRYPTION_KEY`), `DONOR_WORKER_LOGIN_EMAIL_DATABASE_URL` | none |
@@ -133,10 +130,11 @@ so the task definitions always set it; it is not the switch.
 
 ### 4.2 api networking and trust
 
-- `api` listens `0.0.0.0:8002` and is reachable **only from the web tier** (api SG inbound
-  8002 from web SG only).
-- `DONOR_TRUSTED_PROXY_CIDRS` must be the web tier's subnet CIDR so the API trusts
-  `X-Real-IP` only from web. In Compose this is the `app` network `172.30.43.0/24`; on AWS
+- `api` listens `0.0.0.0:8002` and is reachable **only from the web tier and, when native ingress is on, the nginx tier**
+  (api SG inbound 8002 from the web and nginx SGs only).
+- `DONOR_TRUSTED_PROXY_CIDRS` must include the web tier's subnet CIDR, and the nginx tier's when native ingress is on,
+  so the API trusts `X-Real-IP` only from those forwarders (without nginx's, native
+  clients share one rate-limit bucket). In Compose this is the `app` network `172.30.43.0/24`; on AWS
   it becomes the web tier's private-subnet CIDR(s). The API refuses a trusted-proxy range
   broader than IPv4 /8 or IPv6 /32, so per-subnet CIDRs are used, not a supernet.
 - web→api and nginx→web discovery use **ECS Service Connect** (Cloud Map namespace per
@@ -226,10 +224,9 @@ is the proxy's read/write endpoint, and `<db-name>` is the application database 
 `DONOR_GO_DATABASE_URL` takes the same form with `DONOR_GO_DATABASE_PASSWORD` and is used
 only by migrate and provision-roles.
 
-Deploy order: the DAD-Main release containing commit 7506cbf, which accepts both forms,
-goes out first; the DAD-infra change that switches task definitions to the password-less
-form (5c952e2) goes out after it. Deploying DAD-infra first leaves the processes unable
-to find a password. See `DAD-infra/docs/bootstrap.md`, "Database passwords are ECS
+Deploy order: a DAD-Main release that accepts both forms goes out before the DAD-infra
+change that switches task definitions to the password-less form. Deploying DAD-infra
+first leaves the processes unable to find a password. See `DAD-infra/docs/bootstrap.md`, "Database passwords are ECS
 secrets". Login names mirror `.env.database.example`
 (`dad_api_login`, `dad_worker_stripe_login`, … `dad_reconcile_login`).
 
@@ -290,7 +287,8 @@ Security-group chain (mirrors the Compose network isolation):
 
 - NLB → nginx (nginx SG inbound 8080/8443 from NLB / Cloudflare ranges only).
 - nginx → web (web SG inbound 3000 from nginx SG only).
-- web → api (api SG inbound 8002 from web SG only).
+- web → api (api SG inbound 8002 from web SG only); with native ingress, nginx → api
+  (api SG inbound 8002 from nginx SG).
 - api/workers → RDS Proxy (proxy SG inbound 5432 from app SGs only).
 - RDS SG inbound 5432 from the proxy SG and the one-off `bootstrap-owner` task's SG only.
 - Workers: no inbound.
@@ -405,10 +403,17 @@ stacks, and the released image tag is recorded in the SSM parameter `/dad/<env>/
 - **CDK-managed app deploys vs direct ECS:** chose direct `aws ecs update-service` per the
   user's decision; CDK is reserved for infra.
 
----
-Reconciliation summary: service names, env var names, ports (8002 api, 3000 web,
-8080/8443/8081 nginx), worker `--kind` values, maintenance commands, the reconcile
-schedule and alarm, and the per-process DB URL query params
-(`default_query_exec_mode=exec`, `sslmode=verify-full`) were confirmed against
-`docker-compose.prod.yml`, `scripts/deploy.sh`, `docs/operations.md`, `docs/edge.md`,
-`.env.database.example`, and DAD-infra's `apps/dad-main`.
+## Native API hostname
+
+The environment configuration includes a separate native API origin:
+`https://api.staging.dynamicaid.org` or `https://api.dynamicaid.org`. The nginx service
+receives it as `DONOR_NATIVE_API_ORIGIN` and reaches the private API through Service
+Connect. The network stack permits nginx-to-API traffic on 8002 without publishing that
+port. Browser traffic continues through Next.js.
+
+Provision the API DNS record through the same Cloudflare origin path as the other hosts,
+ensure the ingress certificate covers it, and apply the native-host edge rules. Configure
+the native apps' API origin separately from the public origin used for emailed links,
+referrals and hosted checkout returns. See [native ingress](edge.md#native-api-ingress-prerequisite).
+The offline CDK and nginx checks do not establish that DNS, certificates or an AWS
+rollout have been activated; deployments retain the repository's owner/pipeline boundary.

@@ -6,11 +6,23 @@ host_of() {
         *) echo "ingress: $1 must be an https:// origin" >&2; return 1 ;;
     esac
     host="${2#https://}"
-    host="${host%:*}"
     case "$host" in
-        "" | *[!A-Za-z0-9.-]*) echo "ingress: $1 must be a bare https origin" >&2; return 1 ;;
+        *:*)
+            port="${host##*:}"
+            case "$port" in
+                "" | *[!0-9]*) echo "ingress: $1 has an invalid port" >&2; return 1 ;;
+            esac
+            if [ "${#port}" -gt 5 ] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+                echo "ingress: $1 has an invalid port" >&2
+                return 1
+            fi
+            host="${host%:*}"
+            ;;
     esac
-    printf '%s' "$host"
+    case "$host" in
+        "" | .* | *. | -* | *..* | *[!A-Za-z0-9.-]*) echo "ingress: $1 must be a bare https origin" >&2; return 1 ;;
+    esac
+    printf '%s' "$host" | tr '[:upper:]' '[:lower:]'
 }
 case "${INGRESS_MODE:-}" in
     cloudflare | direct) ;;
@@ -23,3 +35,17 @@ if [ "$INGRESS_PUBLIC_HOST" = "$INGRESS_STAFF_HOST" ]; then
     exit 1
 fi
 export INGRESS_PUBLIC_HOST INGRESS_STAFF_HOST
+
+INGRESS_NATIVE_HOST=native-disabled.invalid
+INGRESS_NATIVE_ENABLED=0
+INGRESS_NATIVE_UPSTREAM=web:3000
+if [ -n "${DONOR_NATIVE_API_ORIGIN:-}" ]; then
+    INGRESS_NATIVE_HOST="$(host_of DONOR_NATIVE_API_ORIGIN "$DONOR_NATIVE_API_ORIGIN")" || exit 1
+    if [ "$INGRESS_NATIVE_HOST" = "$INGRESS_PUBLIC_HOST" ] || [ "$INGRESS_NATIVE_HOST" = "$INGRESS_STAFF_HOST" ]; then
+        echo "ingress: DONOR_NATIVE_API_ORIGIN must name its own host" >&2
+        exit 1
+    fi
+    INGRESS_NATIVE_ENABLED=1
+    INGRESS_NATIVE_UPSTREAM=api:8002
+fi
+export INGRESS_NATIVE_HOST INGRESS_NATIVE_ENABLED INGRESS_NATIVE_UPSTREAM

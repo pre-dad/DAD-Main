@@ -65,13 +65,10 @@ RETURNING referred_link_count, referred_irl_count;
 
 -- name: ReferralTotals :one
 -- The totals are maintained incrementally on the referrer's own row (see
--- ApplyReferralDelta), so this reads them directly instead of scanning every
--- referred row. Readiness stays a bounded freshness check over the referred
--- rows: it is inherently a property of the set of referred rows (it flips when
--- any one's next_refresh_at moves), so denormalizing it would risk changing the
--- observable "show referrals only when all referred projections are fresh" rule;
--- per the plan we keep it exact rather than trade correctness for marginal perf.
--- dashboard() reads the referrer's own row first and returns "preparing" before
+-- ApplyReferralDelta), so they are read directly. Readiness is a live freshness
+-- check over the referred rows, since it flips when any one's next_refresh_at
+-- moves. dashboard() reads the referrer's own row first and returns
+-- "preparing" before
 -- calling this, so own-row always exists here.
 SELECT own.referred_link_count::bigint AS link_count,
 own.referred_irl_count::bigint AS irl_count,
@@ -94,6 +91,7 @@ AND EXISTS(SELECT 1 FROM donor_gifts g WHERE g.checkout_id=c.id))::boolean;
 INSERT INTO donor_referral_corrections
     (donor_id,old_first_gift_id,new_first_gift_id,old_referrer_id,new_referrer_id,old_kind,new_kind,recorded_at,rules_version)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9);
+
 -- name: SaveRetentionMilestone :exec
 INSERT INTO donor_retention_milestones(donor_id,days,cohort_at,checkpoint_at,retained,computed_at)
 VALUES($1,$2,$3,$4,$5,$6)
@@ -102,7 +100,7 @@ checkpoint_at=EXCLUDED.checkpoint_at,retained=EXCLUDED.retained,computed_at=EXCL
 
 -- name: FoundingClaimed :one
 -- Whether the donor holds a waitlist grant (D-6).
-SELECT EXISTS(SELECT 1 FROM donor_founding_grants WHERE donor_id = $1)::bool;
+SELECT EXISTS(SELECT 1 FROM donor_founding_grants WHERE donor_id = $1)::boolean;
 
 -- name: GrantFoundingClaim :exec
 -- Grants the donor Founding Donor if their address hash has a claim.

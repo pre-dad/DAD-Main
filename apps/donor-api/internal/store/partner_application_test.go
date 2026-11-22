@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"dad/donor-api/internal/dbroles"
@@ -134,8 +135,16 @@ func TestPartnerApplicationApprovalStateMachine(t *testing.T) {
 	if err := svc.Apply(ctx, rejID, validApplication("Beta LLC", "ops@beta.test")); err != nil {
 		t.Fatal(err)
 	}
+	for _, reason := range []string{"", "   \n", strings.Repeat("x", 501)} {
+		if err := svc.Reject(ctx, superToken, rejID, reason); !errors.Is(err, ErrPartnerApplication) {
+			t.Fatalf("reject with reason %.10q: %v", reason, err)
+		}
+	}
 	if err := svc.Reject(ctx, superToken, rejID, "incomplete details"); err != nil {
 		t.Fatal(err)
+	}
+	if err := svc.Reject(ctx, superToken, rejID, "incomplete details"); !errors.Is(err, ErrPartnerDecision) {
+		t.Fatalf("re-reject of a decided application: %v", err)
 	}
 	if err := svc.Apply(ctx, testID(t), validApplication("Beta LLC", "ops@beta.test")); err != nil {
 		t.Fatalf("re-apply after rejection refused: %v", err)
@@ -149,5 +158,34 @@ func TestPartnerApplicationApprovalStateMachine(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT match_rate_bp FROM donor_partner_signups WHERE id=$1", partnerID).Scan(&rate); err != nil ||
 		rate != 5000 {
 		t.Fatalf("match rate not set: %d %v", rate, err)
+	}
+	if err := svc.SetMatch(ctx, superToken, partnerID, 600, 10001, 1_000_00); !errors.Is(err, ErrPartnerApplication) {
+		t.Fatalf("match rate above 100%% accepted: %v", err)
+	}
+}
+
+func TestNewCompanyCodeUsesTheAlphabetAndSixRandomCharacters(t *testing.T) {
+	seen := map[byte]bool{}
+	for range 400 {
+		code, err := newCompanyCode("Acme Corp")
+		if err != nil {
+			t.Fatal(err)
+		}
+		prefix, random, ok := strings.Cut(code, "-")
+		if !ok || prefix != "ACMECO" || len(random) != 6 {
+			t.Fatalf("code %q is not ACMECO-xxxxxx", code)
+		}
+		for i := range len(random) {
+			if !strings.ContainsRune(companyCodeAlphabet, rune(random[i])) {
+				t.Fatalf("code %q has a character outside the alphabet", code)
+			}
+			seen[random[i]] = true
+		}
+	}
+	if len(seen) != len(companyCodeAlphabet) {
+		t.Fatalf("only %d of %d alphabet characters ever appeared in 2400 draws", len(seen), len(companyCodeAlphabet))
+	}
+	if code, err := newCompanyCode("!!!"); err != nil || len(code) != 6 || strings.Contains(code, "-") {
+		t.Fatalf("code for a name with no usable characters: %q %v", code, err)
 	}
 }

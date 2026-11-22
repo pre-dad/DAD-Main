@@ -15,6 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const staffInviteLifetime = 24 * time.Hour
+
 func createStaffInvite(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) (string, error) {
 	token, err := randomToken(32)
 	if err != nil {
@@ -24,7 +26,13 @@ func createStaffInvite(ctx context.Context, q *queries.Queries, id pgtype.UUID, 
 	if err != nil {
 		return "", err
 	}
-	if err = q.InsertStaffInvite(ctx, queries.InsertStaffInviteParams{ID: inviteID, StaffID: id, TokenHash: HashToken(token), ExpiresAt: timestamp(now.Add(24 * time.Hour))}); err != nil {
+	err = q.InsertStaffInvite(ctx, queries.InsertStaffInviteParams{
+		ID:        inviteID,
+		StaffID:   id,
+		TokenHash: HashToken(token),
+		ExpiresAt: timestamp(now.Add(staffInviteLifetime)),
+	})
+	if err != nil {
 		return "", err
 	}
 	return token, nil
@@ -109,10 +117,25 @@ type AccessChange struct {
 	Token    string     `json:"-"`
 }
 
+// StaffAccessAction names one of the account changes ChangeAccess performs.
+type StaffAccessAction string
+
+const (
+	AccessDisable  StaffAccessAction = "disable"
+	AccessRole     StaffAccessAction = "role"
+	AccessRecovery StaffAccessAction = "recovery"
+)
+
 // ChangeAccess disables another account, changes its role, or replaces its
 // passkeys through a recovery invitation, revoking its sessions. It locks
 // every account so at least one other active administrator always remains.
-func (s *StaffService) ChangeAccess(ctx context.Context, token string, targetID pgtype.UUID, action, role string) (AccessChange, error) {
+func (s *StaffService) ChangeAccess(
+	ctx context.Context,
+	token string,
+	targetID pgtype.UUID,
+	action StaffAccessAction,
+	role string,
+) (AccessChange, error) {
 	return staffRead(ctx, s, token, "staff.manage", func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (AccessChange, error) {
 		q := queries.New(tx)
 		rows, err := q.LockStaffAccounts(ctx)
@@ -169,7 +192,7 @@ func (s *StaffService) Recover(ctx context.Context, email string) (string, error
 		if !target.DonorStaff.ID.Valid {
 			return "", pgx.ErrNoRows
 		}
-		change, err := changeAccess(ctx, q, pgtype.UUID{}, target, "recovery", "", time.Now().UTC())
+		change, err := changeAccess(ctx, q, pgtype.UUID{}, target, AccessRecovery, "", time.Now().UTC())
 		return change.Token, err
 	})
 }
@@ -179,7 +202,8 @@ func changeAccess(
 	q *queries.Queries,
 	actor pgtype.UUID,
 	row queries.LockStaffAccountsRow,
-	action, role string,
+	action StaffAccessAction,
+	role string,
 	now time.Time,
 ) (AccessChange, error) {
 	var result AccessChange
@@ -187,11 +211,11 @@ func changeAccess(
 	var event string
 	target := row.DonorStaff
 	switch action {
-	case "disable":
+	case AccessDisable:
 		target.Disabled = true
 		event = "staff.disabled"
 		result.Disabled = true
-	case "role":
+	case AccessRole:
 		if len(staffPermissions(role)) == 0 {
 			return result, ErrStaffInput
 		}
@@ -204,7 +228,7 @@ func changeAccess(
 		event = "staff.role_changed"
 		view := staffView(target, row.Active)
 		result.Staff = &view
-	case "recovery":
+	case AccessRecovery:
 		details = map[string]bool{"previously_disabled": target.Disabled, "previously_active": row.Active}
 		target.Disabled = false
 		if _, err := q.DeleteStaffPasskeys(ctx, target.ID); err != nil {

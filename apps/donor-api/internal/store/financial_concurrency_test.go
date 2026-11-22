@@ -336,10 +336,10 @@ func TestConcurrentReferralDeltaConverges(t *testing.T) {
 	// Concurrently project all siblings, two contending writers each.
 	var wg sync.WaitGroup
 	failures := make(chan error, siblings*2)
-	for round := range 2 {
+	for range 2 {
 		for _, id := range siblingIDs {
 			wg.Add(1)
-			go func(id pgtype.UUID, round int) {
+			go func(id pgtype.UUID) {
 				defer wg.Done()
 				tx, err := worker.Begin(ctx)
 				if err != nil {
@@ -354,7 +354,7 @@ func TestConcurrentReferralDeltaConverges(t *testing.T) {
 				if err != nil {
 					failures <- err
 				}
-			}(id, round)
+			}(id)
 		}
 	}
 	wg.Wait()
@@ -362,32 +362,32 @@ func TestConcurrentReferralDeltaConverges(t *testing.T) {
 	for err := range failures {
 		t.Error(err)
 	}
-	// Recompute the referrer so the backstop reconciles any lost deltas.
-	{
-		tx, err := worker.Begin(ctx)
+	// Each sibling is LINK 3000, so aggregate: link_count = siblings, irl_count = 0,
+	// link_minor = 3000 * siblings, irl_minor = 0.
+	want := [4]int64{siblings, 0, 3000 * siblings, 0}
+	stored := func() [4]int64 {
+		p, err := queries.New(pool).Projection(ctx, referrerID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = refreshProjection(ctx, tx, referrerID, now); err != nil {
-			tx.Rollback(ctx)
-			t.Fatal(err)
-		}
-		if err = tx.Commit(ctx); err != nil {
-			t.Fatal(err)
-		}
+		return [4]int64{p.ReferredLinkCount, p.ReferredIrlCount, p.ReferredLinkMinor, p.ReferredIrlMinor}
 	}
-	// Assert the referrer's stored columns equal the OLD aggregate.
-	p, err := queries.New(pool).Projection(ctx, referrerID)
+	// The delta path alone must converge; the recompute below would mask a lost delta.
+	if got := stored(); got != want {
+		t.Fatalf("referral deltas lost before the backstop recompute: got %v want %v", got, want)
+	}
+	refresh, err := worker.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Each sibling is LINK 3000, so aggregate: link_count = siblings, irl_count = 0,
-	// link_minor = 3000 * siblings, irl_minor = 0.
-	wantLink := int64(siblings)
-	wantMinor := int64(3000 * siblings)
-	got := [4]int64{p.ReferredLinkCount, p.ReferredIrlCount, p.ReferredLinkMinor, p.ReferredIrlMinor}
-	want := [4]int64{wantLink, 0, wantMinor, 0}
-	if got != want {
-		t.Fatalf("concurrent referral deltas diverged: got %v want %v", got, want)
+	if _, err = refreshProjection(ctx, refresh, referrerID, now); err != nil {
+		refresh.Rollback(ctx)
+		t.Fatal(err)
+	}
+	if err = refresh.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := stored(); got != want {
+		t.Fatalf("referral columns diverged after the backstop recompute: got %v want %v", got, want)
 	}
 }

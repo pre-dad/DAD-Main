@@ -62,6 +62,7 @@ export function InitiativeList({ initiatives }: { initiatives: Schema<"PublicIni
 }
 
 export function InitiativeFacts({ initiative }: { initiative: Schema<"PublicInitiative"> }) {
+  // Calendar dates are UTC throughout (lib/dates.ts), so an initiative flips to "Started" at 00:00 UTC.
   const planned = initiative.started_on > new Date().toISOString().slice(0, 10);
   return (
     <>
@@ -72,7 +73,7 @@ export function InitiativeFacts({ initiative }: { initiative: Schema<"PublicInit
         <time dateTime={initiative.started_on}>{formatDay(initiative.started_on)}</time>.
         {initiative.status === "COMPLETE" && " Complete."}
       </p>
-      {planned && <p>Planned initiative. Programs open at launch; this is not a recipient enrolment form.</p>}
+      {planned && <p>Planned initiative. Programs open at launch; this is not a recipient enrollment form.</p>}
     </>
   );
 }

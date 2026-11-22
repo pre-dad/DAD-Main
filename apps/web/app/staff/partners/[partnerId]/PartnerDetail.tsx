@@ -1,21 +1,23 @@
 "use client";
 import Link from "next/link";
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import { Announcer } from "@/components/donor/Announcer";
 import { LogoEditor } from "@/components/donor/LogoEditor";
 import { Page } from "@/components/donor/Page";
-import { api, failureMessage, type ResponseBody, type Schema, unconfirmedMessage } from "@/lib/api";
+import { api, classifyFailure, failureMessage, type ResponseBody, type Schema, unconfirmedMessage } from "@/lib/api";
 import { formatDollars, formatMoney, parseDollars } from "@/lib/money";
+import { taxYear } from "@/lib/taxYear";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { matchTerms } from "../Partners";
 
 type PendingPayment = { key: string; year: number; amount_minor: number };
 
-type MatchStatus = ResponseBody<"/donor/staff/partners/{partnerID}/match-status", "get">;
+type MatchStatus = ResponseBody<"/donor/staff/partners/{partner_id}/match-status", "get">;
 
 export default function PartnerDetail({ partner }: { partner: string }) {
   const id = encodeURIComponent(partner);
-  const year = new Date().getFullYear();
+  const year = taxYear(new Date());
   const { resource, data, reload } = useApiResource(`/donor/staff/partners/${id}`, {
     load: async (signal) => {
       const [detail, match] = await Promise.all([
@@ -72,6 +74,7 @@ export default function PartnerDetail({ partner }: { partner: string }) {
     done: string,
     action: () => Promise<unknown>,
     uncertainFailure?: string,
+    discardRefusedPayment?: (cause: unknown) => void,
   ) {
     event?.preventDefault();
     const form = event?.currentTarget;
@@ -85,6 +88,7 @@ export default function PartnerDetail({ partner }: { partner: string }) {
       form?.reset();
       reload();
     } catch (cause) {
+      discardRefusedPayment?.(cause);
       setError(
         uncertainFailure
           ? unconfirmedMessage(cause, uncertainFailure)
@@ -150,6 +154,14 @@ export default function PartnerDetail({ partner }: { partner: string }) {
         setPaymentAmount("");
       },
       "The recording is not confirmed. Retry this payment; do not record it again as a new payment.",
+      (cause) => {
+        // A definite refusal means the server recorded nothing, so the saved retry can go.
+        const failure = classifyFailure(cause);
+        if (failure !== "rejected" && failure !== "unconfigured") return;
+        sessionStorage.removeItem(paymentStorageKey);
+        paymentRef.current = null;
+        setPendingPayment(null);
+      },
     );
   }
 
@@ -316,11 +328,31 @@ export default function PartnerDetail({ partner }: { partner: string }) {
                 <li key={user.id}>
                   {user.name || user.email} · {user.email} · {user.role === "ADMIN" ? "Admin" : "Viewer"}
                   {!user.accepted && " · Invitation not yet used"}{" "}
-                  <button
-                    type="button"
+                  {!user.accepted && (
+                    <>
+                      <button
+                        type="button"
+                        className="link"
+                        disabled={busy}
+                        onClick={() =>
+                          run(null, `Resent the invitation to ${user.email}.`, () =>
+                            api(`/donor/staff/partners/${id}/users/${encodeURIComponent(user.id)}/reinvite`, {
+                              method: "POST",
+                            }),
+                          )
+                        }
+                      >
+                        Resend invitation to {user.email}
+                      </button>{" "}
+                    </>
+                  )}
+                  <ConfirmButton
                     className="link"
                     disabled={busy}
-                    onClick={() =>
+                    prompt={`Remove ${user.email} from ${detail.organization}'s portal?`}
+                    confirmLabel={`Confirm removal of ${user.email}`}
+                    keepLabel={`Keep ${user.email}`}
+                    onConfirm={() =>
                       run(null, `Removed ${user.email}.`, () =>
                         api(`/donor/staff/partners/${id}/users/${encodeURIComponent(user.id)}/remove`, {
                           method: "POST",
@@ -329,7 +361,7 @@ export default function PartnerDetail({ partner }: { partner: string }) {
                     }
                   >
                     Remove {user.email}
-                  </button>
+                  </ConfirmButton>
                 </li>
               ))}
             </ul>

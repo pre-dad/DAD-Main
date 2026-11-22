@@ -100,7 +100,9 @@ it("saves the streak-lapsed and badge pushes, rankings and network visibility", 
   const rankings = privacy.getByRole("checkbox", { name: "Rank my giving streak nationally and in my city" });
   expect(rankings).toBeChecked();
   fireEvent.click(rankings);
-  fireEvent.click(privacy.getByRole("checkbox", { name: "Show my public nickname to the person who invited me" }));
+  fireEvent.click(
+    privacy.getByRole("checkbox", { name: "Show my first name and last initial to the person who invited me" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
   expect(await screen.findByText("Preferences saved.")).toBeVisible();
   expect(sent(fetch, "/api/donor/me/preferences")).toMatchObject({
@@ -173,26 +175,37 @@ it("saves ZIP, city and phone", async () => {
   fireEvent.change(details.getByRole("textbox", { name: "Phone" }), { target: { value: "+12125550123" } });
   fireEvent.click(details.getByRole("button", { name: "Save details" }));
   expect(await screen.findByText("Your details were saved.")).toBeVisible();
-  expect(sent(fetch, "/api/donor/me/profile")).toEqual({ zip: "10001", city: "New York", phone: "+12125550123" });
+  expect(sent(fetch, "/api/donor/me/profile")).toEqual({
+    zip: "10001",
+    city: "New York",
+    phone: "+12125550123",
+    timezone_override: "",
+  });
   expect(screen.getByRole("textbox", { name: "City" })).toHaveValue("New York");
 });
 
 it("deletes the account after confirmation", async () => {
   const fetch = stubFetch({ "POST /api/donor/me/delete": () => json({ deleted: true }) });
-  const confirm = vi.fn(() => true);
-  vi.stubGlobal("confirm", confirm);
+  const confirm = vi.spyOn(window, "confirm");
   render(<Profile />);
   fireEvent.click(await screen.findByRole("button", { name: "Delete my account" }));
-  expect(confirm).toHaveBeenCalledOnce();
+  expect(fetch.mock.calls.some(([url]) => url === "/api/donor/me/delete")).toBe(false);
+  const confirmButton = screen.getByRole("button", { name: "Confirm deletion" });
+  expect(confirmButton).toHaveFocus();
+  expect(confirmButton).toHaveAccessibleDescription("Delete your DAD account? This can’t be undone.");
+  fireEvent.click(confirmButton);
+  expect(confirm).not.toHaveBeenCalled();
   expect(await screen.findByText(/Your account has been deleted/)).toHaveAttribute("role", "status");
   expect(fetch.mock.calls.some(([url]) => url === "/api/donor/me/delete")).toBe(true);
 });
 
 it("leaves the account alone when deletion is not confirmed", async () => {
   const fetch = stubFetch();
-  vi.stubGlobal("confirm", () => false);
   render(<Profile />);
-  fireEvent.click(await screen.findByRole("button", { name: "Delete my account" }));
+  const trigger = await screen.findByRole("button", { name: "Delete my account" });
+  fireEvent.click(trigger);
+  fireEvent.click(screen.getByRole("button", { name: "Keep my account" }));
+  expect(screen.getByRole("button", { name: "Delete my account" })).toHaveFocus();
   expect(fetch.mock.calls.some(([url]) => url === "/api/donor/me/delete")).toBe(false);
 });
 
@@ -204,9 +217,9 @@ it("explains that renewing giving must be cancelled before deletion", async () =
         409,
       ),
   });
-  vi.stubGlobal("confirm", () => true);
   render(<Profile />);
   fireEvent.click(await screen.findByRole("button", { name: "Delete my account" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm deletion" }));
   expect(
     await screen.findByText(
       "Cancel your monthly giving, or let a checkout in progress finish, before deleting your account",
@@ -241,4 +254,72 @@ it("saves the gift-processed push choice independently of financial email", asyn
   fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
   expect(await screen.findByText("Preferences saved.")).toBeVisible();
   expect(sent(fetch, "/api/donor/me/preferences")).toMatchObject({ push_gift_processed: false });
+});
+
+it("loads a saved time zone correction and explicitly resets to the ZIP suggestion", async () => {
+  const fetch = stubFetch({
+    "GET /api/donor/me/profile": () => json({ ...profile, timezone_override: "America/New_York" }),
+    "POST /api/donor/me/profile": (init) => json({ ...profile, ...JSON.parse(String(init?.body)) }),
+  });
+  render(<Profile />);
+  const zones = await screen.findByRole("combobox", { name: "Time zone" });
+  expect(zones).toHaveValue("America/New_York");
+  expect(zones).toHaveAccessibleDescription(/ZIP suggestions can be approximate/);
+  fireEvent.change(zones, { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save details" }));
+  expect(await screen.findByText("Your details were saved.")).toBeVisible();
+  expect(sent(fetch, "/api/donor/me/profile").timezone_override).toBe("");
+});
+
+it("keeps an unsaved preference toggle when the details are saved", async () => {
+  const fetch = stubFetch({
+    "POST /api/donor/me/profile": (init) => json({ ...profile, ...JSON.parse(String(init?.body)), version: 4 }),
+    "POST /api/donor/me/preferences": (init) => json({ ...profile, ...JSON.parse(String(init?.body)), version: 5 }),
+  });
+  render(<Profile />);
+  const badge = await screen.findByRole("checkbox", { name: "When I earn a badge" });
+  fireEvent.click(badge);
+  fireEvent.change(screen.getByLabelText("City"), { target: { value: "Oakland" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save details" }));
+  expect(await screen.findByText("Your details were saved.")).toBeVisible();
+  expect(screen.getByRole("checkbox", { name: "When I earn a badge" })).not.toBeChecked();
+  fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
+  expect(await screen.findByText("Preferences saved.")).toBeVisible();
+  expect(sent(fetch, "/api/donor/me/preferences")).toMatchObject({ version: 4, push_badge_earned: false });
+});
+
+it("requests an email change with the new address", async () => {
+  const fetch = stubFetch({ "POST /api/donor/me/email-change": () => json({ requested: true }) });
+  render(<Profile />);
+  fireEvent.click(await screen.findByText("Change account email"));
+  fireEvent.change(screen.getByLabelText("New email address"), { target: { value: "new@example.org" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send confirmation to current address" }));
+  expect(await screen.findByText(/Check your current email address first/)).toBeVisible();
+  expect(sent(fetch, "/api/donor/me/email-change")).toEqual({ email: "new@example.org" });
+  expect(screen.getByLabelText("New email address")).toHaveValue("");
+});
+
+it("signs out everywhere", async () => {
+  const fetch = stubFetch({ "POST /api/donor/logout-all": () => json({ signed_out: true }) });
+  render(<Profile />);
+  fireEvent.click(await screen.findByRole("button", { name: "Confirm sign out everywhere" }));
+  expect(await screen.findByRole("link", { name: "Sign in to manage your profile" })).toBeVisible();
+  expect(fetch.mock.calls.some(([url, init]) => url === "/api/donor/logout-all" && init?.method === "POST")).toBe(true);
+});
+
+it("asks the donor to sign in again when saving preferences returns 401", async () => {
+  stubFetch({ "POST /api/donor/me/preferences": () => json({}, 401) });
+  render(<Profile />);
+  fireEvent.click(await screen.findByRole("button", { name: "Save preferences" }));
+  expect(await screen.findByRole("link", { name: "Sign in to manage your profile" })).toBeVisible();
+});
+
+it("reports a failed preference save and keeps the choices", async () => {
+  stubFetch({ "POST /api/donor/me/preferences": () => json({}, 500) });
+  render(<Profile />);
+  const badge = await screen.findByRole("checkbox", { name: "When I earn a badge" });
+  fireEvent.click(badge);
+  fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
+  expect(await screen.findByText(/Preferences were not confirmed/)).toHaveAttribute("role", "alert");
+  expect(badge).not.toBeChecked();
 });

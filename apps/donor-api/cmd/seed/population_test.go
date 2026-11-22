@@ -86,8 +86,8 @@ func TestPopulationHasALaunchShape(t *testing.T) {
 		"monthly":      {share(monthly), 1 - abandonedShare, 0.02},
 		"abandoned":    {share(abandoned), abandonedShare, 0.01},
 		"$30 monthly":  {float64(monthly30) / float64(monthly), 0.60, 0.02},
-		"referred":     {share(referred), 0.40, 0.08},
-		"sharers":      {share(sharers), 0.92 * claimShare * sharerShare, 0.05},
+		"referred":     {share(referred), referredShare * (1 - abandonedShare) * (1 - lateTouchShare), 0.01},
+		"sharers":      {share(sharers), (1 - abandonedShare) * claimShare * sharerShare, 0.01},
 		"failed rates": {float64(failed) / float64(periods), renewalFailure, 0.01},
 	} {
 		if math.Abs(check.got-check.want) > check.tolerance {
@@ -331,10 +331,34 @@ func TestEngagementLayerKeepsItsConstraints(t *testing.T) {
 		)
 	}
 
-	// Determinism: the same seed reproduces the engagement layer.
 	other := generate(20000, 0, 7, asOf)
 	if len(other.partners) != len(pop.partners) || other.partners[0].id != pop.partners[0].id ||
 		len(other.events[0].reservations) != len(pop.events[0].reservations) {
 		t.Fatal("engagement layer is not reproducible from the seed")
+	}
+}
+
+func TestAppendedEngagementLayersHaveUniqueIdentifiers(t *testing.T) {
+	first, second := generate(10, 0, 3, asOf), generate(10, 10, 3, asOf)
+	codes, slugs := map[string]bool{}, map[string]bool{}
+	for _, pop := range []*population{first, second} {
+		for _, p := range pop.partners {
+			if codes[p.companyCode] {
+				t.Fatalf("company code %s repeats across appended seeds", p.companyCode)
+			}
+			codes[p.companyCode] = true
+		}
+		for _, in := range pop.initiatives {
+			if slugs[in.slug] {
+				t.Fatalf("initiative slug %s repeats across appended seeds", in.slug)
+			}
+			slugs[in.slug] = true
+		}
+		for _, ev := range pop.events {
+			if slugs[ev.slug] {
+				t.Fatalf("event slug %s repeats across appended seeds", ev.slug)
+			}
+			slugs[ev.slug] = true
+		}
 	}
 }

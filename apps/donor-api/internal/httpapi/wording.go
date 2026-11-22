@@ -44,12 +44,16 @@ func (a *api) setRecognitionWording(w http.ResponseWriter, r *http.Request, sess
 	})
 }
 
+// maxRecognitionRulesBody holds a full rule set: one artwork per catalog badge,
+// each up to 350000 characters of data URL, so 24 of them fill about 8 MiB.
+const maxRecognitionRulesBody = 10 << 20
+
 func (a *api) recognitionRules(w http.ResponseWriter, r *http.Request, token string) {
 	a.wording().serve(w, r, func(ctx context.Context) (any, error) { return a.Wording.Rules(ctx, token) })
 }
 func (a *api) setRecognitionRules(w http.ResponseWriter, r *http.Request, token string) {
 	var body store.RecognitionRules
-	if !decodeJSON(w, r, &body) {
+	if !decodeJSONLimit(w, r, &body, maxRecognitionRulesBody) {
 		return
 	}
 	a.wording().serve(w, r, func(ctx context.Context) (any, error) {

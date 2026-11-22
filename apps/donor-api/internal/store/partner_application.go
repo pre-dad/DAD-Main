@@ -213,14 +213,10 @@ func (s PartnerApplicationService) Approve(ctx context.Context, token string, ap
 			if err != nil {
 				return pgtype.UUID{}, err
 			}
-			code, err := newCompanyCode(app.Organization)
-			if err != nil {
-				return pgtype.UUID{}, err
-			}
-			if err = q.PromotePartnerOrg(ctx, queries.PromotePartnerOrgParams{
+			if err = promoteWithCompanyCode(ctx, tx, queries.PromotePartnerOrgParams{
 				ID: partnerID, Organization: app.Organization, Name: app.ContactName,
 				Email: app.WorkEmail, Website: app.Website, ApprovedAt: timestamp(now),
-				PartnerType: app.Type, WorkforceSize: app.WorkforceSize, CompanyCode: text(code),
+				PartnerType: app.Type, WorkforceSize: app.WorkforceSize,
 			}); err != nil {
 				return pgtype.UUID{}, err
 			}
@@ -255,6 +251,33 @@ func (s PartnerApplicationService) Approve(ctx context.Context, token string, ap
 		})
 }
 
+// promoteWithCompanyCode approves the partner under a fresh company code,
+// trying a second code if the first collides. Each try runs in a savepoint so a
+// collision leaves the approval transaction usable.
+func promoteWithCompanyCode(ctx context.Context, tx pgx.Tx, params queries.PromotePartnerOrgParams) error {
+	for attempt := 0; ; attempt++ {
+		code, err := newCompanyCode(params.Organization)
+		if err != nil {
+			return err
+		}
+		params.CompanyCode = text(code)
+		savepoint, err := tx.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		err = queries.New(savepoint).PromotePartnerOrg(ctx, params)
+		if err == nil {
+			return savepoint.Commit(ctx)
+		}
+		if rollback := savepoint.Rollback(ctx); rollback != nil {
+			return rollback
+		}
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); !ok || pgErr.Code != uniqueViolation || attempt > 0 {
+			return err
+		}
+	}
+}
+
 // companyCodeAlphabet leaves out characters easily misread when a code is
 // typed from a poster or a slide: 0/O, 1/I/L.
 const companyCodeAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
@@ -273,12 +296,20 @@ func newCompanyCode(organization string) (string, error) {
 			}
 		}
 	}
-	random := make([]byte, 6)
-	if _, err := rand.Read(random); err != nil {
-		return "", err
-	}
-	for i, b := range random {
-		random[i] = companyCodeAlphabet[int(b)%len(companyCodeAlphabet)]
+	random := make([]byte, 0, 6)
+	buffer := make([]byte, 16)
+	// Bytes at or above the largest multiple of the alphabet size are skipped so
+	// every character is equally likely.
+	limit := byte(256 - 256%len(companyCodeAlphabet))
+	for len(random) < 6 {
+		if _, err := rand.Read(buffer); err != nil {
+			return "", err
+		}
+		for _, b := range buffer {
+			if b < limit && len(random) < 6 {
+				random = append(random, companyCodeAlphabet[int(b)%len(companyCodeAlphabet)])
+			}
+		}
 	}
 	if prefix.Len() == 0 {
 		return string(random), nil
@@ -288,7 +319,8 @@ func newCompanyCode(organization string) (string, error) {
 
 // Reject rejects a pending application with a reason (§8). Audited.
 func (s PartnerApplicationService) Reject(ctx context.Context, token string, appID pgtype.UUID, reason string) error {
-	if utf8.RuneCountInString(reason) > 500 || !plainText(reason, true) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" || utf8.RuneCountInString(reason) > 500 || !plainText(reason, true) {
 		return ErrPartnerApplication
 	}
 	_, err := staffWrite(ctx, s.Staff, token, partnerPermission,
@@ -315,19 +347,20 @@ func (s PartnerApplicationService) Reject(ctx context.Context, token string, app
 	return err
 }
 
-// LinkInitiative links an initiative to an approved partner org (§8/P-3). Audited.
+// LinkInitiative links an initiative to an approved partner org (§8/P-3). A nil
+// commitment leaves the stored commitment as it is. Audited.
 func (s PartnerApplicationService) LinkInitiative(
 	ctx context.Context,
 	token string,
 	partnerID, initiativeID pgtype.UUID,
-	commitment ...int64,
+	commitment *int64,
 ) error {
 	var amount pgtype.Int8
-	if len(commitment) > 1 || (len(commitment) == 1 && commitment[0] < 0) {
-		return ErrStaffInput
-	}
-	if len(commitment) == 1 {
-		amount = pgtype.Int8{Int64: commitment[0], Valid: true}
+	if commitment != nil {
+		if *commitment < 0 {
+			return ErrStaffInput
+		}
+		amount = pgtype.Int8{Int64: *commitment, Valid: true}
 	}
 	_, err := staffWrite(ctx, s.Staff, token, partnerPermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
@@ -363,7 +396,7 @@ func (s PartnerApplicationService) SetMatch(
 	workforce, rateBP int32,
 	capMinor int64,
 ) error {
-	if workforce < 0 || rateBP < 0 || capMinor < 0 {
+	if workforce < 0 || rateBP < 0 || rateBP > 10000 || capMinor < 0 {
 		return ErrPartnerApplication
 	}
 	_, err := staffWrite(ctx, s.Staff, token, partnerPermission,

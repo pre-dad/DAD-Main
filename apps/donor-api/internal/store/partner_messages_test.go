@@ -3,11 +3,15 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"dad/donor-api/internal/dbroles"
 	"dad/donor-api/internal/mail"
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store/queries"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -35,6 +39,28 @@ func queuePartnerIntent(t *testing.T, partnerID interface{ String() string }, ki
 	})
 }
 
+// queuePartnerIntentAsProduction enqueues through queuePartnerMessage, the call
+// the approval, publish and completion paths make, so dedup and the
+// kind-specific side effects are the production ones.
+func queuePartnerIntentAsProduction(t *testing.T, partnerID pgtype.UUID, kind, key string) {
+	t.Helper()
+	pool := as(t, dbroles.API)
+	tx, err := pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	if err := queuePartnerMessage(context.Background(), queries.New(tx), partnerID, kind, key, map[string]string{}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanExec(t, "DELETE FROM donor_partner_messages WHERE dedup_key=$1", key)
+	})
+}
+
 // TestPartnerMessageMatrixDeliversEachTriggerOnce walks the partner side of the
 // §6.11 matrix: each status trigger renders once, fans out to every accepted
 // org user, and the intent's dedup key makes it idempotent.
@@ -56,9 +82,14 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 		`INSERT INTO donor_partner_users (id, partner_id, email, name, role, accepted_at, disabled, created_at)
 		 VALUES ($1,$2,'off@x.test','D','VIEWER',now(),true,now())`, mustNewID(t), partnerID)
 
-	for _, kind := range []string{"METRICS_VERIFIED", "INITIATIVE_COMPLETE", "MONTHLY_REPORT"} {
+	for _, test := range []struct{ kind, subject, org string }{
+		{"METRICS_VERIFIED", "New verified figures for Matrix Org", "Matrix Org"},
+		{"INITIATIVE_COMPLETE", "An initiative has been marked complete", "Matrix Org's initiatives"},
+		{"MONTHLY_REPORT", "Your monthly DAD impact summary", "summary for Matrix Org"},
+	} {
+		kind := test.kind
 		key := "matrix:" + kind + ":" + partnerID.String()
-		queuePartnerIntent(t, partnerID, kind, key)
+		queuePartnerIntentAsProduction(t, partnerID, kind, key)
 		transport := &recordingMail{}
 		w := partnerMessageWorker(t, transport)
 		now := time.Now().UTC().Add(time.Second)
@@ -73,8 +104,18 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 			if m.To == "pending@x.test" || m.To == "off@x.test" {
 				t.Fatalf("%s: delivered to non-recipient %s", kind, m.To)
 			}
-			if m.Subject == "" || m.Body == "" {
-				t.Fatalf("%s: empty subject/body", kind)
+			if m.Subject != test.subject || !strings.Contains(m.Subject+"\n"+m.Body, test.org) {
+				t.Fatalf(
+					"%s: subject %q, body %q; want subject %q and the organisation %q",
+					kind,
+					m.Subject,
+					m.Body,
+					test.subject,
+					test.org,
+				)
+			}
+			if !strings.Contains(m.Body, "https://donor.example.org/partner") || !strings.HasSuffix(m.Body, partnerMessageFooter) {
+				t.Fatalf("%s: body lacks the portal link or footer: %q", kind, m.Body)
 			}
 		}
 		// Idempotent: the intent is completed, so a second drain finds nothing
@@ -82,14 +123,18 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 		if steps := drainPartnerMessages(t, w, now.Add(time.Minute)); steps != 0 {
 			t.Fatalf("%s: redelivered a completed intent in %d steps", kind, steps)
 		}
-		queuePartnerIntent(t, partnerID, kind, key)
+		queuePartnerIntentAsProduction(t, partnerID, kind, key)
+		if _, _, err := renderPartnerMessage(ctx, queries.New(pool), queries.DonorPartnerMessage{PartnerID: partnerID, Kind: "UNKNOWN"},
+			publicSite("https://donor.example.org")); !errors.Is(err, payments.ErrFacts) || !messageDataError(err) {
+			t.Fatalf("unknown partner message kind: %v", err)
+		}
 		var pending int
 		if err := pool.QueryRow(ctx,
 			"SELECT count(*) FROM donor_partner_messages WHERE dedup_key=$1 AND completed_at IS NULL", key).Scan(&pending); err != nil {
 			t.Fatal(err)
 		}
 		if pending != 0 {
-			t.Fatalf("%s: dedup key re-queued a live intent", kind)
+			t.Fatalf("%s: dedup key re-queued a completed intent", kind)
 		}
 	}
 }
@@ -226,4 +271,53 @@ func partnerMonthlyCount(t *testing.T, pool *pgxpool.Pool, partnerID interface{ 
 		t.Fatal(err)
 	}
 	return n
+}
+
+func TestPartnerMessageFailingFanOutDoesNotStarveTheQueue(t *testing.T) {
+	ctx := context.Background()
+	owner := database(t)
+	pool := as(t, dbroles.API)
+	mustExec(t, owner, "DELETE FROM donor_partner_messages")
+	broken := approvedPartner(t, pool, "Broken Org", "BROKEN-"+mustNewID(t).String()[:8], 0, 0)
+	healthy := approvedPartner(t, pool, "Healthy Org", "HEALTHY-"+mustNewID(t).String()[:8], 0, 0)
+	approvePartnerAdmin(t, pool, broken)
+	approvePartnerAdmin(t, pool, healthy)
+	mustExec(t, owner, `CREATE FUNCTION fail_broken_fan_out() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+		 IF EXISTS(SELECT 1 FROM donor_partner_messages m WHERE m.id=NEW.message_id AND m.dedup_key LIKE 'starve:broken:%') THEN
+		  RAISE EXCEPTION 'forced fan-out failure';
+		 END IF;
+		 RETURN NEW;
+		END $$`)
+	t.Cleanup(func() { cleanExec(t, "DROP FUNCTION fail_broken_fan_out() CASCADE") })
+	mustExec(t, owner, `CREATE TRIGGER fail_broken_fan_out BEFORE INSERT ON donor_partner_message_deliveries
+		FOR EACH ROW EXECUTE FUNCTION fail_broken_fan_out()`)
+
+	brokenKey, healthyKey := "starve:broken:"+broken.String(), "starve:healthy:"+healthy.String()
+	mustExec(t, pool,
+		`INSERT INTO donor_partner_messages (id, partner_id, kind, dedup_key, context, available_at)
+		 VALUES ($1,$2,'MONTHLY_REPORT',$3,'{}',now()-interval '1 hour'), ($4,$5,'MONTHLY_REPORT',$6,'{}',now())`,
+		mustNewID(t), broken, brokenKey, mustNewID(t), healthy, healthyKey)
+	t.Cleanup(func() {
+		cleanExec(t, "DELETE FROM donor_partner_messages WHERE dedup_key IN ($1,$2)", brokenKey, healthyKey)
+	})
+
+	transport := &recordingMail{}
+	w := partnerMessageWorker(t, transport)
+	now := time.Now().UTC().Add(time.Second)
+	if _, err := w.DeliverNext(ctx, now); err == nil {
+		t.Fatal("forced fan-out failure was not reported")
+	}
+	var attempts int32
+	var lastError string
+	if err := pool.QueryRow(ctx, "SELECT attempts, coalesce(last_error,'') FROM donor_partner_messages WHERE dedup_key=$1", brokenKey).
+		Scan(&attempts, &lastError); err != nil || attempts != 1 || lastError == "" {
+		t.Fatalf("failed intent attempts=%d last_error=%q err=%v; want the failure recorded", attempts, lastError, err)
+	}
+	if steps := drainPartnerMessages(t, w, now); steps != 2 {
+		t.Fatalf("healthy intent behind the failed one took %d steps; want fan-out and one send", steps)
+	}
+	if len(transport.messages) != 1 {
+		t.Fatalf("sent %d messages; want the healthy partner's one", len(transport.messages))
+	}
 }

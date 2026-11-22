@@ -78,12 +78,12 @@ func TestQueueHealthCountsParkedAndIgnoresFutureAndCompleted(t *testing.T) {
 		)
 	}
 	actAs(t, tx, dbroles.Monitor)
-	rows, err := queries.New(tx).QueueHealth(ctx, timestamp(now))
+	rows, err := queries.New(tx).QueueHealth(ctx, queries.QueueHealthParams{AsOf: timestamp(now), MaxAttempts: MaxDeliveryAttempts})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rows) != 9 {
-		t.Fatal(rows)
+		t.Fatalf("queue health rows = %d, want 9: %+v", len(rows), rows)
 	}
 	for queue, want := range map[string]struct{ due, parked, oldest int64 }{
 		"messages":      {2, 1, 3600},
