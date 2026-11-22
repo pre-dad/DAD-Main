@@ -54,6 +54,35 @@ pins its dependency; changing the backend must preserve supported installed clie
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
 
+## Moving the apps from foundation 2 to 3
+
+Version 3 is a major release because two partner-portal changes break clients generated
+from 2.13. Adopt 3.0 in both native apps before this API revision reaches them.
+
+Breaking changes:
+
+- `partnerRemoveUser` (`POST /donor/partner/users/{user_id}/remove`) renames its path
+  parameter from `userID` to `user_id`. Generated Swift call sites change from
+  `.init(path: .init(userID: id))` to `.init(path: .init(user_id: id))`. The Android
+  foundation already sends `user_id`.
+- `partnerUsers` (`GET /donor/partner/users`) returns a required boolean `accepted` on
+  every user: whether that user has accepted their invitation. Items keep
+  `additionalProperties: false`, so 2.13 decoders reject the response.
+
+Additions:
+
+- `partnerReinviteUser` (`POST /donor/partner/users/{user_id}/reinvite`), admin only:
+  resends the invitation to a user who has not accepted it yet. It returns 404 once the
+  user has accepted or was removed, and 429 past one resend a minute or five an hour.
+- `dashboard` (`GET /donor/me/dashboard`) may return an optional `insights` object
+  (`InsightsPanel`: `catalog_version`, `spec_id`, `spec`). The field is omitted when no
+  approved panel is live or `DONOR_INSIGHTS_ENABLED` is off. `spec` is a `UiSpec` tree of
+  `UiSpecNode` values drawn from the [UI catalog](#ui-catalog).
+- The bundle adds `ui-catalog.json` and `ui-catalog-vectors.json`. Each app adds both
+  names to the file list in `scripts/check-foundation.mjs` when it re-vendors, and must
+  pass every shared vector. A node with an unknown component type renders nothing, and an
+  app shows no panel for a `catalog_version` it does not support.
+
 ## Compatible additions in version 2.13
 
 Version 2.13 adds response and request fields that clients generated from 2.12 do not
