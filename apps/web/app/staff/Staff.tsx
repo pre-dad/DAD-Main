@@ -109,6 +109,7 @@ export default function Staff({ q }: { q: string | null }) {
                 <>
                   <Link href="/staff/content">Source documents</Link>
                   <Link href="/staff/content/wording">Badge and milestone wording</Link>
+                  <Link href="/staff/insights">Dashboard insights</Link>
                 </>
               )}
               {actor.permissions.includes("initiative.manage") && <Link href="/staff/initiatives">Initiatives</Link>}
