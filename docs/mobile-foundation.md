@@ -429,8 +429,8 @@ known type is an error.
   `preparing` state renders them empty. `Heading`, `Text`, `Callout` and `Metric` need a
   scalar, `Metric` an integer with a `format` of `integer`, `usd_minor`, `days` or
   `percent`, and `List` an array.
-- **Actions.** `LinkButton` navigates to a path in `account_paths` or `notification_paths`
-  of `links.json`. There are no other actions and no external URLs.
+- **Actions.** `LinkButton` navigates to a path in `account_paths` of
+  `links.json`; notification-only paths such as `/partner` are not reachable. There are no other actions and no external URLs.
 
 `node scripts/ui-catalog.mjs check` validates the catalog against `openapi.json` and
 `links.json` and runs every vector; `make check-mobile` runs it. Renaming a bound field in

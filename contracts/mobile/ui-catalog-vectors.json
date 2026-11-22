@@ -256,7 +256,10 @@
     },
     {
       "name": "link button to a notification-only path",
-      "valid": true,
+      "valid": false,
+      "codes": [
+        "NAV_FORBIDDEN"
+      ],
       "spec": [
         {
           "type": "LinkButton",

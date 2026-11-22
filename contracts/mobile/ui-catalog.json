@@ -42,13 +42,12 @@
     "city_rank": "City rank"
   },
   "navigate": {
-    "path_lists": ["account_paths", "notification_paths"],
+    "path_lists": ["account_paths"],
     "labels": {
       "/account/dashboard": "Your dashboard",
       "/account/profile": "Your profile",
       "/account/payment-method": "Payment method",
-      "/account/gifts": "Your gifts",
-      "/partner": "Partner portal"
+      "/account/gifts": "Your gifts"
     }
   },
   "components": {

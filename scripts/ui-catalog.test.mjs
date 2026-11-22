@@ -105,7 +105,7 @@ test("dropping a navigate path from links.json breaks the check and the vectors"
 
 test("a new links.json path without a catalog label breaks the check", () => {
   const links = structuredClone(sources.links);
-  links.notification_paths.push("/account/new");
+  links.account_paths.push("/account/new");
   assert.ok(checkCatalog({ ...sources, links }).some((problem) => problem.includes("/account/new has no label")));
 });
 

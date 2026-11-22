@@ -6,7 +6,7 @@ export const uiCatalogVersion = 1;
 export type UiBind = string;
 export type UiMetricFormat = "integer" | "usd_minor" | "days" | "percent";
 export type UiMetricCaption = "given" | "initiatives_funded" | "events_volunteered" | "referral_total" | "referral_link" | "referral_irl" | "active_network" | "annualized_network" | "streak" | "days_to_next" | "last_milestone" | "national_percentile" | "city_rank";
-export type UiNavigatePath = "/account/dashboard" | "/account/profile" | "/account/payment-method" | "/account/gifts" | "/partner";
+export type UiNavigatePath = "/account/dashboard" | "/account/profile" | "/account/payment-method" | "/account/gifts";
 
 export type UiHeading = { type: "Heading"; title: string } | { type: "Heading"; bind: string };
 export type UiText = { type: "Text"; bind: string };
