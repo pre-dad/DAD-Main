@@ -32,7 +32,11 @@ A company-code visit is captured before giving and kept for 30 days. It links th
 to the employer when they prove account ownership in that browser, or when they enter
 the code in their signed-in profile. Starting checkout cannot change a donor's employer or attribute their giving to a company without the donor's account proof. An email link
 opened in another browser needs the code entered after sign-in; app-install attribution
-still requires a deferred-link integration.
+uses an explicit invitation handoff on iOS: copy the canonical referral or company-code
+link on its landing page before installing, then paste it under “Have an invitation?”
+in the app before signup. The app records a new native visit, preserving the IRL marker,
+and keeps the returned attribution token. It does not infer an installation's identity
+or recover the browser's original touch time. Android also supports Play Install Referrer.
 
 Email claim and sign-in links last 15 minutes and are single-use. A browser session lasts
 at most 30 days; an app session lasts while the app refreshes it at least every 60 days,

@@ -88,7 +88,7 @@ check-generated: generate
 test: test-donor-go test-web test-ledger
 
 test-api test-donor-go:
-	cd apps/donor-api && test -z "$$(gofmt -l .)" && test -z "$$($(GOLINES) -l .)" && go vet ./... && go test -race ./... && go build ./...
+	cd apps/donor-api && test -z "$$(gofmt -l .)" && test -z "$$($(GOLINES) -l .)" && go vet ./... && go test -race -p 1 ./... && go build ./...
 
 format: format-go format-web
 

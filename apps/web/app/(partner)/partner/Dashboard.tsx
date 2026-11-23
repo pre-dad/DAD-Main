@@ -107,11 +107,15 @@ function InitiativeCard({ item }: { item: Initiative }) {
           {item.metrics.slice(0, 3).map((m) => (
             <div key={m.label}>
               <dt>{m.label}</dt>
-              <dd>{metricValue(m)}</dd>
+              <dd>
+                {metricValue(m)}
+                <p className="note">Verified {formatDay(m.verified_on)}</p>
+              </dd>
             </div>
           ))}
         </dl>
       )}
+      <p className="note">Last updated {formatDateTime(item.updated_at)}</p>
       <details>
         <summary>All figures and spend</summary>
         <p>{item.summary}</p>
@@ -130,7 +134,6 @@ function InitiativeCard({ item }: { item: Initiative }) {
           </ul>
         )}
         {item.spend.length > 0 && <SpendTable rows={item.spend} caption={`Spend by category for ${item.title}`} />}
-        <p className="note">Last updated {formatDateTime(item.updated_at)}</p>
       </details>
     </article>
   );

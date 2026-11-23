@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { GiftFraming } from "@/components/donor/GiftFraming";
+import { InstallInvitation } from "@/components/donor/InstallInvitation";
 import { Page } from "@/components/donor/Page";
 import { api, classifyFailure, type RequestBody, type ResponseBody } from "@/lib/api";
 import { foundingDeadlineLabel, launchDateLabel } from "@/lib/launch";
@@ -31,14 +32,15 @@ export default function ReferralLanding({
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const [leaving, setLeaving] = useState(false);
-  const capture = useRef<Promise<unknown>>(Promise.resolve());
+  const capture = useRef<{ pending: Promise<unknown>; signal: AbortSignal } | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: retry is the retry trigger, deliberately unread
   useEffect(() => {
     const controller = new AbortController();
     setResult(null);
     setError("");
+    setLeaving(false);
     // The capture sets the attribution cookie, so it must come from the visitor's browser.
-    capture.current = api<Capture>(`/donor/referrals/${encodeURIComponent(code)}`, {
+    const pending = api<Capture>(`/donor/referrals/${encodeURIComponent(code)}`, {
       method: "POST",
       body: JSON.stringify({ kind } satisfies RequestBody<"/donor/referrals/{code}", "post">),
       signal: controller.signal,
@@ -53,16 +55,28 @@ export default function ReferralLanding({
           failure === "offline" ? failures.offline : failure === "rateLimited" ? failures.rateLimited : failures.other,
         );
       });
+    capture.current = { pending, signal: controller.signal };
     return () => controller.abort();
   }, [code, kind, retry]);
   // A tap before the referral is saved waits for it (briefly), so the gift is still attributed.
   async function give(event: React.MouseEvent<HTMLAnchorElement>) {
     if (result || error || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    if (leaving) return;
+    const current = capture.current;
+    if (leaving || !current) return;
     setLeaving(true);
-    await Promise.race([capture.current, new Promise((resolve) => setTimeout(resolve, 4000))]);
-    window.location.assign("/donate");
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        current.pending,
+        new Promise((resolve) => {
+          timeout = setTimeout(resolve, 4000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!current.signal.aborted) window.location.assign("/donate");
   }
   // Keep the server-rendered owner of the opened code; a capture response must not rename the invitation.
   const name = referrer.state === "found" ? referrer.name : null;
@@ -103,6 +117,10 @@ export default function ReferralLanding({
           {leaving ? "Saving your referral…" : name ? `Give $1 a day with ${name}` : "Give $1 a day"}
         </Link>
       )}
+      <InstallInvitation
+        key={`${code}:${kind}`}
+        path={`/r/${encodeURIComponent(code)}${kind === "IRL" ? "?via=irl" : ""}`}
+      />
       <About />
     </Page>
   );

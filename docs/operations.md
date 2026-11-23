@@ -1402,10 +1402,10 @@ that the donor dashboard renders from its own response. Specs live in `donor_ins
 The API validates a spec with the same rules as `scripts/ui-catalog.mjs` when it is saved,
 submitted and approved, and again each time a donor reads it. A live spec that no longer
 validates, or that targets a newer catalog than the server knows, is logged
-(`live insight spec failed validation`) and the dashboard answers `insights: null`.
+(`live insight spec failed validation`) and the dashboard omits `insights`.
 
 `DONOR_INSIGHTS_ENABLED=true` makes `GET /donor/me/dashboard` carry the live spec as
-`insights`. It defaults to `false`, where the field is always null; the staff routes work
+`insights`. It defaults to `false`, where the field is omitted; the staff routes work
 either way, so layouts can be prepared and approved before launch. To switch it off in an
 incident, set it to `false` and restart the API; retiring the live spec has the same effect
 for donors without a restart.
