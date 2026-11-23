@@ -92,7 +92,7 @@ are hosted by Stripe. Use `/api/donor/stripe/webhook` as the externally reachabl
 See [operations](docs/operations.md) for supported events and recovery behavior.
 
 `DONOR_INSIGHTS_ENABLED=true` makes `GET /donor/me/dashboard` carry the approved insights layout
-(default `false`, where the `insights` field is always null). Staff can draft, approve and retire
+(default `false`, where the `insights` field is omitted). Staff can draft, approve and retire
 layouts under `/donor/staff/insights` whether or not it is set; see
 [operations](docs/operations.md#dashboard-insights).
 

@@ -435,9 +435,10 @@ OS app-link association, or physical-device acceptance.
 dashboard layout may use, and `contracts/mobile/ui-catalog-vectors.json` holds valid and
 invalid specs with the expected error codes. Both ship in the bundle, versioned by
 `catalog_version` under the bundle's semver: adding a component or an optional prop is a
-minor change; removing or changing one is major. The catalog defines the contract only.
-Renderers, the staff approval step that precedes display, and spec authoring are separate
-work.
+minor change; removing or changing one is major. Web, iOS and Android render the approved
+layout from the dashboard response. Staff author JSON specs and a different publisher
+approves them before display; see [dashboard insights](operations.md#dashboard-insights).
+Automated AI authoring is not implemented.
 
 A spec is an ordered array of nodes. Seven components exist, each with a closed prop set:
 `Heading`, `Text`, `Metric`, `MetricGrid`, `Callout`, `List` and `LinkButton`. `MetricGrid`
