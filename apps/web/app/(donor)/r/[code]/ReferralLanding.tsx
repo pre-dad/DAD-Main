@@ -37,6 +37,7 @@ export default function ReferralLanding({
     const controller = new AbortController();
     setResult(null);
     setError("");
+    setLeaving(false);
     // The capture sets the attribution cookie, so it must come from the visitor's browser.
     const pending = api<Capture>(`/donor/referrals/${encodeURIComponent(code)}`, {
       method: "POST",

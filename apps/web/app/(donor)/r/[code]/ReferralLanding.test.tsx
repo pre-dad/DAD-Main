@@ -134,6 +134,25 @@ it("cancels the capture deadline when saving finishes before it", async () => {
   expect(vi.getTimerCount()).toBe(existingTimers);
 });
 
+it("resets a pending tap when the visitor opens another invitation", async () => {
+  vi.useFakeTimers();
+  const assign = vi.fn();
+  vi.stubGlobal("location", { assign });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => new Promise(() => {})),
+  );
+  const view = render(<ReferralLanding code="first" kind="LINK" referrer={{ state: "found", name: "Sam" }} />);
+  fireEvent.click(screen.getByRole("link", { name: "Give $1 a day with Sam" }));
+  view.rerender(<ReferralLanding code="second" kind="LINK" referrer={{ state: "found", name: "Alex" }} />);
+  expect(screen.getByRole("link", { name: "Give $1 a day with Alex" })).not.toHaveAttribute("aria-disabled");
+  expect(screen.getByRole("status")).toBeEmptyDOMElement();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4000);
+  });
+  expect(assign).not.toHaveBeenCalled();
+});
+
 it("leads with the unavailable message for a replaced code", async () => {
   const fetch = vi.fn().mockResolvedValue(response({ captured: false, public_name: null }));
   vi.stubGlobal("fetch", fetch);
