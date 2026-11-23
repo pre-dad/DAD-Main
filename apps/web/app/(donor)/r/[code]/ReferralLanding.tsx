@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { GiftFraming } from "@/components/donor/GiftFraming";
+import { InstallInvitation } from "@/components/donor/InstallInvitation";
 import { Page } from "@/components/donor/Page";
 import { api, classifyFailure, type RequestBody, type ResponseBody } from "@/lib/api";
 import { foundingDeadlineLabel, launchDateLabel } from "@/lib/launch";
@@ -116,6 +117,10 @@ export default function ReferralLanding({
           {leaving ? "Saving your referral…" : name ? `Give $1 a day with ${name}` : "Give $1 a day"}
         </Link>
       )}
+      <InstallInvitation
+        key={`${code}:${kind}`}
+        path={`/r/${encodeURIComponent(code)}${kind === "IRL" ? "?via=irl" : ""}`}
+      />
       <About />
     </Page>
   );
