@@ -332,6 +332,14 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"POST /donor/staff/exports/jobs":                             store.ExportJob{},
 		"GET /donor/staff/exports/jobs/{job_id}":                     store.ExportJob{},
 		"GET /donor/staff/content":                                   store.ContentInventory{},
+		"GET /donor/staff/insights":                                  store.InsightSpecPage{},
+		"GET /donor/staff/insights/{spec_id}":                        store.InsightSpec{},
+		"POST /donor/staff/insights":                                 store.InsightSpec{},
+		"POST /donor/staff/insights/{spec_id}":                       store.InsightSpec{},
+		"POST /donor/staff/insights/{spec_id}/submit":                store.InsightSpec{},
+		"POST /donor/staff/insights/{spec_id}/approve":               store.InsightSpec{},
+		"POST /donor/staff/insights/{spec_id}/reject":                store.InsightSpec{},
+		"POST /donor/staff/insights/{spec_id}/retire":                store.InsightSpec{},
 		"GET /donor/staff/events":                                    store.StaffEventPage{},
 		"GET /donor/staff/events/{event_id}":                         store.StaffEventDetail{},
 		"GET /donor/staff/initiatives":                               store.StaffInitiativePage{},
@@ -372,6 +380,9 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"POST /donor/staff/donors/{donor_id}/gifts/{gift_id}/refund": refundBody{},
 		"POST /donor/staff/donors/{donor_id}/cancellation":           staffCancelBody{},
 		"POST /donor/me/events/check-in":                             checkInBody{},
+		"POST /donor/staff/insights":                                 insightBody{},
+		"POST /donor/staff/insights/{spec_id}":                       insightBody{},
+		"POST /donor/staff/insights/{spec_id}/reject":                rejectInsightBody{},
 		"POST /donor/staff/events":                                   store.EventInput{},
 		"POST /donor/staff/events/{event_id}":                        store.EventInput{},
 		"POST /donor/public/partner-apply":                           store.PartnerApplicationInput{},
@@ -392,6 +403,7 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 	}
 	c.checkShape(t, "NativeSession", reflect.TypeOf(nativeSession{}), c.Components.Schemas["NativeSession"], true)
 	c.checkShape(t, "Problem", reflect.TypeOf(problem{}), c.Components.Schemas["Problem"], true)
+	c.checkShape(t, "InsightSpecProblem", reflect.TypeOf(insightProblem{}), c.Components.Schemas["InsightSpecProblem"], true)
 }
 
 // resolve follows $ref and the non-null branch of a nullable anyOf.

@@ -39,6 +39,14 @@ test("a donor signs in from their email link, names themselves, gets a referral 
   await page.getByRole("button", { name: "Save public name" }).click();
   await expect(page.getByLabel("Your referral link")).toHaveValue(/\/r\/\S+/);
 
+  const invitation = await page.getByLabel("Your referral link").inputValue();
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto(`${invitation}?via=irl`);
+  await page.getByText("Keep this invitation for the app").click();
+  await page.getByRole("button", { name: "Copy invitation for the app" }).click();
+  await expect(page.getByText("Invitation copied.")).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`${invitation}?via=irl`);
+
   await page.goto("/account/profile");
   await expect(page.getByText("Robin", { exact: true })).toBeVisible();
   // The suite's public origin is an IP address, which cannot be a passkey relying party.

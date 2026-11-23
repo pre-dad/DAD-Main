@@ -120,6 +120,7 @@ test("bundle writes a manifest whose digests match the emitted files", async () 
     assert.match(manifest.source_revision, /^[a-f0-9]{40}$/);
     const emitted = (await readdir(directory)).filter((name) => name !== "manifest.json");
     assert.deepEqual(Object.keys(manifest.files).sort(), emitted.sort());
+    for (const name of ["ui-catalog.json", "ui-catalog-vectors.json"]) assert.ok(name in manifest.files, name);
     for (const [name, digest] of Object.entries(manifest.files)) {
       const contents = await readFile(join(directory, name));
       assert.equal(digest, createHash("sha256").update(contents).digest("hex"), name);

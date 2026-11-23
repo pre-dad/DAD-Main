@@ -1383,6 +1383,45 @@ projection refreshes. Past awards remain permanent. Company month winners use co
 active giving, matching the displayed leaderboard. Qualifying website-waitlist claims
 have no redemption expiry; only their keyed address hashes are retained.
 
+## Dashboard insights
+
+A dashboard insights layout is a spec in the UI catalog (`contracts/mobile/ui-catalog.json`)
+that the donor dashboard renders from its own response. Specs live in `donor_insight_specs`
+(migration 0101) and move `draft`, `pending`, `live`, then `retired`, or from `pending` to
+`rejected`. Staff with `content.publish` use `/donor/staff/insights`:
+
+- The author saves a draft and submits it. Only the author edits or submits a draft.
+- A different staff member approves or rejects it; the store and a database constraint refuse
+  the author. Approving makes the spec live and retires the live one in the same transaction,
+  and a partial unique index keeps at most one live.
+- Any publisher can retire the live spec, with no second person, so a bad layout is never held
+  up.
+- Every transition is in the staff audit log as `content.insight_*`, with the spec's SHA-256
+  rather than its content.
+
+The API validates a spec with the same rules as `scripts/ui-catalog.mjs` when it is saved,
+submitted and approved, and again each time a donor reads it. A live spec that no longer
+validates, or that targets a newer catalog than the server knows, is logged
+(`live insight spec failed validation`) and the dashboard omits `insights`.
+
+`DONOR_INSIGHTS_ENABLED=true` makes `GET /donor/me/dashboard` carry the live spec as
+`insights`. It defaults to `false`, where the field is omitted; the staff routes work
+either way, so layouts can be prepared and approved before launch. To switch it off in an
+incident, set it to `false` and restart the API; retiring the live spec has the same effect
+for donors without a restart.
+
+In the back office, `/staff/insights` (linked for `content.publish`) lists layouts, edits a draft
+as JSON with a live preview drawn from invented sample figures (never a real donor's), and shows
+each refusal with its path and code. Approve, reject (with a reason) and retire ask for
+confirmation in the page; the author of a pending layout sees no approve or reject controls.
+The donor dashboard draws the live layout in a "Your insights" section, from the same response,
+and draws nothing for a node it does not know, a bind that does not resolve, a value of the
+wrong type or a link outside the catalog's paths. A pointer under `/insights` never resolves, in
+either validator or the web renderer, so a layout cannot repeat its own text through a bind.
+
+The embedded copies of the catalog and `links.json` in `apps/donor-api/internal/uicatalog` must
+match `contracts/mobile`; a test fails when they differ.
+
 ## Container revision identity
 
 The API health responses report the commit linked into the executable. The deploy

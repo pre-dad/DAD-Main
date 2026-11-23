@@ -1,4 +1,4 @@
-# DAD — donor release
+# DAD — Dynamic Aid Delivery
 
 The R1 application for Dynamic Aid Delivery: verified-account giving, direct Link and IRL
 referrals, a donor dashboard with streak recognition, badges, rankings and network
@@ -90,6 +90,11 @@ start with only one of them. The receiver accepts
 snapshot events at `2026-09-30.endive`, matching stripe-go v87. Card entry and card updates
 are hosted by Stripe. Use `/api/donor/stripe/webhook` as the externally reachable route.
 See [operations](docs/operations.md) for supported events and recovery behavior.
+
+`DONOR_INSIGHTS_ENABLED=true` makes `GET /donor/me/dashboard` carry the approved insights layout
+(default `false`, where the `insights` field is omitted). Staff can draft, approve and retire
+layouts under `/donor/staff/insights` whether or not it is set; see
+[operations](docs/operations.md#dashboard-insights).
 
 Workers start only with `DONOR_GO_WORKERS_ENABLED=true`. Run each kind in a separate
 terminal with the environment loaded:

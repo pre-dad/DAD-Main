@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { catalogData, catalogTypes } from "./ui-catalog.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
@@ -176,6 +177,21 @@ export async function generateWeb(check = false) {
     if ((await readFile(target, "utf8")) !== tokens["tokens.ts"])
       throw new Error("Web design tokens differ; run make generate-mobile");
   } else await writeFile(target, tokens["tokens.ts"]);
+
+  const catalog = JSON.parse(await readFile(resolve(root, "contracts/mobile/ui-catalog.json"), "utf8"));
+  const links = JSON.parse(await readFile(resolve(root, "contracts/mobile/links.json"), "utf8"));
+  const types = catalogTypes(catalog, links);
+  const typesTarget = resolve(root, "apps/web/lib/ui-catalog.d.ts");
+  if (check) {
+    if ((await readFile(typesTarget, "utf8")) !== types)
+      throw new Error("UI catalog types differ; run make generate-mobile");
+  } else await writeFile(typesTarget, types);
+  const data = catalogData(catalog);
+  const dataTarget = resolve(root, "apps/web/lib/ui-catalog-data.ts");
+  if (check) {
+    if ((await readFile(dataTarget, "utf8")) !== data)
+      throw new Error("UI catalog data differs; run make generate-mobile");
+  } else await writeFile(dataTarget, data);
 }
 
 export async function bundle(output) {
@@ -184,6 +200,8 @@ export async function bundle(output) {
   const openapi = await readFile(resolve(root, "apps/donor-api/api/openapi.json"), "utf8");
   const tokens = await readFile(resolve(root, "design/tokens.json"), "utf8");
   const links = await readFile(resolve(root, "contracts/mobile/links.json"), "utf8");
+  const catalog = await readFile(resolve(root, "contracts/mobile/ui-catalog.json"), "utf8");
+  const vectors = await readFile(resolve(root, "contracts/mobile/ui-catalog-vectors.json"), "utf8");
   const mobile = nativeContract(JSON.parse(openapi));
   const files = {
     "openapi.json": openapi,
@@ -195,6 +213,8 @@ export async function bundle(output) {
     ),
     "tokens.json": tokens,
     "links.json": links,
+    "ui-catalog.json": catalog,
+    "ui-catalog-vectors.json": vectors,
     ...tokenSources(JSON.parse(tokens)),
   };
   const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();

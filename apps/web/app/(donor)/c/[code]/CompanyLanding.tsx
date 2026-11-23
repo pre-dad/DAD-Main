@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
+import { InstallInvitation } from "@/components/donor/InstallInvitation";
 import { Page } from "@/components/donor/Page";
 import { api, failureMessage, type ResponseBody } from "@/lib/api";
 
@@ -50,6 +51,7 @@ export default function CompanyLanding({ code }: { code: string }) {
         Start giving $1 a day
       </Link>
       <p className="note">Sign in or claim your account to link your giving to this workplace.</p>
+      <InstallInvitation key={code} path={`/c/${encodeURIComponent(code)}`} />
       <p className="note">
         Company code <span className="hash">{code}</span>
         {captured ? " is saved for this browser." : error ? " was not saved for this browser." : "."} Already giving?

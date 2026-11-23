@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "account_paths": [
+    "/account/dashboard",
+    "/account/profile",
+    "/account/payment-method",
+    "/account/gifts"
+  ],
+  "proof_paths": [
+    "/account/claim",
+    "/account/email-change"
+  ],
+  "claim_return_paths": [
+    "/account/dashboard",
+    "/account/payment-method"
+  ],
+  "referral_prefix": "/r/",
+  "company_prefix": "/c/",
+  "partner_paths": [
+    "/partner"
+  ],
+  "partner_proof_paths": [
+    "/partner/accept"
+  ],
+  "notification_paths": [
+    "/account/dashboard",
+    "/account/payment-method",
+    "/account/gifts",
+    "/partner"
+  ],
+  "referrals_open_web": false
+}

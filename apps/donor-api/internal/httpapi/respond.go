@@ -136,6 +136,14 @@ func respond(w http.ResponseWriter, r *http.Request, body any, err error, classi
 		off.write(w)
 		return
 	}
+	if invalid, ok := errors.AsType[*store.InsightInvalidError](err); ok {
+		writeJSON(
+			w,
+			http.StatusUnprocessableEntity,
+			insightProblem{Detail: "The layout does not pass the catalog rules", Errors: invalid.Errors},
+		)
+		return
+	}
 	if err != nil {
 		status, detail := classify(err)
 		writeError(w, r, status, detail, err)

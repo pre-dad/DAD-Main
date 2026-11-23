@@ -21,9 +21,10 @@ cd "$root"
 
 image="dad/nginx:check-$$"
 name="dad-nginx-check-$$"
+half_name="$name-half"
 work="$(mktemp -d "${TMPDIR:-/tmp}/nginx-image-check.XXXXXX")"
 cleanup() {
-  docker rm -f "$name" >/dev/null 2>&1 || true
+  docker rm -f "$name" "$half_name" >/dev/null 2>&1 || true
   docker rmi "$image" >/dev/null 2>&1 || true
   rm -rf -- "$work"
 }
@@ -98,9 +99,19 @@ docker exec "$name" sh -c "! grep -q ' resolve;' /etc/nginx/conf.d/ingress.conf"
   fail "native upstream must not require Docker's runtime resolver"
 
 # 5. Half a certificate must be refused, not silently ignored.
-if timeout 30 docker run --rm "${common[@]}" -e "INGRESS_TLS_FULLCHAIN=x" "$image" >"$work/half.log" 2>&1; then
+docker run -d --name "$half_name" "${common[@]}" -e "INGRESS_TLS_FULLCHAIN=x" "$image" >/dev/null
+exited=false
+for _ in $(seq 1 30); do
+  if [[ "$(docker inspect -f '{{.State.Running}}' "$half_name")" == "false" ]]; then
+    exited=true
+    break
+  fi
+  sleep 1
+done
+$exited || fail "half-configured nginx did not exit within 30 seconds"
+docker logs "$half_name" >"$work/half.log" 2>&1
+[[ "$(docker inspect -f '{{.State.ExitCode}}' "$half_name")" != "0" ]] ||
   fail "starting with only INGRESS_TLS_FULLCHAIN must fail"
-fi
 grep -q 'set both INGRESS_TLS_FULLCHAIN and INGRESS_TLS_PRIVKEY' "$work/half.log" ||
   fail "the half-configured certificate was refused for the wrong reason: $(cat "$work/half.log")"
 

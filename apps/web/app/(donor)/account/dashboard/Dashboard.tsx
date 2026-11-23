@@ -6,6 +6,8 @@ import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { TodayInitiative } from "@/components/donor/TodayInitiative";
+import { Insights } from "@/components/insights/Insights";
+import { canRender } from "@/components/insights/panel";
 import type { Schema } from "@/lib/api";
 import { formatDateTime } from "@/lib/dates";
 import { foundingDaysLeft, foundingDeadlineLabel, launchDateLabel } from "@/lib/launch";
@@ -98,8 +100,9 @@ function StarIcon() {
     </svg>
   );
 }
+const count = (value: number) => value.toLocaleString("en-US");
 const milestoneCopy = (daysToNext: number, milestone: number) =>
-  `${daysToNext} ${daysToNext === 1 ? "day" : "days"} to your ${milestone}-day milestone.`;
+  `${count(daysToNext)} ${daysToNext === 1 ? "day" : "days"} to your ${count(milestone)}-day milestone.`;
 
 /** The single most useful next step, in priority order; the at-risk callout below carries the detail. */
 function nextStep(data: Schema<"DonorDashboard">): string {
@@ -263,7 +266,7 @@ export default function Dashboard() {
                   <h2>Giving streak</h2>
                   <p className="metricValue">
                     {data.streak?.ladder
-                      ? `${data.streak.ladder.days} ${data.streak.ladder.days === 1 ? "day" : "days"}`
+                      ? `${count(data.streak.ladder.days)} ${data.streak.ladder.days === 1 ? "day" : "days"}`
                       : data.streak
                         ? "Starting today"
                         : "Updating"}
@@ -323,6 +326,12 @@ export default function Dashboard() {
                   </article>
                 )}
               </div>
+              {canRender(data.insights) && (
+                <section className="insights" aria-labelledby="insights-heading">
+                  <h2 id="insights-heading">Your insights</h2>
+                  <Insights spec={data.insights.spec} dashboard={data} />
+                </section>
+              )}
               {!data.founding_donor && (
                 <p className="note">
                   Founding Donor badge: not yet earned.{" "}

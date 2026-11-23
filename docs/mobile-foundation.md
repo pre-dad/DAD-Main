@@ -54,6 +54,35 @@ pins its dependency; changing the backend must preserve supported installed clie
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
 
+## Moving the apps from foundation 2 to 3
+
+Version 3 is a major release because two partner-portal changes break clients generated
+from 2.13. Adopt 3.0 in both native apps before this API revision reaches them.
+
+Breaking changes:
+
+- `partnerRemoveUser` (`POST /donor/partner/users/{user_id}/remove`) renames its path
+  parameter from `userID` to `user_id`. Generated Swift call sites change from
+  `.init(path: .init(userID: id))` to `.init(path: .init(user_id: id))`. The Android
+  foundation already sends `user_id`.
+- `partnerUsers` (`GET /donor/partner/users`) returns a required boolean `accepted` on
+  every user: whether that user has accepted their invitation. Items keep
+  `additionalProperties: false`, so 2.13 decoders reject the response.
+
+Additions:
+
+- `partnerReinviteUser` (`POST /donor/partner/users/{user_id}/reinvite`), admin only:
+  resends the invitation to a user who has not accepted it yet. It returns 404 once the
+  user has accepted or was removed, and 429 past one resend a minute or five an hour.
+- `dashboard` (`GET /donor/me/dashboard`) may return an optional `insights` object
+  (`InsightsPanel`: `catalog_version`, `spec_id`, `spec`). The field is omitted when no
+  approved panel is live or `DONOR_INSIGHTS_ENABLED` is off. `spec` is a `UiSpec` tree of
+  `UiSpecNode` values drawn from the [UI catalog](#ui-catalog).
+- The bundle adds `ui-catalog.json` and `ui-catalog-vectors.json`. Each app adds both
+  names to the file list in `scripts/check-foundation.mjs` when it re-vendors, and must
+  pass every shared vector. A node with an unknown component type renders nothing, and an
+  app shows no panel for a `catalog_version` it does not support.
+
 ## Compatible additions in version 2.13
 
 Version 2.13 adds response and request fields that clients generated from 2.12 do not
@@ -399,6 +428,49 @@ The command stops the server and removes credential fixtures on completion or fa
 Cross-repo CI needs authenticated access to all three pinned revisions before this can
 be a required hosted check. This local acceptance does not establish provider delivery,
 OS app-link association, or physical-device acceptance.
+
+## UI catalog
+
+`contracts/mobile/ui-catalog.json` is the closed set of components a generated donor
+dashboard layout may use, and `contracts/mobile/ui-catalog-vectors.json` holds valid and
+invalid specs with the expected error codes. Both ship in the bundle, versioned by
+`catalog_version` under the bundle's semver: adding a component or an optional prop is a
+minor change; removing or changing one is major. Web, iOS and Android render the approved
+layout from the dashboard response. Staff author JSON specs and a different publisher
+approves them before display; see [dashboard insights](operations.md#dashboard-insights).
+Automated AI authoring is not implemented.
+
+A spec is an ordered array of nodes. Seven components exist, each with a closed prop set:
+`Heading`, `Text`, `Metric`, `MetricGrid`, `Callout`, `List` and `LinkButton`. `MetricGrid`
+holds only `Metric`; `List` holds `Text` or `LinkButton`. Specs nest two levels deep, hold
+at most 40 nodes, and a grid holds at most 12 metrics. A node with an unknown `type` is
+valid and renders nothing, so a newer spec degrades on an older app. An unknown prop on a
+known type is an error.
+
+- **Text.** Literal text appears only as a `Heading` title and as a `Callout` title and
+  body: plain text, at most 60 characters (160 for a body), with no angle brackets, URL
+  schemes, markdown links, or control and format characters. Everything else shown comes
+  from a `bind`. A `Metric` caption is an id from the catalog's `metric_captions`, and a
+  `LinkButton` is labelled from `navigate.labels`, so no free text reaches those.
+- **Data.** A `bind` is an RFC 6901 pointer into the `DonorDashboard` response (`GET
+  /donor/me/dashboard`) and nothing else. The validator resolves it against that schema in
+  `openapi.json` through `$ref`, `allOf`, `oneOf` and nullable unions. A pointer resolves
+  when any `oneOf` branch carries the field, so ready-state fields are bindable and the
+  `preparing` state renders them empty. `Heading`, `Text`, `Callout` and `Metric` need a
+  scalar, `Metric` an integer with a `format` of `integer`, `usd_minor`, `days` or
+  `percent`, and `List` an array.
+  A pointer under `/insights` (the field that carries the layout) never resolves, so a layout
+  cannot display its own literal text through a bind.
+- **Actions.** `LinkButton` navigates to a path in `account_paths` of
+  `links.json`; notification-only paths such as `/partner` are not reachable. There are no other actions and no external URLs.
+
+`node scripts/ui-catalog.mjs check` validates the catalog against `openapi.json` and
+`links.json` and runs every vector; `make check-mobile` runs it. Renaming a bound field in
+`DonorDashboard` or dropping a linked path fails the check. `apps/web/lib/ui-catalog.d.ts`
+holds the generated TypeScript spec types and is rebuilt by `make generate`. An app that
+re-vendors a bundle containing the catalog adds `ui-catalog.json` and
+`ui-catalog-vectors.json` to its `check-foundation.mjs` file list, and its renderer must
+pass the shared vectors.
 
 ## Design source
 

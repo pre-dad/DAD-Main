@@ -26,6 +26,7 @@ import (
 	"dad/donor-api/internal/push"
 	"dad/donor-api/internal/sms"
 	"dad/donor-api/internal/store"
+	"dad/donor-api/internal/uicatalog"
 	"dad/donor-api/internal/wallet"
 )
 
@@ -108,6 +109,9 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	var services httpapi.Services
 	release := func() {}
 	var err error
+	if err = uicatalog.Preload(); err != nil {
+		return services, release, err
+	}
 	if services.TrustedProxies, err = trustedProxies(getenv("DONOR_TRUSTED_PROXY_CIDRS")); err != nil {
 		return services, release, err
 	}
@@ -239,7 +243,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	services.PartnerPortal = store.PartnerDashboardService{PartnerPortalService: portal}
 	services.PartnerApply = store.PartnerApplicationService{DB: pool}
 	services.ApplicationReceipts = store.PartnerApplicationService{DB: pool}
-	services.Dashboard = store.DashboardReader{DB: pool}
+	services.Dashboard = store.DashboardReader{DB: pool, Insights: getenv("DONOR_INSIGHTS_ENABLED") == "true"}
 	services.Account = store.AccountService{DB: pool}
 	services.Passwords = store.PasswordService{DB: pool, FoundingClaims: foundingClaims}
 	services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
@@ -285,6 +289,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		services.StaffFinance = store.StaffFinanceService{Staff: staff, Gateway: gateway, Origin: services.Origin}
 		services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKeys: contentKeys}
 		services.Wording = store.WordingService{Staff: staff}
+		services.Insights = store.InsightService{Staff: staff}
 		services.FoundingClaims = store.FoundingClaimService{Staff: staff, Key: foundingClaims}
 		services.Initiatives = store.InitiativeService{Staff: staff}
 		services.Events = store.EventService{Staff: staff}

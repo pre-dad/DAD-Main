@@ -1387,3 +1387,34 @@ footer .tagline {
     break-inside: avoid;
   }
 }
+
+.insights {
+  display: grid;
+  gap: var(--space-3);
+}
+.insights h2 {
+  font-size: var(--text-lg);
+}
+.insightsHeading {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.insightsCalloutTitle {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+.insights p {
+  margin: 0;
+}
+.insightsList {
+  display: grid;
+  gap: var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+.insights a.secondary {
+  justify-self: start;
+}

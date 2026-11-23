@@ -14,13 +14,13 @@ export default function HowItWorks() {
     <Page eyebrow="How it works" title="A small gift. A growing circle.">
       <p className="lead">
         DAD brings donors and partner organizations together to support practical aid work. Each initiative is assembled
-        with a partner and approved by the board. From launch, programs invite people to enroll in that work.
+        with a partner and approved by the board, and DAD and its partners run that work offline.
       </p>
       <h2>Giving</h2>
       <p>
-        Create a donor account and verify your email, then give monthly on the web. Giving suggests a dollar a day,
-        billed as $30/month. You can give more in whole dollars a day, up to $30 a day ($900/month); the monthly charge
-        is always the daily amount × 30.
+        Create a donor account with your email, phone, Apple or Google, then give monthly. Giving suggests a dollar a
+        day, billed as $30/month. You can give more in whole dollars a day, up to $30 a day ($900/month); the monthly
+        charge is always the daily amount × 30.
       </p>
       <h2>Your circle</h2>
       <p>
@@ -70,11 +70,12 @@ export default function HowItWorks() {
         DAD publishes spend as totals by category, never as individual transactions. Staff verify each figure against
         finance records before it is published.
       </p>
-      <h2>Programs start at launch</h2>
+      <h2>What DAD does not do</h2>
       <p>
-        This donor release does not enroll recipients or send money to them. Aid programs begin at launch. Partners can
-        apply now; approved partners use the partner portal to manage their profile, initiatives, employee giving, and
-        reports. Donor apps for iOS and Android are being developed separately.
+        No one receives money through DAD, and it does not enroll recipients: aid reaches people through the initiatives
+        DAD and its partners run. Partners apply here; once DAD approves them, they use the partner portal to follow
+        their co-funded initiatives, spend, employee giving and reports. The iOS and Android apps use the same accounts
+        as this website.
       </p>
       <div className="actions">
         <Link className="button" href="/donate">
