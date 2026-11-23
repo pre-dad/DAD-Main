@@ -16,7 +16,7 @@ export function InstallInvitation({ path }: { path: string }) {
       await navigator.clipboard.writeText(invitation);
       setStatus("Invitation copied.");
     } catch {
-      setError("Copy wasn’t available. Select and copy your invitation below.");
+      setError("Copy wasn’t available. Select and copy your invitation link.");
     }
   }
 

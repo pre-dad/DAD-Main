@@ -25,7 +25,7 @@ it("keeps a selectable invitation when clipboard access fails", async () => {
   render(<InstallInvitation path="/r/ALEX42?via=irl" />);
   fireEvent.click(screen.getByText("Keep this invitation for the app"));
   fireEvent.click(screen.getByRole("button", { name: "Copy invitation for the app" }));
-  expect(await screen.findByText(/Select and copy your invitation below/)).toHaveAttribute("aria-live", "polite");
+  expect(await screen.findByText(/Select and copy your invitation link/)).toHaveAttribute("aria-live", "polite");
   expect(screen.getByLabelText("Your invitation link")).toHaveValue(`${window.location.origin}/r/ALEX42?via=irl`);
   expect(screen.getByLabelText("Your invitation link")).toHaveAttribute("readonly");
   expect(screen.queryByText("Invitation copied.")).not.toBeInTheDocument();
