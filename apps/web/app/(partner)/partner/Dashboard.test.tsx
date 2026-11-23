@@ -174,6 +174,10 @@ it("shows each initiative's status, progress, headline metrics and detail", asyn
   expect(card.getByText("Northern Nevada · 3 counties")).toBeInTheDocument();
   expect(card.getByText("$400.00 deployed of $1,000.00 committed (40%)")).toBeInTheDocument();
   expect(card.getAllByText("$4.25").length).toBeGreaterThan(0);
+  expect(
+    card.getAllByText("Verified Oct 18, 2026").filter((element) => element.closest("details") === null),
+  ).toHaveLength(2);
+  expect(card.getByText(/Last updated/).closest("details")).toBeNull();
   expect(card.getByText("Direct program delivery")).toBeInTheDocument();
 });
 
