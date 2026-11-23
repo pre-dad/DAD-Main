@@ -1,4 +1,4 @@
-# DAD — donor release
+# DAD — Dynamic Aid Delivery
 
 The R1 application for Dynamic Aid Delivery: verified-account giving, direct Link and IRL
 referrals, a donor dashboard with streak recognition, badges, rankings and network

@@ -4,11 +4,11 @@ import { PreviewBanner } from "@/components/donor/PreviewBanner";
 import About from "../about/page";
 import HowItWorks from "./page";
 
-it("explains the donor release, monthly billing, direct referral credit, and launch timing", () => {
+it("explains R1, monthly billing, direct referral credit, and launch timing", () => {
   render(<HowItWorks />);
   expect(screen.getByText(/April 22, 2027/)).toHaveTextContent("Founding Donor badge");
   expect(screen.getByText(/April 22, 2027/)).toHaveTextContent("by December 31, 2026 (New York time)");
-  expect(screen.getByText(/verify your email, then give monthly/)).toHaveTextContent(
+  expect(screen.getByText(/with your email, phone, Apple or Google, then give monthly/)).toHaveTextContent(
     "up to $30 a day ($900/month); the monthly charge is always the daily amount × 30",
   );
   expect(screen.getByText(/only people you personally refer/)).toHaveTextContent("less successful refunds");
@@ -16,13 +16,13 @@ it("explains the donor release, monthly billing, direct referral credit, and lau
   expect(screen.getByText(/streak growing in local calendar days/)).toHaveTextContent(
     "Cancellation ends it at the first skipped renewal",
   );
-  expect(screen.getByText(/does not enroll recipients/)).toHaveTextContent("Aid programs begin at launch");
-  expect(screen.getByText(/does not enroll recipients/)).toHaveTextContent("approved partners use the partner portal");
+  expect(screen.getByText(/does not enroll recipients/)).toHaveTextContent("No one receives money through DAD");
+  expect(screen.getByText(/does not enroll recipients/)).toHaveTextContent("follow their co-funded initiatives");
   expect(screen.getByText(/does not enroll recipients/)).toHaveTextContent(
-    "Donor apps for iOS and Android are being developed separately",
+    "The iOS and Android apps use the same accounts as this website",
   );
   expect(screen.queryByText(/R2/)).not.toBeInTheDocument();
-  expect(screen.getByText(/approved by the board/)).toHaveTextContent("From launch, programs invite");
+  expect(screen.getByText(/approved by the board/)).toHaveTextContent("DAD and its partners run that work offline");
   expect(screen.queryByText(/sandbox preview/)).not.toBeInTheDocument();
 });
 

@@ -1,6 +1,6 @@
 # AWS deployment design (DAD foundation)
 
-This document describes the AWS deployment of the DAD donor release. Service names,
+This document describes the AWS deployment of the DAD R1 platform. Service names,
 environment variable names, ports and commands match `docker-compose.prod.yml`,
 `scripts/deploy.sh`, `docs/operations.md` and `docs/edge.md`; where this document and
 those files differ, the repository files win.

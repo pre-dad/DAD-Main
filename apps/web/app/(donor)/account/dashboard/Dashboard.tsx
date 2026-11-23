@@ -100,8 +100,9 @@ function StarIcon() {
     </svg>
   );
 }
+const count = (value: number) => value.toLocaleString("en-US");
 const milestoneCopy = (daysToNext: number, milestone: number) =>
-  `${daysToNext} ${daysToNext === 1 ? "day" : "days"} to your ${milestone}-day milestone.`;
+  `${count(daysToNext)} ${daysToNext === 1 ? "day" : "days"} to your ${count(milestone)}-day milestone.`;
 
 /** The single most useful next step, in priority order; the at-risk callout below carries the detail. */
 function nextStep(data: Schema<"DonorDashboard">): string {
@@ -265,7 +266,7 @@ export default function Dashboard() {
                   <h2>Giving streak</h2>
                   <p className="metricValue">
                     {data.streak?.ladder
-                      ? `${data.streak.ladder.days} ${data.streak.ladder.days === 1 ? "day" : "days"}`
+                      ? `${count(data.streak.ladder.days)} ${data.streak.ladder.days === 1 ? "day" : "days"}`
                       : data.streak
                         ? "Starting today"
                         : "Updating"}
