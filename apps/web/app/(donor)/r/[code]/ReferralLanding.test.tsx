@@ -50,7 +50,9 @@ it("follows the give link after the capture window and ignores repeat taps while
   try {
     render(<ReferralLanding code="code" kind="LINK" referrer={{ state: "found", name: "Sam" }} />);
     const link = screen.getByRole("link", { name: "Give $1 a day with Sam" });
+    link.setAttribute("target", "_blank");
     expect(fireEvent.click(link, { altKey: true })).toBe(true);
+    link.removeAttribute("target");
     expect(fireEvent.click(link)).toBe(false);
     expect(fireEvent.click(screen.getByRole("link", { name: "Saving your referral…" }))).toBe(false);
     await act(async () => {
@@ -87,6 +89,49 @@ it("does not let a capture response rename the server-rendered invitation", asyn
   await act(async () => {});
   expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Sam invited you to DAD");
   expect(screen.queryByText(/Unexpected Name/)).not.toBeInTheDocument();
+});
+
+it("does not redirect a visitor who left while the referral was saving", async () => {
+  vi.useFakeTimers();
+  const assign = vi.fn();
+  vi.stubGlobal("location", { assign });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => new Promise(() => {})),
+  );
+  const view = render(<ReferralLanding code="code" kind="LINK" referrer={{ state: "found", name: "Sam" }} />);
+  fireEvent.click(screen.getByRole("link", { name: "Give $1 a day with Sam" }));
+  view.unmount();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4000);
+  });
+  expect(assign).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("cancels the capture deadline when saving finishes before it", async () => {
+  vi.useFakeTimers();
+  const assign = vi.fn();
+  vi.stubGlobal("location", { assign });
+  let finish: (value: ReturnType<typeof response>) => void = () => {};
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    ),
+  );
+  render(<ReferralLanding code="code" kind="LINK" referrer={{ state: "found", name: "Sam" }} />);
+  const existingTimers = vi.getTimerCount();
+  fireEvent.click(screen.getByRole("link", { name: "Give $1 a day with Sam" }));
+  await act(async () => {
+    finish(response({ captured: true, public_name: "Sam" }));
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(assign).toHaveBeenCalledExactlyOnceWith("/donate");
+  expect(vi.getTimerCount()).toBe(existingTimers);
 });
 
 it("leads with the unavailable message for a replaced code", async () => {
