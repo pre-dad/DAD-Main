@@ -432,11 +432,16 @@ it("keeps the saved profile and says so when only the workforce size fails to sa
   const calls: { url: string; init?: RequestInit }[] = [];
   stub({}, calls);
   const base = vi.mocked(fetch).getMockImplementation();
+  let profileSaved = false;
   vi.mocked(fetch).mockImplementation((input, init) => {
     if (String(input).endsWith("/workforce"))
       return Promise.resolve(Response.json({ detail: "Down" }, { status: 503 }));
     if (!base) throw new Error("Missing fixture fetch");
-    return base(input, init);
+    if (String(input).endsWith("/profile")) profileSaved = true;
+    const response = base(input, init);
+    return profileSaved && String(input).endsWith("/overview")
+      ? response.then(() => Response.json({ ...overview, organization: "Delta Group" }))
+      : response;
   });
   render(<Dashboard />);
   const organization = within(await screen.findByRole("region", { name: "Organization" }));
@@ -445,6 +450,9 @@ it("keeps the saved profile and says so when only the workforce size fails to sa
   fireEvent.click(organization.getByRole("button", { name: "Save profile" }));
   expect(await organization.findByText(/Profile saved; workforce size was not/)).toBeInTheDocument();
   expect(organization.queryByText(/could not be saved right now/)).not.toBeInTheDocument();
+  expect(await screen.findByRole("heading", { level: 1, name: "Delta Group" })).toBeVisible();
+  expect(organization.getByLabelText("Organization name")).toHaveValue("Delta Group");
+  expect(organization.getByLabelText("Workforce size")).toHaveValue(400);
   expect(calls.filter((c) => c.url.endsWith("/overview")).length).toBeGreaterThanOrEqual(2);
 });
 
